@@ -1,200 +1,181 @@
 # TRACE — Project Memory
 
-> Running log of what TRACE is, what has been built, and what's in progress.
+> Running log of what TRACE is, what has been built, and where things stand.
 > Updated after every work session so anyone (or any AI tool) can pick up where we left off.
-> Last updated: 2026-11-05
+> **Last updated: 2026-11-06** · Latest commit on `main`: `564d3f6`
 
 ---
 
 ## 1. What TRACE is
 
-**On-Chain Strategy Intelligence** — built for **ETHGlobal Mumbai 2026**.
+**On-Chain Strategy Intelligence on Ethereum Sepolia** — built for ETHGlobal Mumbai 2026.
 
-Enter a wallet → TRACE rebuilds its Uniswap V3 liquidity history → works out the
-strategy behind it → backtests it → compiles the compatible rules into an
-executable **1inch Aqua** program, released only with human approval.
+TRACE takes a wallet and runs it through these stages:
+1. Reads its real Uniswap V3 liquidity history on Sepolia.
+2. Rebuilds every position.
+3. Computes deterministic behaviour metrics (Strategy DNA).
+4. Infers the strategy, with 0G AI proposing it and a deterministic gate checking it against the evidence.
+5. Backtests it on real pool swaps.
+6. Compiles the compatible rules into a **1inch Aqua** strategy that the user ships from their own MetaMask, after signing a server-verified authorization.
+7. Archives the results to 0G Storage.
 
 ```
-INVESTIGATE → RECONSTRUCT → DISCOVER → VALIDATE → EXECUTE
+INVESTIGATE → RECONSTRUCT → DISCOVER (DNA + 0G) → VALIDATE (backtest) → EXECUTE (Aqua)
 ```
 
-### Core concepts
-| Concept | Meaning |
-|---|---|
-| Reconstruction | Replay on-chain Uniswap V3 position events into a ledger; principal withdrawals kept separate from fees |
-| Behavioural fingerprints | Deterministic stats computed from events (range width, rebalance timing, etc.) |
-| Rule mining / family scoring | Find recurring rules and match them to strategy "families" |
-| Strategy IR | Shared structured format describing a strategy (`packages/strategy-ir`) |
-| 0G inference gate | An LLM on 0G only *proposes* a Strategy IR; it is schema-validated and checked against real evidence before being trusted |
-| Look-ahead-safe backtest | Learn on a train window, test on a later window; no future data. Enforced in engine, IR validator, and a DB trigger |
-| Aqua compile | Check compatibility with 1inch Aqua, compile deterministically (same input → same program hash). No unlimited approvals |
-| World Agent Pass | Human authorization proof bound to user + strategy version + plan + action + expiry + one-time challenge; server-verified, replay-protected (currently demo HMAC key) |
-| 0G Storage | Archives results; refs marked `demo: true` when no endpoint is configured |
-| Honesty rule | **No fake data shown as real.** Demo data always has a DEMO DATA badge; failed live steps are marked `degraded` with reasons |
+**Product rule:** no demo data, no mocks, no simulated success. Every integration is either live or labelled with why it isn't. Status labels: VERIFIED LIVE / VERIFIED TESTNET / IMPLEMENTED BUT NOT VERIFIED / BLOCKED BY EXTERNAL DEPENDENCY / NOT IMPLEMENTED.
 
 ---
 
 ## 2. Architecture
 
 ```
-src/                 Next.js 14 App Router web app (8 pages)
-  app/               investigate · positions/[id] · strategy · backtest · execute · reports · activity · saved
-  components/        app-shell, ui, charts, investigate
-  lib/fixture.ts     labelled demo data
-  lib/live.ts        API data layer (queue/poll, live↔demo badge)
+src/                     Next.js 14 app (wagmi 3 + viem, Sepolia only)
+  app/                   / (investigate) · positions · positions/[id] · strategy · backtest
+                         execute · reports · activity · saved · providers.tsx
+  components/            app-shell, wallet (connect + NetworkBanner), inv-gate, positions, ui, charts
+  lib/                   api.ts (typed API client + hooks), wagmi.ts, format.ts, assets.ts
 
-packages/            Engine (zero-runtime-dependency TypeScript)
-  strategy-ir        data contract, canonical hashing, schema gates
-  uniswap-v3         events → position ledger + accounting
-  strategy-inference fingerprints, rule mining, 0G gate
-  backtester         look-ahead-safe simulation
-  aqua-adapter       NFT→Aqua compatibility + deterministic compile
-  world-auth         Agent Pass sign/verify
-  zero-g-storage     archiving client
-  chain-data         viem client: reads Uniswap V3 NPM logs from chain
-  chain-config       NEW (uncommitted) — single source of chain/explorer/contract config
-  types/             offline type stubs
+packages/                Engine (TypeScript, built to dist/ by scripts/build-packages.mjs)
+  chain-config           single source of truth: Sepolia, verified contract addresses, explorer, status labels
+  strategy-ir            IR v2 types, validators, canonical hashing, content-addressed strategy ids
+  chain-data             viem Sepolia reader: ERC-721 discovery, lifecycle logs, Multicall3, Swap price series
+  uniswap-v3             order-independent reconstruction, principal vs fees, real decimals
+  strategy-inference     fingerprints (Strategy DNA), deterministic baseline, 0G Router client + gate
+  backtester             real-swap backtest, canonical V3 math, enforced look-ahead guard
+  aqua-adapter           compatibility + on-chain checks, SwapVM compile (1inch SDKs), simulate, verify receipts
+  world-auth             EIP-712 authorization + optional World ID v4
+  zero-g-storage         0G Galileo uploads + Merkle-proof read-back
 
-server/              Express API (:4000) + BullMQ worker + Postgres
-  src/pipeline.ts    runPipeline: reconstruct → infer → backtest → compile → archive
-  src/worker.ts      job runner; fetches live events or falls back to fixture
-db/schema.sql        Postgres schema (includes no-look-ahead trigger)
-test/                node:test suite (64 tests)
-scripts/build-packages.mjs   builds each package to dist/
+server/src               config.ts · integrations.ts · db.ts · pipeline.ts · worker.ts · api.ts · index.ts
+db/migrations/           0001_init.sql (applied by scripts/migrate.mjs)
+test/                    unit + API tests (real captured Sepolia data in test/data), live/, fork/
+e2e/                     Playwright
+docs/                    ARCHITECTURE, TESTNET_SETUP, INTEGRATIONS, SECURITY, DEMO_FLOW, KNOWN_LIMITATIONS
 ```
 
 ### Commands
 ```bash
-npm install && npm run dev        # demo at http://localhost:3000 (offline, fixture data)
-npm run typecheck                 # frontend + packages + server
-npm test                          # build packages + run 64 tests
-
-# full stack
-createdb trace && psql trace -f db/schema.sql
-npm run build:packages && npm run build:server
-DATABASE_URL=postgres://postgres:postgres@localhost:5432/trace REDIS_URL=redis://localhost:6379 npm run start:server
-# then set NEXT_PUBLIC_TRACE_API_URL=http://localhost:4000 in .env.local and npm run dev
+npm install
+npm run db:migrate                         # apply db/migrations to Supabase
+npm run build:server && npm run start:server   # API + worker :4000 (node --env-file=.env.local)
+npm run build && npm run start             # web :3000   (or npm run dev)
+npm run typecheck                          # frontend + packages + server
+npm test                                   # 45 unit + API tests
+npm run test:live                          # live Sepolia (4)
+npm run test:fork                          # real Aqua approve→ship→dock on anvil Sepolia fork (1)
+npm run test:e2e                           # Playwright against the running app (4)
 ```
 
-### Env vars
-`DATABASE_URL`, `REDIS_URL`, `PORT`, `ZERO_G_ENDPOINT`/`ZERO_G_API_KEY`,
-`ZERO_G_STORAGE_ENDPOINT`/`ZERO_G_STORAGE_KEY`, `WORLD_DEMO_ID`/`WORLD_DEMO_KEY`,
-`NEXT_PUBLIC_TRACE_API_URL`, and (new) `TRACE_RPC_URL`, `TRACE_V3_NPM`.
+### Env vars (`.env.local`, gitignored; documented in `.env.example`)
+- **Chain:** `TRACE_CHAIN_ID=11155111`, `SEPOLIA_RPC_URL` (Infura), `SEPOLIA_RPC_FALLBACK_URLS`, `TRACE_OWNER_WALLET` (public address).
+- **Persistence:** `DATABASE_URL` (Supabase **session pooler**), `DATABASE_URL_DIRECT`, `DATABASE_SSL`, `REDIS_URL` (Upstash `rediss://`), `PORT`, `CORS_ORIGINS`.
+- **0G inference:** `ZERO_G_ROUTER_URL`, `ZERO_G_API_KEY`, `ZERO_G_MODEL` (default glm-4.7), `ZERO_G_TRUST_MODE`, `ZERO_G_VERIFY_TEE`.
+- **0G Storage:** `OG_STORAGE_RPC_URL`, `OG_STORAGE_INDEXER_URL`, `OG_STORAGE_PRIVATE_KEY` (burner), `OG_STORAGE_ADDRESS`.
+- **World ID:** `WORLD_APP_ID`, `WORLD_RP_ID`, `WORLD_RP_SIGNING_KEY`, `WORLD_ACTION`, `WORLD_ENVIRONMENT`.
+- **Frontend:** `NEXT_PUBLIC_TRACE_API_URL`, `NEXT_PUBLIC_CHAIN_ID`, `NEXT_PUBLIC_SEPOLIA_PUBLIC_RPC`.
 
 ### Design system
-Editorial luxury fintech look: ivory `#F3EBDD` / paper `#FAF7F0`, charcoal `#171714`,
-antique gold `#B68A42`, sage `#78866B`, forest `#344C3A`. Playfair Display + Inter,
-tabular numerals, Lucide icons, SVG charts.
+Editorial luxury fintech look:
+- Colours: ivory `#F3EBDD`, paper `#FAF7F0`, charcoal `#171714`, antique gold `#B68A42`, sage `#78866B` (verified states), forest `#344C3A`.
+- Type: Playfair Display + Inter.
+- Charts: hand-built SVG from real data only. Significant-digit axis labels, because testnet prices can be tiny.
 
 ---
 
-## 3. Status / history
+## 3. Verified facts (checked 2026-11-05/06)
 
-### Committed
-- `3a11c81` Initial commit: full TRACE monorepo (all of the above, demo runs offline).
-
-### In progress (uncommitted as of 2026-11-05): Mainnet → Sepolia migration
-- **`packages/chain-config/`** (new): Sepolia (chainId 11155111) is the only supported chain.
-  Public RPC fallback `https://ethereum-sepolia.publicnode.com`, explorer `https://sepolia.etherscan.io`.
-  Candidate Uniswap V3 Sepolia addresses (ship as `verified: false`):
-  - NPM `0x03a5b0Cc65d1319D0811b8c75f5b397638b5Df25`
-  - Factory `0xE73a04317494A4B0360C7EEC8871c26d0f46A45B`
-  - Quoter `0x881124ca20841843Bf05C8A1BCDE91F78Fc9a5F5`
-  - Router `0x2648054f82274Cf4738C466fD18331739905b087`
-- **`packages/chain-data/src/client.ts`**: default chain 1 → 11155111; new `probeNpmDeployment()`
-  (eth_getCode check); `npmAddress` / `npmVerified` config; new error `UNVERIFIED_DEPLOYMENT`;
-  client returns `chainId` and `npmIsVerified`.
-- **`packages/chain-data/src/abis.ts`, `index.ts`**: registry + `npmDeploymentNote` helper.
-- **`server/src/pipeline.ts`**: `ChainIdentity` passed through instead of hardcoded "Ethereum Mainnet".
-- **`server/src/worker.ts`**: job accepts `chainId` / `npmAddress`; reads `TRACE_V3_NPM` env.
-- `scripts/build-packages.mjs`, `packages/tsconfig.check.json`: chain-config added to the build.
-- `packages/strategy-ir/tsconfig.check.json` deleted; `.gitignore` modified.
-
-### TODO / loose ends
-- [ ] `docs/TESTNET_SETUP.md` and `docs/KNOWN_LIMITATIONS.md` are referenced in chain-config but `docs/` doesn't exist.
-- [ ] `@trace/chain-config` is built but **imported nowhere** (not by chain-data, server, or frontend).
-- [ ] Server startup `eth_getCode` probe that flips `verified: true` + reports on `/health` is not wired yet.
-- [ ] `chain-data/abis.ts` still says Sepolia has no known NPM address (conflicts with chain-config's candidate address).
-- [ ] DB still defaults to mainnet: `db/schema.sql` `chain_id default 1`, `server/src/db.ts` `insertInvestigation` uses `chainId ?? 1`.
-- [ ] README and `.env.example` still describe mainnet (`TRACE_RPC_URL` example is an eth-mainnet URL); add `TRACE_V3_NPM`.
-- [ ] Verify the Sepolia addresses on Sepolia Etherscan.
-- [ ] Frontend: testnet indicator + Sepolia explorer links from chain-config.
-
----
-
-## 4. Full code review findings (2026-11-05)
-
-### Current build/test status
-- `npm run typecheck` **fails** (frontend):
-  - `src/app/page.tsx` imports `toDisplayPositions` and `fixtureEvents` from `src/lib/live.ts`, which **don't exist** → clicking "Investigate Wallet" throws at runtime.
-  - `queueInvestigation(wallet, { events })` — `events` no longer accepted by `live.ts`.
-  - `ArrowLeftRight` icon not exported by installed lucide-react (backtest + positions pages).
-  - `live.ts:346-360` uses `r` typed `unknown` in `getEvents`.
-- `npm test` **fails at build step**: `packages/chain-data/src/client.ts:144` calls `client.getBytecode`, which the offline viem stub (`packages/types/viem.d.ts`) doesn't declare. (viem installed: 2.57.16.)
-- Running tests on the old dist (`npm run test:engines`): **60/64 pass**; the 4 failing are frontend tests expecting the removed demo helpers in `live.ts`.
-- Root cause: `live.ts` was rewritten to "real data only, no fixtures", but `page.tsx`, `execute/page.tsx`, and `test/frontend.test.mjs` still expect the old demo-path behaviour.
-
-### Frontend reality
-- Only `/` (investigate) and `/execute` call the API. **strategy, backtest, positions, reports, activity, saved are 100% hardcoded fixture data** (`src/lib/fixture.ts`) even when the API is live. The `live.ts` store/`getFullInvestigation` exists but no page renders from it.
-- `DemoBadge` is driven by a constant `DEMO_MODE = true` (`src/lib/assets.ts`), not by the data source.
-- Wire-type mismatch: `live.ts` `BacktestRunSummary` = `{label, result:{netReturnPct…}}`, but server sends `{label, net, maxDrawdown, finalEquity}`.
-- Fixture says "Ethereum Mainnet", chainId 1.
-- `/execute` "approve" button: the **server signs the proof itself** (`POST /authorizations` issues + signs + verifies in one call) — no actual human/World ID step. After approve, `shipped` is set by a `setTimeout` (fake ship).
-
-### Live chain reader (`packages/chain-data`) — will not work against real Uniswap V3
-The ABI doesn't match the real NonfungiblePositionManager:
-- Real NPM has **no `Mint` or `PositionInitialized` event** (Mint is a pool event) and no `TransferSingle` (that's ERC-1155).
-- Real `IncreaseLiquidity/DecreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)` and `Collect(uint256 indexed tokenId, address recipient, uint256 amount0, uint256 amount1)` have **no indexed sender** — so wallet-topic filtering on topic[2] returns nothing / decode mismatches.
-- Real NPM has no `getPool(tokenId)`; it's `positions(tokenId)` → (nonce, operator, token0, token1, fee, tickLower, tickUpper, liquidity, …). Pools expose `token0()`/`token1()`, not `tokens()`.
-- Burn detection (`liquidity == max uint128`) is not how burns work (`burn()` emits Transfer to 0x0).
-- Correct approach: find tokenIds via ERC-721 `Transfer` (to/from wallet, both indexed), then fetch Increase/Decrease/Collect logs filtered by `tokenId` topic, and read `positions(tokenId)` for ticks/tokens/fee.
-
-### Other engine/server issues spotted
-- `events` table uses `bigint` for amounts/liquidity → overflows for 18-decimal tokens above ~9.2 tokens (should be `numeric`).
-- `mergeBacktestConfig` ignores the reconstruction (`void r`) — backtest uses hardcoded mainnet-ish params (blocks 21M–23M, ETH price 3080–3920, capital 1.2M).
-- `observedReplayRunner` reads `observed[observed.length-1]` = last price of the whole series (look-ahead into the test window, contradicting the guarantee). `withinTestCount` is hardcoded to 4. Operator precedence bug in `newRange` condition.
-- `buyHoldRunner` returns a V3 LP (no trades) — it's the same as passive, not real buy & hold.
-- `fingerprints.ts`: `exposure` is always 1 for active positions (lastActivityBlock is always set); `poolCount` uses `t.pool` which is always undefined → counts tokenIds.
-- `aqua-adapter` approvals are hardcoded WETH/USDC regardless of the strategy's tokens.
-- `world-auth` `verifyProof` ignores `expectedAction`.
-- `_w.mjs` in repo root imports from a stale sandbox path (`/sessions/...`) — junk file.
-- `positions`, `fingerprints` DB tables are defined but never written.
-
-### What genuinely works well
-- strategy-ir: types, validators, canonical hashing (FNV-1a 128), deterministic ids.
-- uniswap-v3 reconstruction (given correct events), principal vs fees separation.
-- 0G gate (schema + evidence audit + fallback), deterministic Aqua compile with stable program hash, World proof sign/verify with replay protection, 0G storage demo/live labelling.
-- Express API + BullMQ worker + in-memory queue fallback + Postgres persistence, CORS, `/health`.
-- 60 engine/server/API tests pass.
+- **Sepolia RPC: Infura.**
+  - eth_getLogs is capped at 10,000 blocks per request, and bursts are throttled. The fix: chunked scans, ONE shared rate limiter per RPC URL (120ms), and retries with longer back-off on 429.
+  - viem errors embed the RPC URL including the key, so every chain error passes through `scrubSecrets`.
+  - No free public fallback works: publicnode has pruned history, dRPC free doesn't serve Sepolia, and 1rpc allows 50 blocks.
+- **Uniswap V3 Sepolia (official):**
+  - Factory `0x0227628f3F023bb0B980b67D528571c95c6DaC1c`
+  - NPM `0x1238536071E1c677A632429e3655c799b22cDA52` (deploy block 3,518,286)
+  - QuoterV2 `0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3`
+  - SwapRouter02 `0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E`
+- **Real NPM events.** In IncreaseLiquidity, DecreaseLiquidity and Collect, only `tokenId` is indexed, so wallets are found via ERC-721 Transfer. `Collect` returns owed principal + fees, and TRACE splits them.
+- **Actively traded Sepolia pools:** WETH/USDC 1% `0x6418EEC70f50913ff0d756B48d32Ce7C02b47C47` (~1,279 swaps in 30k blocks), 0.05% `0x3289680d…`, 0.3% `0x6Ce0896e…`.
+  - WETH `0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14`
+  - USDC `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`
+  - Most other test pools have ~0 swaps, so the backtest returns `insufficient_data`.
+- **1inch Aqua Sepolia (documented legacy test pair):**
+  - Registry `0xe8026bf31e58b738647319362581ab11be92139b`
+  - AquaSwapVMRouter `0x016b417bc933370f5eacc40b1d58b015ac72b070`
+  - KycNFT `0x26FFc7D378E8e49Be2c483295A3e3E511F96a468`
+  - approve + ship simulate OK on Sepolia, and the full approve → ship → dock passes on an anvil fork.
+  - Swap (taker) needs the KycNFT, which the owner doesn't have.
+- **1inch SDK bug.** `@1inch/swap-vm-sdk@0.5.0` has a broken ESM build, so both 1inch SDKs are loaded via `createRequire` (CJS).
+- **0G inference.** The `sk-` key is a MAINNET router key locked to trust mode "private".
+  - No model currently has a private (TEE) provider, so every call returns `no_provider_for_trust_mode`. Other trust modes return `trust_mode_mismatch`.
+  - **BLOCKED** until 0G adds private providers or the user creates a key with standard/verified trust at pc.0g.ai.
+- **0G Storage.** Burner uploader on Galileo (chainId 16602): `0xe8f9c5bA6c8c196B72989193362f3A28638a754A`. Its key is in `.env.local` only, and its balance is 0. **BLOCKED** until funded at faucet.0g.ai.
+- **Supabase.** The direct host is IPv6-only and this Mac has no IPv6 route, so `DATABASE_URL` uses the session pooler `aws-0-ap-northeast-1.pooler.supabase.com:5432` (user `postgres.<ref>`).
+- **Upstash Redis** works with ioredis built from the full `rediss://` URL.
+- **Owner wallet `0x5971…`:** 0.12 Sepolia ETH, 0 V3 positions. Real active LP wallets are found live through `findActiveLpWallets` (`GET /wallets/suggested`).
+- **World ID.** No credentials. "World Agent Pass" isn't an official product. Authorization is an EIP-712 wallet signature, with an optional World ID v4 staging layer.
 
 ---
 
-## 4b. Testnet migration — implementation progress (2026-11-06)
-Plan: `~/.claude/plans/linear-gathering-starlight.md` (from user brief `~/Downloads/TRACE_Claude_Final_Testnet_Implementation_Prompt.md`).
+## 4. Status
 
-**Verified facts**
-- Sepolia RPC = Infura (`SEPOLIA_RPC_URL`). Infura caps eth_getLogs at 10,000 blocks/request and throttles bursts → chunked scans + client rate limiter (120ms) + backoff. viem errors embed the RPC URL (with key) → all chain errors pass through `scrubSecrets`.
-- Uniswap V3 Sepolia (official): Factory 0x0227628f3F023bb0B980b67D528571c95c6DaC1c, NPM 0x1238536071E1c677A632429e3655c799b22cDA52 (deploy block 3518286), QuoterV2 0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3, SwapRouter02 0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E. The OLD chain-config addresses had no code anywhere (fabricated).
-- 1inch Aqua Sepolia (docs, legacy test pair): registry 0xe8026bf31e58b738647319362581ab11be92139b, AquaSwapVMRouter 0x016b417bc933370f5eacc40b1d58b015ac72b070, KycNFT 0x26FFc7D378E8e49Be2c483295A3e3E511F96a468. approve+ship SIMULATE OK from owner wallet. swap needs KycNFT (owner has none).
-- @1inch/swap-vm-sdk@0.5.0 ESM build is broken (extensionless import) → load both 1inch SDKs via createRequire (CJS).
-- 0G Router key (`sk-`) is a MAINNET router key locked to trust mode "private"; currently NO model has a private (TEE) provider → every call fails `no_provider_for_trust_mode`; other trust modes → `trust_mode_mismatch`. BLOCKED until 0G adds private providers or user makes a key with standard/verified trust mode at pc.0g.ai.
-- 0G Storage burner (Galileo 16602): 0xe8f9c5bA6c8c196B72989193362f3A28638a754A — key in .env.local only; balance 0 → user must fund at faucet.0g.ai.
-- Supabase direct host is IPv6-only (no IPv6 route on this Mac) → DATABASE_URL uses session pooler aws-0-ap-northeast-1.pooler.supabase.com:5432 (user postgres.<ref>). Migrations applied (db/migrations/0001_init.sql via scripts/migrate.mjs).
-- Upstash Redis (rediss://) works with ioredis full-URL (PONG).
-- Owner wallet 0x5971… has 0.12 Sepolia ETH, 0 V3 positions. Real active Sepolia LPs exist (found live via findActiveLpWallets).
-- World ID: no creds; "World Agent Pass" isn't a product → EIP-712 wallet signature + optional World ID v4 staging layer.
+### Integration status (live via `GET /integrations` / Reports screen)
+| Integration | Status |
+|---|---|
+| Sepolia RPC, Uniswap V3 data | VERIFIED TESTNET |
+| Supabase, BullMQ/Redis | VERIFIED LIVE |
+| Aqua ship/dock | IMPLEMENTED BUT NOT VERIFIED on Sepolia (sim OK; fork test passes against real contracts) |
+| Aqua swap | BLOCKED (KycNFT) |
+| 0G inference | BLOCKED (key trust mode "private", no providers) |
+| 0G Storage | BLOCKED (burner unfunded) |
+| EIP-712 auth | IMPLEMENTED BUT NOT VERIFIED with real MetaMask (tested with real signatures) |
+| World ID | BLOCKED (no creds) |
 
-**Status (2026-11-06): implementation COMPLETE.** All layers rewritten for real Sepolia data; fixtures/demo removed (src/lib/fixture.ts, live.ts, DEMO_MODE, offline type stubs deleted).
-- Server: config.ts (startup validation, refuses non-Sepolia), integrations.ts (live probes → honest labels, GET /integrations), db.ts (new schema), pipeline.ts, worker.ts (BullMQ over TLS ioredis; lockDuration 15m, maxStalledCount 0 — short lock caused duplicate runs), api.ts (all routes; EIP-712 auth gating).
-- Frontend: wagmi 3 (import `injected` from "wagmi" root — "wagmi/connectors" barrel breaks Next build with optional peers), providers.tsx, wallet.tsx (connect/disconnect/NetworkBanner), every screen reads real API data via ?inv= (InvestigationGate). Positions list page /positions added.
-- Package exports fixed (invalid ".types" key broke webpack).
-- Results: typecheck ✓; `npm test` 45/45; `npm run test:live` 4/4; `npm run test:fork` 1/1 (real Aqua approve→ship→dock on anvil fork, events + rawBalances verified); `npm run test:e2e` 4/4; `next build` ✓.
-- Docs: README + docs/{ARCHITECTURE,TESTNET_SETUP,INTEGRATIONS,SECURITY,DEMO_FLOW,KNOWN_LIMITATIONS}.md; .env.example complete.
-- Remaining user actions: fund 0G burner 0xe8f9c5bA6c8c196B72989193362f3A28638a754A at faucet.0g.ai; new 0G Router key with standard/verified trust mode (or wait for private providers); create WETH/USDC positions on Sepolia from 0x5971… and do a real MetaMask ship; optional World ID staging creds.
-- Run: `npm run start:server` (API :4000) + `npm run build && npm run start` (web :3000).
+### Test results (last run 2026-11-06)
+- typecheck ✓ · `next build` ✓
+- `npm test` 45/45 · `test:live` 4/4 · `test:fork` 1/1 · `test:e2e` 4/4 (the wallet test was re-run after the MetaMask fix: 2/2 ✓)
 
-## 5. Session log
-- **2026-11-05** — Reviewed project (README + uncommitted diff). Created this memory.md.
-- **2026-11-05** — Read entire codebase end to end (~11k lines). Ran typecheck (fails) and tests (build fails; 60/64 pass on old dist). Recorded findings in section 4. No code changed.
-- **2026-11-06** — Implemented the full Sepolia migration plan (see 4b): real chain data, 0G Router client, real backtests, Aqua SDK compile + fork-verified ship/dock, EIP-712 auth, 0G Storage SDK, Supabase migrations, wagmi frontend, tests, docs.
-- **2026-11-06** — Committed all work as 485642e on branch `sepolia-testnet-migration` and pushed to GitHub over HTTPS (SSH key not set up on this Mac; remote `origin` is SSH). Not merged into main.
+### Remaining user actions
+1. Fund the 0G burner `0xe8f9c5bA6c8c196B72989193362f3A28638a754A` at faucet.0g.ai, then press **Retry archive** on Reports.
+2. Create a new 0G Router key with standard/verified trust mode (or wait for private providers).
+3. From wallet `0x5971…`, create WETH/USDC positions on Sepolia (app.uniswap.org), investigate the wallet, and do a real MetaMask approve → ship. That moves Aqua to VERIFIED TESTNET.
+4. Optional: World ID staging credentials.
+5. Optional: rotate the Infura key. It once appeared in a local RPC error during development, and also briefly in a test file; that was replaced with a dummy before any commit.
+
+---
+
+## 5. Gotchas learned (don't repeat)
+- **BullMQ:** the default 30s job lock let long RPC jobs be marked "stalled" and run twice. Fixed with `lockDuration` 15 min and `maxStalledCount` 0.
+- **viem multicall** with `allowFailure:true` turns RPC 429s into per-item "failure" results, which look like reverts. The `multicall()` wrapper re-throws transport errors so they get retried.
+- **wagmi 3:** import `injected` from the `"wagmi"` root. The `"wagmi/connectors"` barrel pulls optional peers (mppx, safe) and breaks the Next build.
+- **MetaMask:** chaining a chain switch into connect (`connect({chainId})`) crashed MetaMask's popup with "Cannot read properties of undefined (reading 'origin')". Connect now only requests accounts, using MetaMask's EIP-6963 connector `io.metamask` first. The NetworkBanner handles the explicit Switch to Sepolia.
+- **Package exports:** an invalid `".types"` key in package.json exports broke webpack. All packages now use a proper `exports["."]`.
+- **@types/express v5** types `req.params` as `string | string[]`. Use the `P(req, k)` helper in api.ts.
+- **Git:** this Mac has **no GitHub SSH key**. Push over HTTPS: `git push https://github.com/himanshukaushik9813/TRACE.git main`. `origin` is SSH.
+- **Git authorship:** the user wants commits under **himanshukaushik9813 only — no Claude `Co-Authored-By` trailer**, ever.
+
+---
+
+## 6. History of the original audit (2026-11-05) — all resolved by the migration
+The original repo had these problems:
+- the build was broken
+- the chain reader used a non-existent Uniswap ABI (`Mint` / `getPool` / `TransferSingle` on the NPM)
+- six of eight screens were hardcoded fixtures
+- the World "Agent Pass" proof was self-signed HMAC by the server
+- `chain-config` had addresses with no code
+- Redis TLS and password were dropped
+- the backtest had a look-ahead bug and hardcoded mainnet parameters
+- DB amounts were `bigint`, which overflows
+- unlimited/hardcoded WETH/USDC approvals
+
+All of these were replaced in the 2026-11-06 migration.
+
+---
+
+## 7. Session log
+- **2026-11-05** — Reviewed the project (README + uncommitted diff) and created this memory.md.
+- **2026-11-05** — Read the entire codebase end to end (~11k lines). Typecheck failed; tests failed at the build step (60/64 on the old dist). Findings went to section 6.
+- **2026-11-06** — Implemented the full Sepolia migration plan (`~/.claude/plans/linear-gathering-starlight.md`, from the brief `~/Downloads/TRACE_Claude_Final_Testnet_Implementation_Prompt.md`). Covered: real chain data, 0G Router client, real backtests, Aqua SDK compile + fork-verified ship/dock, EIP-712 auth, 0G Storage SDK, Supabase migrations, wagmi frontend, tests, docs.
+- **2026-11-06** — Pushed to GitHub `main` over HTTPS. At the user's request, rewrote history to remove the Claude co-author trailer (force-push) and deleted the temporary branch `sepolia-testnet-migration`. History on GitHub has authors = himanshukaushik9813 only. The GitHub Contributors sidebar may still show "claude" until GitHub's cache refreshes (or support rebuilds it).
+- **2026-11-06** — Fixed the MetaMask connect crash ("reading 'origin'"): connect requests accounts only, and the switch to Sepolia is explicit. Committed `564d3f6` and pushed.
+- **2026-11-06** — Rewrote this memory.md to reflect the current state.

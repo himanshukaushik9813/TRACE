@@ -8,15 +8,52 @@
  * No address is ever assumed; nothing is signed without an explicit click.
  */
 
-import { useEffect, useState } from "react";
-import { useConnect, useConnection, useDisconnect, useSwitchChain } from "wagmi";
+import { useEffect, useRef, useState } from "react";
+import { useConnect, useConnection, useDisconnect } from "wagmi";
 import { AlertTriangle, LogOut, Wallet } from "lucide-react";
-import { SEPOLIA_CHAIN_ID, CHAIN_LABEL } from "@trace/chain-config";
+import { SEPOLIA_CHAIN, SEPOLIA_CHAIN_ID, CHAIN_LABEL } from "@trace/chain-config";
 import { fmt } from "@/lib/format";
+
+type Eip1193 = { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> };
+
+const SEPOLIA_HEX = `0x${SEPOLIA_CHAIN_ID.toString(16)}`;
+
+/**
+ * Switch the wallet to Sepolia with ONE direct EIP-1193 request.
+ *
+ * wagmi's switchChain fires wallet_switchEthereumChain and, on some errors, a
+ * follow-up wallet_addEthereumChain with library-default RPCs while MetaMask's
+ * popup is still open — some MetaMask versions crash that popup with
+ * "Cannot read properties of undefined (reading 'origin')". Here we send a
+ * single switch request; only if MetaMask reports the chain as unknown (4902)
+ * do we add Sepolia with explicit, known-good parameters. The UI updates from
+ * the wallet's own `chainChanged` event, never from an assumption.
+ */
+async function switchProviderToSepolia(provider: Eip1193): Promise<void> {
+  try {
+    await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: SEPOLIA_HEX }] });
+  } catch (err) {
+    const code = (err as { code?: number; data?: { originalError?: { code?: number } } }).code ?? (err as { data?: { originalError?: { code?: number } } }).data?.originalError?.code;
+    if (code !== 4902) throw err;
+    await provider.request({
+      method: "wallet_addEthereumChain",
+      params: [
+        {
+          chainId: SEPOLIA_HEX,
+          chainName: SEPOLIA_CHAIN.name,
+          nativeCurrency: SEPOLIA_CHAIN.nativeCurrency,
+          rpcUrls: [SEPOLIA_CHAIN.publicRpc],
+          blockExplorerUrls: [SEPOLIA_CHAIN.explorerUrl],
+        },
+      ],
+    });
+  }
+}
 
 export function useSepoliaWallet() {
   const conn = useConnection();
-  const { mutateAsync: switchChain, isPending: switching } = useSwitchChain();
+  const [switching, setSwitching] = useState(false);
+  const inFlight = useRef(false);
   const connected = conn.status === "connected" && Boolean(conn.address);
   const onSepolia = connected && conn.chainId === SEPOLIA_CHAIN_ID;
   return {
@@ -25,7 +62,19 @@ export function useSepoliaWallet() {
     connected,
     onSepolia,
     switching,
-    switchToSepolia: () => switchChain({ chainId: SEPOLIA_CHAIN_ID }),
+    switchToSepolia: async () => {
+      if (inFlight.current) return; // never stack wallet popups
+      inFlight.current = true;
+      setSwitching(true);
+      try {
+        const provider = (await conn.connector?.getProvider()) as Eip1193 | undefined;
+        if (!provider) throw new Error("Wallet provider unavailable — reconnect your wallet");
+        await switchProviderToSepolia(provider);
+      } finally {
+        inFlight.current = false;
+        setSwitching(false);
+      }
+    },
   };
 }
 
@@ -113,14 +162,18 @@ export function NetworkBanner() {
           try {
             await w.switchToSepolia();
           } catch (e) {
-            setErr((e as { shortMessage?: string }).shortMessage ?? (e as Error).message);
+            const code = (e as { code?: number }).code;
+            setErr(code === 4001 ? "You rejected the network switch." : ((e as { shortMessage?: string }).shortMessage ?? (e as Error).message));
           }
         }}
         disabled={w.switching}
         className="rounded-md2 bg-brick text-ivory-50 px-3 py-1 text-[0.78rem] font-medium hover:opacity-90 disabled:opacity-50"
       >
-        {w.switching ? "Switching…" : "Switch to Sepolia"}
+        {w.switching ? "Confirm in wallet…" : "Switch to Sepolia"}
       </button>
+      <span className="text-[0.72rem] text-brick/80">
+        Or select <strong>Sepolia</strong> in MetaMask&apos;s network menu — TRACE detects the change automatically.
+      </span>
       {err && <span className="text-[0.74rem]">{err}</span>}
     </div>
   );
