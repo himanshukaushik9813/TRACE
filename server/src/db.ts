@@ -22,7 +22,7 @@ import type { InferenceRun } from "@trace/strategy-inference";
 
 export type DbConfig = { connectionString: string; ssl: boolean };
 
-export type InvestigationStatus = "queued" | "fetching" | "reconstructing" | "inferring" | "backtesting" | "archiving" | "done" | "failed";
+export type InvestigationStatus = "queued" | "fetching" | "reconstructing" | "inferring" | "backtesting" | "archiving" | "done" | "no_positions" | "failed";
 
 const s = (v: unknown) => (v == null ? null : typeof v === "bigint" ? v.toString() : String(v));
 

@@ -46,6 +46,19 @@ export async function archive(opts) {
     const indexer = new zg.Indexer(cfg.indexerUrl);
     const refs = [];
     const errors = [];
+    // Preflight: an unfunded uploader can never pay the storage fee. Checking the
+    // balance (one cheap read) fails fast with the real reason instead of
+    // attempting every upload and waiting for each to be rejected.
+    try {
+        const bal = await provider.getBalance(signer.address);
+        if (bal === 0n) {
+            const why = `uploader ${signer.address} has 0 balance on 0G Galileo — fund it at https://faucet.0g.ai, then Retry archive`;
+            return { status: "failed", refs, errors: opts.artifacts.map((a) => ({ kind: a.kind, error: why })), signer: signer.address };
+        }
+    }
+    catch {
+        /* balance unreadable — fall through to the real upload attempt, which reports its own error */
+    }
     for (const a of opts.artifacts) {
         try {
             const text = canonicalString({ kind: a.kind, content: a.content });

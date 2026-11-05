@@ -53,7 +53,7 @@ export type Integrations = {
   integrations: { key: string; label: string; status: IntegrationStatus; detail: string; checkedAt: string }[];
 };
 
-export type InvestigationStatus = "queued" | "fetching" | "reconstructing" | "inferring" | "backtesting" | "archiving" | "done" | "failed";
+export type InvestigationStatus = "queued" | "fetching" | "reconstructing" | "inferring" | "backtesting" | "archiving" | "done" | "no_positions" | "failed";
 
 export type Investigation = {
   id: string;
@@ -330,15 +330,17 @@ export function useIntegrations() {
   return useQuery({ queryKey: ["integrations"], queryFn: () => api<Integrations>("/integrations"), refetchInterval: 120_000 });
 }
 
+export type SuggestedWallet = { wallet: string; mints: number; lastBlock: number; pool: string | null; pair: string | null; feeTier: number | null; poolSwaps: number };
+
 export function useSuggestedWallets() {
   return useQuery({
     queryKey: ["suggested"],
-    queryFn: () => api<{ wallets: { wallet: string; mints: number; lastBlock: number }[]; source: string; computedAt: string }>("/wallets/suggested"),
+    queryFn: () => api<{ wallets: SuggestedWallet[]; source: string; computedAt: string }>("/wallets/suggested"),
     staleTime: 10 * 60_000,
   });
 }
 
-export const TERMINAL: InvestigationStatus[] = ["done", "failed"];
+export const TERMINAL: InvestigationStatus[] = ["done", "no_positions", "failed"];
 
 export function useInvestigationStatus(id: string | null) {
   return useQuery({

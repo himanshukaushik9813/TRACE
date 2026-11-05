@@ -2,7 +2,7 @@
 
 > Running log of what TRACE is, what has been built, and where things stand.
 > Updated after every work session so anyone (or any AI tool) can pick up where we left off.
-> **Last updated: 2026-11-06** · Latest commit on `main`: `564d3f6`
+> **Last updated: 2026-11-06** · Latest commit on `main`: demo + speed commit after `c3f2391` (see session log)
 
 ---
 
@@ -86,7 +86,9 @@ Editorial luxury fintech look:
 ## 3. Verified facts (checked 2026-11-05/06)
 
 - **Sepolia RPC: Infura.**
-  - eth_getLogs is capped at 10,000 blocks per request, and bursts are throttled. The fix: chunked scans, ONE shared rate limiter per RPC URL (120ms), and retries with longer back-off on 429.
+  - eth_getLogs is capped at 10,000 blocks per request (verified: "range 50000 exceeds limit of 10000").
+  - **Measured throughput of this free key: about 1 eth_getLogs per second sustained**, which is roughly 250 credits/s, not the documented 500. A getLogs costs 255 credits and most reads cost 80. Calls spaced 700ms apart still get about 35% 429s; at 1s they get none.
+  - The fix (2026-11-06) is a process-wide token-bucket **credit limiter** in `chain-data`: 240 credits/s by default, overridable with `TRACE_RPC_CREDITS_PER_SEC`, FIFO-serialized. On a 429 it drains the bucket and backs off linearly for 0.6–6s instead of 2–20s exponentially.
   - viem errors embed the RPC URL including the key, so every chain error passes through `scrubSecrets`.
   - No free public fallback works: publicnode has pruned history, dRPC free doesn't serve Sepolia, and 1rpc allows 50 blocks.
 - **Uniswap V3 Sepolia (official):**
@@ -112,7 +114,32 @@ Editorial luxury fintech look:
 - **0G Storage.** Burner uploader on Galileo (chainId 16602): `0xe8f9c5bA6c8c196B72989193362f3A28638a754A`. Its key is in `.env.local` only, and its balance is 0. **BLOCKED** until funded at faucet.0g.ai.
 - **Supabase.** The direct host is IPv6-only and this Mac has no IPv6 route, so `DATABASE_URL` uses the session pooler `aws-0-ap-northeast-1.pooler.supabase.com:5432` (user `postgres.<ref>`).
 - **Upstash Redis** works with ioredis built from the full `rediss://` URL.
-- **Owner wallet `0x5971…`:** 0.12 Sepolia ETH, 0 V3 positions. Real active LP wallets are found live through `findActiveLpWallets` (`GET /wallets/suggested`).
+- **Owner wallet `0x5971…`:** 0.12 Sepolia ETH, 0 V3 positions. The MetaMask wallet `0x6583…d2De` also has 0 V3 positions. Investigating either one ends in NO_EVENTS, which is correct behaviour, not a bug.
+- **Real active LP wallets** are found live through `findActiveLpWallets` (`GET /wallets/suggested`).
+  - Since 2026-11-06 they are ranked by real Swap count in each wallet's latest pool over the last ~10k blocks, and each result carries `pair`, `pool` and `poolSwaps`.
+  - Before that, a bot (`0xC01F…3042`) with 34 junk-pool positions ranked first, and its backtest was `insufficient_data`.
+- **Best demo investigate target:** `0x4797a94741b2512c3236d61ca0195638c44deb4c`.
+  - It holds WETH/USDC 1% position #230171 (pool `0x6418…`, ~3,900 swaps in 200k blocks), with 14 events.
+  - Inferred family: `passive_concentrated` (collects about every 4.1 days, 100% in range).
+  - The backtest completed with 4 runs. Aqua compatibility is PARTIAL, and the plan compiles to approve, approve, ship, dock with all simulations OK.
+- **Demo signing wallet:** `0x9245B8eB7d1a2964b896607dfBe1Da30b3E10200`.
+  - Created by `scripts/demo-wallet.mjs create`. Its key is in `.demo-wallet.local.json` (gitignored, chmod 600), TESTNET ONLY.
+  - It needs about 0.06 Sepolia ETH, then `seed` (wrap, swap, mint WETH/USDC 1%), then `collect` and `rerange` a few minutes later.
+- **Investigation speed (2026-11-06):**
+  - Before: 252–319s per investigation and 199 RPC calls for 14 events.
+  - After: a cold, never-seen wallet takes **~88s (63 calls)**. A repeat takes **~14s (11 calls)**.
+  - How:
+    - The credit limiter, so requests are never rejected and there are no back-off stalls.
+    - **Aligned log chunks:** chunks are aligned to multiples of 10k blocks; finalized ones (≥64 blocks behind head) are cached in memory **and Redis** (`setPersistentChainCache`, wired in `server/src/index.ts`, 30-day TTL).
+    - Block timestamps are cached in Redis too.
+    - Price-series timestamp anchors sit at fixed 10k-block boundaries, so they're shared across pools and runs.
+    - Process-wide token/timestamp/receipt caches.
+    - `tokenOfOwnerByIndex` batched through Multicall3.
+    - 0G archive preflights the uploader balance and fails fast when it's 0 (this used to burn ~12s).
+    - `POST /investigations` re-attaches to an already-running job for the same wallet+days (`reused: true`). Previously, two duplicate jobs saturated the key.
+    - The pipeline heartbeat writes `progress.liveRpcCalls` every 2.5s, and the UI shows "N RPC calls so far".
+  - On a free key, the first run for a brand-new wallet is RPC-bound. For a demo, run the wallet once beforehand; the cache then makes it fast for 30 days.
+- **Aqua ship needs only ETH for gas plus exact approvals.** The maker's token balances are not required to ship; Aqua pulls tokens only when swaps fill, and the fork test sets only ETH.
 - **World ID.** No credentials. "World Agent Pass" isn't an official product. Authorization is an EIP-712 wallet signature, with an optional World ID v4 staging layer.
 
 ---
@@ -131,11 +158,12 @@ Editorial luxury fintech look:
 | EIP-712 auth | IMPLEMENTED BUT NOT VERIFIED with real MetaMask (tested with real signatures) |
 | World ID | BLOCKED (no creds) |
 
-### Test results (last run 2026-11-06)
+### Test results (last run 2026-11-06, after the speed work)
 - typecheck ✓ · `next build` ✓
-- `npm test` 45/45 · `test:live` 4/4 · `test:fork` 1/1 · `test:e2e` 4/4 (the wallet test was re-run after the MetaMask fix: 2/2 ✓)
+- `npm test` 45/45 (live/fork/e2e were not re-run after the speed work) · `test:live` 4/4 · `test:fork` 1/1 · `test:e2e` 4/4 (the wallet test was re-run after the MetaMask fix: 2/2 ✓)
 
 ### Remaining user actions
+0. **Demo:** send ~0.06 Sepolia ETH to the demo wallet `0x9245B8eB7d1a2964b896607dfBe1Da30b3E10200`, then run `node --env-file=.env.local scripts/demo-wallet.mjs seed`. Import the key from `.demo-wallet.local.json` into MetaMask. See docs/DEMO_FLOW.md, section "Before the demo".
 1. Fund the 0G burner `0xe8f9c5bA6c8c196B72989193362f3A28638a754A` at faucet.0g.ai, then press **Retry archive** on Reports.
 2. Create a new 0G Router key with standard/verified trust mode (or wait for private providers).
 3. From wallet `0x5971…`, create WETH/USDC positions on Sepolia (app.uniswap.org), investigate the wallet, and do a real MetaMask approve → ship. That moves Aqua to VERIFIED TESTNET.
@@ -152,6 +180,10 @@ Editorial luxury fintech look:
 - **Package exports:** an invalid `".types"` key in package.json exports broke webpack. All packages now use a proper `exports["."]`.
 - **@types/express v5** types `req.params` as `string | string[]`. Use the `P(req, k)` helper in api.ts.
 - **Git:** this Mac has **no GitHub SSH key**. Push over HTTPS: `git push https://github.com/himanshukaushik9813/TRACE.git main`. `origin` is SSH.
+- **Infura burst limit:** ad-hoc scripts running parallel `getLogs` calls (or running alongside the worker) get 429. Run them sequentially with about 400ms gaps. This is a burst limit, not the daily quota; a single call right after succeeds.
+- **Duplicate investigations** of the same wallet (double click, two tabs) used to split the RPC budget; the API now reuses the running job.
+- **Don't run ad-hoc RPC scripts while the API is investigating.** They share the same Infura key, and the limiter is only process-wide.
+- **The web server runs `next start` (production).** UI changes need `npm run build` and a restart. API changes need `npm run build:server` and a restart of `node --env-file=.env.local server/dist/index.js`.
 - **Git authorship:** the user wants commits under **himanshukaushik9813 only — no Claude `Co-Authored-By` trailer**, ever.
 
 ---
@@ -179,3 +211,23 @@ All of these were replaced in the 2026-11-06 migration.
 - **2026-11-06** — Pushed to GitHub `main` over HTTPS. At the user's request, rewrote history to remove the Claude co-author trailer (force-push) and deleted the temporary branch `sepolia-testnet-migration`. History on GitHub has authors = himanshukaushik9813 only. The GitHub Contributors sidebar may still show "claude" until GitHub's cache refreshes (or support rebuilds it).
 - **2026-11-06** — Fixed the MetaMask connect crash ("reading 'origin'"): connect requests accounts only, and the switch to Sepolia is explicit. Committed `564d3f6` and pushed.
 - **2026-11-06** — Rewrote this memory.md to reflect the current state.
+- **2026-11-06** — `d7f6166` and `c3f2391`: MetaMask network-switch fixes. Connect requests the Sepolia permitted-chains permission up front.
+- **2026-11-06 (demo prep)** — The user's wallets showed "No supported positions"; this is correct, since neither wallet has V3 positions.
+  - Positions/Strategy/etc. now offer one-click investigation of live LP wallets when a wallet has none (`SuggestedLpWallets` in `inv-gate.tsx`).
+  - Suggestions are ranked by pool swap activity and show the pair and swap count.
+  - Added `scripts/demo-wallet.mjs` and created demo wallet `0x9245…0200` (awaiting funding).
+  - Verified the full pipeline on `0x4797…`.
+  - Added a "Before the demo" section to docs/DEMO_FLOW.md.
+  - Tests 45/45, typecheck ✓, build ✓. Not committed yet.
+  - A parallel session (sepolia-testnet-migration) added a terminal investigation status `no_positions`.
+    - A wallet without V3 positions is now a completed result, not "failed".
+    - Migration `db/migrations/0002_no_positions_status.sql` is applied to Supabase; 17 old NO_EVENTS rows were migrated.
+  - The API now warms `/wallets/suggested` at startup.
+  - On restart, jobs left in a non-terminal state are marked failed with "INTERRUPTED".
+- **2026-11-06 (speed)** — The user reported that investigations took minutes.
+  - Root cause: Infura's real limit is about 1 getLogs/s; burst requests got 429s and then slept in exponential back-off.
+  - Added the credit limiter, Redis chunk/timestamp cache, fixed anchors, multicall batching, the fast-fail archive, job reuse and the live RPC progress display (details in section 3).
+  - Result: cold 319s → 88s, repeat → 14s. Tests 45/45, typecheck ✓, build ✓.
+  - Testing in Chrome was not done: the user declined the browser connection prompt.
+  - Committed and pushed under himanshukaushik9813 (no Claude trailer) together with the parallel session's `no_positions` work.
+  - The untracked `scripts/find-v3-wallets.mjs` uses a wrong NPM address and a non-existent Mint event. It is superseded by `/wallets/suggested` and `demo-wallet.mjs`, so delete it rather than commit it.

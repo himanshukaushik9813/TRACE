@@ -117,8 +117,8 @@ export default function InvestigatePage() {
                 </button>
               )}
               {suggested.data?.wallets.slice(0, 3).map((s) => (
-                <button key={s.wallet} onClick={() => run(s.wallet)} className="inline-flex items-center gap-1 rounded-full border border-cream/15 px-2 py-0.5 hover:text-cream" title={`${s.mints} position mints in the last ~50k blocks (live scan)`}>
-                  {fmt.addr(s.wallet)} · {s.mints} mints
+                <button key={s.wallet} onClick={() => run(s.wallet)} className="inline-flex items-center gap-1 rounded-full border border-cream/15 px-2 py-0.5 hover:text-cream" title={`${s.mints} position mints in the last ~50k blocks; ${s.poolSwaps} real swaps in its pool in the last ~10k blocks (live scan)`}>
+                  {fmt.addr(s.wallet)} · {s.pair ?? `${s.mints} mints`}{s.poolSwaps > 0 ? ` · ${s.poolSwaps} swaps` : ""}
                 </button>
               ))}
               {suggested.isLoading && <span>Finding active Sepolia LPs…</span>}
@@ -134,7 +134,7 @@ export default function InvestigatePage() {
           <SectionTitle
             eyebrow={inv ? `Investigation ${invId.slice(0, 8)} · ${fmt.addr(inv.wallet)}` : "Investigation"}
             title="Pipeline"
-            action={inv?.status === "done" ? <Pill tone="forest"><Check size={12} /> Complete</Pill> : inv?.status === "failed" ? <Pill tone="brick">Stopped</Pill> : inv ? <Pill tone="gold">Running</Pill> : null}
+            action={inv?.status === "done" ? <Pill tone="forest"><Check size={12} /> Complete</Pill> : inv?.status === "no_positions" ? <Pill tone="neutral"><Check size={12} /> Complete · no positions</Pill> : inv?.status === "failed" ? <Pill tone="brick">Stopped</Pill> : inv ? <Pill tone="gold">Running</Pill> : null}
           />
           {status.isError && <ErrorState message={(status.error as Error).message} />}
           {status.isLoading && <LoadingState label="Loading investigation…" />}
@@ -143,7 +143,8 @@ export default function InvestigatePage() {
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                 {STAGES.map((s, i) => {
                   const idx = ORDER.indexOf(s.key);
-                  const state = inv.status === "done" || stageIdx > idx ? "done" : stageIdx === idx ? (inv.status === "failed" ? "failed" : "running") : inv.status === "failed" ? "skipped" : "idle";
+                  const empty = inv.status === "no_positions";
+                  const state = inv.status === "done" || stageIdx > idx || (empty && s.key === "fetching") ? "done" : stageIdx === idx ? (inv.status === "failed" ? "failed" : "running") : inv.status === "failed" || empty ? "skipped" : "idle";
                   const Icon = s.icon;
                   return (
                     <div key={s.key} className="rounded-md2 border border-ink/10 bg-ivory-50 p-3.5">
@@ -156,22 +157,27 @@ export default function InvestigatePage() {
                   );
                 })}
               </div>
-              {inv.status !== "done" && inv.status !== "failed" && (
+              {inv.status !== "done" && inv.status !== "failed" && inv.status !== "no_positions" && (
                 <div className="mt-3 text-[0.78rem] text-ink-600">
                   {inv.progress.stage ?? "Queued"}
                   {inv.progress.events != null && ` · ${inv.progress.events} events, ${inv.progress.positions} positions, ${inv.progress.rpcCalls} RPC calls`}
+                  {inv.progress.events == null && inv.progress.liveRpcCalls != null && ` · ${inv.progress.liveRpcCalls} RPC calls so far`}
                   <span className="block text-[0.7rem] mt-1">Free-tier RPC limits apply; wallets with many positions take a few minutes.</span>
+                </div>
+              )}
+              {inv.status === "no_positions" && (
+                <div className="mt-4">
+                  <EmptyState title="No supported Uniswap V3 positions found" icon={<Crosshair size={17} />}>
+                    Sepolia was read successfully: {fmt.addr(inv.wallet)} has no Uniswap V3 position NFTs and none were minted or transferred in the last {inv.windowDays} days. TRACE shows nothing rather than sample data.
+                    <span className="block mt-2">
+                      To continue: pick one of the suggested live LP wallets above, try a longer window, or create a WETH/USDC position from this wallet on app.uniswap.org (Sepolia) and investigate again.
+                    </span>
+                  </EmptyState>
                 </div>
               )}
               {inv.status === "failed" && (
                 <div className="mt-4">
-                  {inv.progress.errorCode === "NO_EVENTS" ? (
-                    <EmptyState title="No supported Uniswap V3 positions found" icon={<Crosshair size={17} />}>
-                      {inv.error?.replace(/^NO_EVENTS:\s*/, "")} — TRACE shows nothing rather than sample data. Try a longer window or another wallet.
-                    </EmptyState>
-                  ) : (
-                    <ErrorState title="Investigation failed" message={inv.error ?? "unknown error"} />
-                  )}
+                  <ErrorState title="Investigation failed" message={inv.error ?? "unknown error"} />
                 </div>
               )}
             </>
@@ -238,10 +244,10 @@ export default function InvestigatePage() {
                 <div className="flex-1 min-w-0">
                   <div className="text-[0.88rem] text-ink font-medium tabular">{fmt.addr(r.wallet)}</div>
                   <div className="text-[0.7rem] text-ink-600">
-                    {r.counts ? `${r.counts.positions} positions · ${r.counts.events} events` : r.status === "failed" ? (r.error ?? "failed").slice(0, 90) : r.status}
+                    {r.counts ? `${r.counts.positions} positions · ${r.counts.events} events` : r.status === "no_positions" ? "No Uniswap V3 positions in the window" : r.status === "failed" ? (r.error ?? "failed").slice(0, 90) : r.status}
                   </div>
                 </div>
-                <Pill tone={r.status === "done" ? "sage" : r.status === "failed" ? "brick" : "gold"}>{r.status}</Pill>
+                <Pill tone={r.status === "done" ? "sage" : r.status === "failed" ? "brick" : r.status === "no_positions" ? "neutral" : "gold"}>{r.status === "no_positions" ? "no positions" : r.status}</Pill>
                 <span className="text-[0.66rem] text-ink-600/70 tabular hidden sm:block">{new Date(r.createdAt).toLocaleString("en-US")}</span>
               </button>
             ))}

@@ -115,7 +115,7 @@ export function createApi(deps) {
         if (!suggested || Date.now() - suggested.at > 10 * 60_000) {
             const chain = createTraceClient({ rpcUrl: cfg.sepoliaRpcUrl, fallbackRpcUrls: cfg.sepoliaFallbackRpcUrls });
             const wallets = await chain.findActiveLpWallets(5, 50_000);
-            suggested = { at: Date.now(), data: { wallets, source: "Live scan of Uniswap V3 position mints on Sepolia (last ~50,000 blocks)", computedAt: new Date().toISOString() } };
+            suggested = { at: Date.now(), data: { wallets, source: "Live scan of Uniswap V3 position mints on Sepolia (last ~50,000 blocks), ranked by real swaps in each wallet's pool (last ~10,000 blocks)", computedAt: new Date().toISOString() } };
         }
         res.json(suggested.data);
     }));
@@ -127,6 +127,14 @@ export function createApi(deps) {
         const d = days == null ? 30 : Number(days);
         if (!Number.isInteger(d) || d < 1 || d > 365)
             return bad(res, "days must be an integer between 1 and 365");
+        // Same wallet + window already running → attach to it instead of reading the chain twice
+        // (double clicks and multiple tabs otherwise split the RPC budget between identical jobs).
+        const running = await db.query(`select id, status from investigations
+        where lower(wallet) = lower($1) and window_days = $2
+          and status not in ('done','no_positions','failed') and created_at > now() - interval '30 minutes'
+        order by created_at desc limit 1`, [wallet, d]);
+        if (running.length)
+            return res.status(202).json({ investigationId: running[0].id, status: running[0].status, reused: true });
         const id = await db.insertInvestigation(wallet, d);
         await queue.add({ investigationId: id, wallet, days: d });
         res.status(202).json({ investigationId: id, status: "queued" });

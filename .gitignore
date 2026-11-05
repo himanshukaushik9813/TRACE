@@ -39,3 +39,6 @@ _w.mjs
 
 # build-generated transient check configs (scripts/build-packages.mjs creates + deletes per package)
 packages/*/tsconfig.check.json
+
+# TRACE demo wallet key (testnet only) — never commit
+.demo-wallet.local.json

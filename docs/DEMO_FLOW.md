@@ -2,6 +2,21 @@
 
 Each step uses real Sepolia data. Where an external dependency blocks a step, the app says so; no success is shown without a real receipt.
 
+## Before the demo
+
+TRACE analyses the wallet you **investigate**; you **execute** from the wallet you **connect**. They do not have to be the same wallet.
+
+- **Investigate target with good data:** a wallet whose positions sit in an actively traded pool, so the backtest has real swaps to replay.
+  - `0x4797a94741b2512c3236d61ca0195638c44deb4c` was verified 2026-11-06: one WETH/USDC 1% position, 14 lifecycle events, *passive concentrated*, and a completed 4-run backtest.
+  - Alternatively, click a suggested wallet. Suggestions are ranked by real swap activity in each wallet's pool.
+- **Demo wallet for signing:** `scripts/demo-wallet.mjs` manages a dedicated testnet-only wallet. Its key is in `.demo-wallet.local.json`, which is gitignored and must never be committed.
+  1. `node --env-file=.env.local scripts/demo-wallet.mjs create` makes the wallet (done once).
+  2. Send it about 0.06 Sepolia ETH.
+  3. `… seed` wraps ETH, swaps half to USDC, and mints a WETH/USDC 1% position. These are real transactions.
+  4. A few minutes later, `… collect` and `… rerange` add real lifecycle history (collect, withdraw, re-mint).
+  5. `… status` shows balances and positions.
+  6. Import the private key into MetaMask (*Add account → Import account*). The wallet can now investigate itself (**Use connected wallet**) and approve/ship to Aqua.
+
 1. **Open TRACE** at http://localhost:3000. The top bar shows **Testnet · Sepolia**, and the sidebar footer shows the live Sepolia block.
 2. **Connect a wallet.** Click **Connect wallet** (MetaMask). TRACE requests Sepolia. If you change network inside MetaMask, a banner blocks signing and offers **Switch to Sepolia**.
 3. **Enter a wallet.**

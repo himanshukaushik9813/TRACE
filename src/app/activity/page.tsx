@@ -63,8 +63,8 @@ export default function ActivityPage() {
               {q.data.investigations.map((i) => (
                 <Link key={i.id} href={withInv("/reports", i.id)} className="px-5 py-3 flex items-center gap-3 text-[0.82rem] hover:bg-ink/3">
                   <span className="tabular text-ink-600">{new Date(i.createdAt).toLocaleString("en-US")}</span>
-                  <span className="flex-1 text-ink">{i.counts ? `${i.counts.positions} positions · ${i.counts.events} events` : (i.error ?? i.status).slice(0, 100)}</span>
-                  <Pill tone={i.status === "done" ? "sage" : i.status === "failed" ? "brick" : "gold"}>{i.status}</Pill>
+                  <span className="flex-1 text-ink">{i.counts ? `${i.counts.positions} positions · ${i.counts.events} events` : i.status === "no_positions" ? "No Uniswap V3 positions in the window" : (i.error ?? i.status).slice(0, 100)}</span>
+                  <Pill tone={i.status === "done" ? "sage" : i.status === "failed" ? "brick" : i.status === "no_positions" ? "neutral" : "gold"}>{i.status === "no_positions" ? "no positions" : i.status}</Pill>
                 </Link>
               ))}
             </Card>

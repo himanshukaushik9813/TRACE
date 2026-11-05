@@ -37,9 +37,28 @@ export type ChainDataConfig = {
     maxLogRange?: number;
     /** Parallel RPC requests. */
     concurrency?: number;
-    /** Minimum spacing between RPC requests in ms (default 120 ≈ 8 req/s, free-tier safe). */
+    /** Minimum spacing between RPC requests in ms (default 0; pacing is credit-based, see creditsPerSecond). */
     minIntervalMs?: number;
+    /**
+     * Provider throughput budget in credits/second (Infura free tier;
+     * eth_getLogs costs 255, most other reads 80). Requests are paced to stay
+     * under it instead of tripping 429s and sleeping in exponential back-off.
+     * Default 240 (measured on the free Infura Sepolia key: ~1 eth_getLogs/s is
+     * the sustained ceiling; faster pacing only buys 429s), or TRACE_RPC_CREDITS_PER_SEC.
+     */
+    creditsPerSecond?: number;
 };
+/**
+ * Optional persistent store (e.g. Redis) for finalized log chunks, so cached
+ * chain reads survive restarts. Only data at or below a finalized block is
+ * ever stored: it can no longer change, so serving it from cache is exactly
+ * what the RPC would return.
+ */
+export type ChainCacheStore = {
+    get(key: string): Promise<string | null>;
+    set(key: string, value: string): Promise<void>;
+};
+export declare function setPersistentChainCache(store: ChainCacheStore | null): void;
 export type TraceChainErrorCode = "UNSUPPORTED_CHAIN" | "WRONG_CHAIN" | "RPC_UNREACHABLE" | "RPC_ERROR" | "RATE_LIMITED" | "NO_EVENTS" | "DECODE_FAILED" | "INVALID_ADDRESS" | "INVALID_RANGE";
 export type TraceChainError = Error & {
     code: TraceChainErrorCode;
@@ -86,6 +105,10 @@ export declare function createTraceClient(cfg: ChainDataConfig): {
         wallet: string;
         mints: number;
         lastBlock: number;
+        pool: string | null;
+        pair: string | null;
+        feeTier: number | null;
+        poolSwaps: number;
     }[]>;
     probeCode: (address: string) => Promise<{
         hasCode: boolean;

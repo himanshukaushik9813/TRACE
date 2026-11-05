@@ -47,9 +47,45 @@ export type ChainDataConfig = {
   maxLogRange?: number;
   /** Parallel RPC requests. */
   concurrency?: number;
-  /** Minimum spacing between RPC requests in ms (default 120 ≈ 8 req/s, free-tier safe). */
+  /** Minimum spacing between RPC requests in ms (default 0; pacing is credit-based, see creditsPerSecond). */
   minIntervalMs?: number;
+  /**
+   * Provider throughput budget in credits/second (Infura free tier;
+   * eth_getLogs costs 255, most other reads 80). Requests are paced to stay
+   * under it instead of tripping 429s and sleeping in exponential back-off.
+   * Default 240 (measured on the free Infura Sepolia key: ~1 eth_getLogs/s is
+   * the sustained ceiling; faster pacing only buys 429s), or TRACE_RPC_CREDITS_PER_SEC.
+   */
+  creditsPerSecond?: number;
 };
+
+/* ------------------------------------------------------------------ */
+/*  Process-wide caches of IMMUTABLE chain data                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Optional persistent store (e.g. Redis) for finalized log chunks, so cached
+ * chain reads survive restarts. Only data at or below a finalized block is
+ * ever stored: it can no longer change, so serving it from cache is exactly
+ * what the RPC would return.
+ */
+export type ChainCacheStore = { get(key: string): Promise<string | null>; set(key: string, value: string): Promise<void> };
+let persistent: ChainCacheStore | null = null;
+export function setPersistentChainCache(store: ChainCacheStore | null): void {
+  persistent = store;
+}
+
+const FINALITY_MARGIN = 64; // blocks behind head treated as final (Sepolia finalizes in ~2 epochs)
+const LOG_CACHE_MAX = 4_000;
+const logChunkCache = new Map<string, unknown[]>();
+function memSet(k: string, v: unknown[]) {
+  if (logChunkCache.size >= LOG_CACHE_MAX) logChunkCache.delete(logChunkCache.keys().next().value as string);
+  logChunkCache.set(k, v);
+}
+const tsCacheGlobal = new Map<number, number>();
+const tokenCacheGlobal = new Map<string, { symbol: string; decimals: number }>();
+const receiptCache = new Map<string, { gasUsed: string; effectiveGasPrice: string }>();
+let knownHead = 0;
 
 export type TraceChainErrorCode =
   | "UNSUPPORTED_CHAIN"
@@ -112,14 +148,50 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * Client-side rate limiter (free-tier RPC providers throttle bursts): every
  * request reserves the next slot `minIntervalMs` after the previous one.
  */
-const limiters = new Map<string, () => Promise<void>>();
-function sharedLimiter(rpcUrl: string, minIntervalMs: number) {
+type Limiter = { acquire(cost: number): Promise<void>; drain(): void };
+const limiters = new Map<string, Limiter>();
+function sharedLimiter(rpcUrl: string, minIntervalMs: number, creditsPerSecond: number): Limiter {
   let l = limiters.get(rpcUrl);
   if (!l) {
-    l = createLimiter(minIntervalMs);
+    l = createCreditLimiter(creditsPerSecond, minIntervalMs);
     limiters.set(rpcUrl, l);
   }
   return l;
+}
+
+/**
+ * Token bucket in provider credits, FIFO-serialized so a burst of parallel
+ * callers is spread over time instead of hitting the provider at once.
+ */
+function createCreditLimiter(perSec: number, minIntervalMs: number): Limiter {
+  let available = perSec;
+  let last = Date.now();
+  let queue: Promise<void> = Promise.resolve();
+  const spacing = createLimiter(minIntervalMs);
+  return {
+    acquire(cost: number) {
+      const c = Math.min(cost, perSec);
+      const p = queue.then(async () => {
+        for (;;) {
+          const now = Date.now();
+          available = Math.min(perSec, available + ((now - last) * perSec) / 1000);
+          last = now;
+          if (available >= c) {
+            available -= c;
+            break;
+          }
+          await sleep(Math.ceil(((c - available) * 1000) / perSec));
+        }
+        await spacing();
+      });
+      queue = p.catch(() => undefined);
+      return p;
+    },
+    drain() {
+      available = 0;
+      last = Date.now();
+    },
+  };
 }
 
 function createLimiter(minIntervalMs: number) {
@@ -137,7 +209,7 @@ const isTransient = (e: TraceChainError) =>
   e.code === "RPC_UNREACHABLE" ||
   /internal error|header not found|-32603|temporarily unavailable|bad gateway|gateway time|50[234]/i.test(e.message);
 
-async function withRetry<T>(fn: () => Promise<T>, attempts = 9): Promise<T> {
+async function withRetry<T>(fn: () => Promise<T>, attempts = 9, onRateLimited?: () => void): Promise<T> {
   let lastErr: TraceChainError | null = null;
   for (let a = 0; a < attempts; a++) {
     try {
@@ -146,9 +218,14 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 9): Promise<T> {
       const e = classify(err);
       lastErr = e;
       if (!isTransient(e) || a === attempts - 1) throw e;
-      // Rate limits get a longer, jittered back-off (free-tier quotas are per second).
-      const baseMs = e.code === "RATE_LIMITED" ? 2_000 : 1_000;
-      await sleep(Math.min(baseMs * 2 ** a, 20_000) + Math.floor(Math.random() * 500));
+      // Credit quotas refill every second: empty the shared bucket so every
+      // caller waits for the refill, then retry after a short linear back-off.
+      if (e.code === "RATE_LIMITED") {
+        onRateLimited?.();
+        await sleep(Math.min(600 * (a + 1), 6_000) + Math.floor(Math.random() * 300));
+      } else {
+        await sleep(Math.min(1_000 * 2 ** a, 20_000) + Math.floor(Math.random() * 500));
+      }
     }
   }
   throw lastErr ?? makeChainError("RPC_ERROR", "retry exhausted");
@@ -214,7 +291,8 @@ export function createTraceClient(cfg: ChainDataConfig) {
   const conc = cfg.concurrency ?? 3;
   // One limiter per RPC endpoint, shared by every client in the process, so
   // concurrent jobs and API reads cannot multiply the request rate.
-  const acquire = sharedLimiter(cfg.rpcUrl, cfg.minIntervalMs ?? 120);
+  const credits = cfg.creditsPerSecond ?? (Number(process.env.TRACE_RPC_CREDITS_PER_SEC) || 240);
+  const limiter = sharedLimiter(cfg.rpcUrl, cfg.minIntervalMs ?? 0, credits);
   let rpcCalls = 0;
 
   const client: PublicClient = createPublicClient({
@@ -224,12 +302,17 @@ export function createTraceClient(cfg: ChainDataConfig) {
       : http(cfg.rpcUrl, { timeout: 30_000, retryCount: 0 }),
   }) as PublicClient;
 
-  const call = <T>(fn: () => Promise<T>) => {
-    return withRetry(async () => {
-      await acquire();
-      rpcCalls++;
-      return fn();
-    });
+  /** Every RPC request goes through here: credit-paced, counted, retried. `cost` is the provider credit price (eth_getLogs 255, reads 80). */
+  const call = <T>(fn: () => Promise<T>, cost = 80) => {
+    return withRetry(
+      async () => {
+        await limiter.acquire(cost);
+        rpcCalls++;
+        return fn();
+      },
+      9,
+      () => limiter.drain(),
+    );
   };
 
   let chainChecked = false;
@@ -243,20 +326,32 @@ export function createTraceClient(cfg: ChainDataConfig) {
   }
 
   async function latestBlock(): Promise<number> {
-    return Number(await call(() => client.getBlockNumber()));
+    const b = Number(await call(() => client.getBlockNumber()));
+    knownHead = Math.max(knownHead, b);
+    return b;
   }
 
-  /** eth_getLogs over [from,to] in provider-sized chunks, adaptive on range errors. */
-  async function getLogsChunked(params: { address: Address; topics: (Hex | Hex[] | null)[] }, from: number, to: number): Promise<RawLog[]> {
+  /**
+   * eth_getLogs over [from,to] in provider-sized chunks, adaptive on range errors.
+   * Chunks are ALIGNED to multiples of maxRange so different queries over
+   * overlapping windows hit the same chunks; chunks entirely at or below the
+   * finalized head are cached (memory + optional persistent store) and then
+   * filtered to [from,to]. Same logs as a direct query, far fewer RPC calls.
+   */
+  async function getLogsChunked(params: { address: Address | Address[]; topics: (Hex | Hex[] | null)[] }, from: number, to: number): Promise<RawLog[]> {
     const ranges: [number, number][] = [];
-    for (let s = from; s <= to; s += maxRange) ranges.push([s, Math.min(s + maxRange - 1, to)]);
+    for (let s = Math.floor(from / maxRange) * maxRange; s <= to; s += maxRange) ranges.push([s, s + maxRange - 1]);
+    const addrKey = (Array.isArray(params.address) ? [...params.address].map((a) => a.toLowerCase()).sort().join(",") : params.address.toLowerCase());
+    const topicKey = JSON.stringify(params.topics);
     const fetchRange = async ([a, b]: [number, number]): Promise<RawLog[]> => {
       try {
-        return (await call(() =>
-          client.request({
-            method: "eth_getLogs",
-            params: [{ address: params.address, topics: params.topics as never, fromBlock: numberToHex(a), toBlock: numberToHex(b) }],
-          }),
+        return (await call(
+          () =>
+            client.request({
+              method: "eth_getLogs",
+              params: [{ address: params.address, topics: params.topics as never, fromBlock: numberToHex(a), toBlock: numberToHex(b) }],
+            }),
+          255,
         )) as unknown as RawLog[];
       } catch (err) {
         const e = err as TraceChainError;
@@ -267,27 +362,70 @@ export function createTraceClient(cfg: ChainDataConfig) {
         throw e;
       }
     };
-    const parts = await pool(ranges, conc, fetchRange);
-    return parts.flat().map((l) => ({
-      ...l,
-      blockNumber: l.blockNumber == null ? null : BigInt(l.blockNumber),
-      logIndex: l.logIndex == null ? null : Number(l.logIndex),
-    }));
+    const fetchChunk = async ([a, b]: [number, number]): Promise<RawLog[]> => {
+      const finalized = knownHead > 0 && b <= knownHead - FINALITY_MARGIN;
+      if (!finalized) return fetchRange([a, Math.min(b, to)]);
+      const key = `trace:logs:v1:${chainId}:${addrKey}:${topicKey}:${a}-${b}`;
+      const mem = logChunkCache.get(key);
+      if (mem) return mem as RawLog[];
+      if (persistent) {
+        try {
+          const hit = await persistent.get(key);
+          if (hit != null) {
+            const v = JSON.parse(hit) as RawLog[];
+            memSet(key, v);
+            return v;
+          }
+        } catch {
+          /* cache unavailable — read the chain */
+        }
+      }
+      const logs = await fetchRange([a, b]);
+      memSet(key, logs);
+      if (persistent) {
+        const json = JSON.stringify(logs);
+        if (json.length < 900_000) persistent.set(key, json).catch(() => undefined);
+      }
+      return logs;
+    };
+    const parts = await pool(ranges, conc, fetchChunk);
+    return parts
+      .flat()
+      .filter((l) => {
+        const bn = l.blockNumber == null ? null : Number(l.blockNumber);
+        return bn == null || (bn >= from && bn <= to);
+      })
+      .map((l) => ({
+        ...l,
+        blockNumber: l.blockNumber == null ? null : BigInt(l.blockNumber),
+        logIndex: l.logIndex == null ? null : Number(l.logIndex),
+      }));
   }
 
-  const tsCache = new Map<number, number>();
+  const tsCache = tsCacheGlobal;
   async function blockTimestamps(blocks: number[]): Promise<Map<number, number>> {
     const need = [...new Set(blocks)].filter((b) => !tsCache.has(b));
     await pool(need, conc + 2, async (b) => {
+      const final = knownHead > 0 && b <= knownHead - FINALITY_MARGIN;
+      const key = `trace:ts:v1:${chainId}:${b}`;
+      if (final && persistent) {
+        try {
+          const hit = await persistent.get(key);
+          if (hit != null) return void tsCache.set(b, Number(hit));
+        } catch {
+          /* cache unavailable — read the chain */
+        }
+      }
       const blk = await call(() => client.getBlock({ blockNumber: BigInt(b) }));
       tsCache.set(b, Number(blk.timestamp));
+      if (final && persistent) persistent.set(key, String(blk.timestamp)).catch(() => undefined);
     });
     return tsCache;
   }
 
   /* ---------------- positions + tokens ---------------- */
 
-  const tokenCache = new Map<string, { symbol: string; decimals: number }>();
+  const tokenCache = tokenCacheGlobal;
   async function tokenInfo(addr: string): Promise<{ symbol: string; decimals: number } | null> {
     const k = addr.toLowerCase();
     if (tokenCache.has(k)) return tokenCache.get(k)!;
@@ -440,10 +578,17 @@ export function createTraceClient(cfg: ChainDataConfig) {
     const bal = Number(await call(() => client.readContract({ address: NPM, abi: NPM_ABI, functionName: "balanceOf", args: [wallet] })));
     const MAX_HELD = 200;
     if (bal > MAX_HELD) notes.push(`wallet holds ${bal} position NFTs; only the first ${MAX_HELD} are analysed`);
-    const heldIds = await pool(Array.from({ length: Math.min(bal, MAX_HELD) }, (_, i) => i), conc, (i) =>
-      call(() => client.readContract({ address: NPM, abi: NPM_ABI, functionName: "tokenOfOwnerByIndex", args: [wallet, BigInt(i)] })),
-    );
-    heldIds.forEach((id) => held.add(Number(id)));
+    // One Multicall3 request per 100 NFTs instead of one RPC call per NFT.
+    const idx = Array.from({ length: Math.min(bal, MAX_HELD) }, (_, i) => i);
+    for (let i = 0; i < idx.length; i += 100) {
+      const batch = idx.slice(i, i + 100);
+      const res = await multicall(batch.map((k) => ({ address: NPM, abi: NPM_ABI, functionName: "tokenOfOwnerByIndex" as const, args: [wallet, BigInt(k)] as const })));
+      for (let j = 0; j < res.length; j++) {
+        const r = res[j];
+        if (r.status === "success") held.add(Number(r.result as bigint));
+        else held.add(Number(await call(() => client.readContract({ address: NPM, abi: NPM_ABI, functionName: "tokenOfOwnerByIndex", args: [wallet, BigInt(batch[j])] }))));
+      }
+    }
 
     // 2) NFT transfers in the window (both directions).
     const W = topicAddr(wallet);
@@ -632,9 +777,13 @@ export function createTraceClient(cfg: ChainDataConfig) {
     if (txs.length > MAX_RECEIPTS) notes.push(`gas read for the first ${MAX_RECEIPTS} of ${txs.length} transactions`);
     const receipts = new Map<string, { gasUsed: string; effectiveGasPrice: string }>();
     await pool(txs.slice(0, MAX_RECEIPTS), conc, async (h) => {
+      const hit = receiptCache.get(h.toLowerCase());
+      if (hit) return void receipts.set(h, hit);
       try {
         const r = await call(() => client.getTransactionReceipt({ hash: h as Hex }));
-        receipts.set(h, { gasUsed: r.gasUsed.toString(), effectiveGasPrice: (r.effectiveGasPrice ?? 0n).toString() });
+        const v = { gasUsed: r.gasUsed.toString(), effectiveGasPrice: (r.effectiveGasPrice ?? 0n).toString() };
+        receipts.set(h, v);
+        if (Number(r.blockNumber) <= knownHead - FINALITY_MARGIN) receiptCache.set(h.toLowerCase(), v);
       } catch {
         /* gas left undefined — never estimated */
       }
@@ -701,13 +850,12 @@ export function createTraceClient(cfg: ChainDataConfig) {
       };
     });
 
-    // Timestamps: exact for up to 24 anchor blocks, linear interpolation between them.
+    // Timestamps: exact at fixed anchors (the window ends + every aligned
+    // maxRange boundary inside it), linear interpolation in between. Fixed
+    // anchors are shared by every pool and every run, so they are read once
+    // and then served from the timestamp cache.
     const anchorsWanted = new Set<number>([fromBlock, toBlock]);
-    if (raw.length) {
-      const step = Math.max(1, Math.floor(raw.length / 22));
-      for (let i = 0; i < raw.length; i += step) anchorsWanted.add(raw[i].block);
-      anchorsWanted.add(raw[raw.length - 1].block);
-    }
+    for (let b = Math.ceil(fromBlock / maxRange) * maxRange; b < toBlock; b += maxRange) anchorsWanted.add(b);
     const ts = await blockTimestamps([...anchorsWanted]);
     const anchors = [...anchorsWanted].sort((a, b) => a - b).map((b) => [b, ts.get(b)!] as const);
     const interp = (b: number) => {
@@ -743,25 +891,86 @@ export function createTraceClient(cfg: ChainDataConfig) {
 
   /* ---------------- discovery of real active LPs ---------------- */
 
-  /** Recently active EOA liquidity providers (by mint count), found live from NPM logs. */
-  async function findActiveLpWallets(n = 5, lookbackBlocks = 50_000): Promise<{ wallet: string; mints: number; lastBlock: number }[]> {
+  /**
+   * Recently active EOA liquidity providers, found live from NPM mint logs and
+   * ranked so wallets whose latest position sits in an ACTIVELY TRADED pool come
+   * first (those are the ones a backtest can actually replay). Swap activity is
+   * counted from real pool Swap logs over the last ~10k blocks.
+   */
+  async function findActiveLpWallets(
+    n = 5,
+    lookbackBlocks = 50_000,
+  ): Promise<{ wallet: string; mints: number; lastBlock: number; pool: string | null; pair: string | null; feeTier: number | null; poolSwaps: number }[]> {
     await assertChain();
     const latest = await latestBlock();
     const logs = await getLogsChunked({ address: NPM, topics: [SEL.Transfer, topicAddr(ZERO_ADDRESS), null, null] }, latest - lookbackBlocks, latest);
-    const agg = new Map<string, { mints: number; lastBlock: number }>();
+    const agg = new Map<string, { mints: number; lastBlock: number; lastTokenId: number }>();
     for (const l of logs) {
       if (l.topics.length !== 4) continue;
       const to = topicToAddr(l.topics[2]);
-      const a = agg.get(to) ?? { mints: 0, lastBlock: 0 };
+      const a = agg.get(to) ?? { mints: 0, lastBlock: 0, lastTokenId: 0 };
       a.mints++;
-      a.lastBlock = Math.max(a.lastBlock, Number(l.blockNumber));
+      const b = Number(l.blockNumber);
+      if (b >= a.lastBlock) {
+        a.lastBlock = b;
+        a.lastTokenId = Number(BigInt(l.topics[3]));
+      }
       agg.set(to, a);
     }
-    const ranked = [...agg.entries()].sort((a, b) => b[1].mints - a[1].mints).slice(0, n * 3);
-    const out: { wallet: string; mints: number; lastBlock: number }[] = [];
-    for (const [w, a] of ranked) {
-      const code = await call(() => client.getCode({ address: w as Address }));
-      if (!code || code === "0x") out.push({ wallet: w, ...a }); // EOAs only (people, not router contracts)
+
+    // Latest position of every minter → its pool (positions() + factory.getPool, batched).
+    const entries = [...agg.entries()];
+    type PosTuple = readonly [bigint, string, string, string, number, number, number, bigint];
+    const posOf = new Map<string, PosTuple>();
+    for (let i = 0; i < entries.length; i += 100) {
+      const batch = entries.slice(i, i + 100);
+      const res = await multicall(batch.map(([, a]) => ({ address: NPM, abi: NPM_ABI, functionName: "positions" as const, args: [BigInt(a.lastTokenId)] as const })));
+      res.forEach((r, j) => {
+        if (r.status === "success") posOf.set(batch[j][0], r.result as unknown as PosTuple);
+      });
+    }
+    const triples = [...new Set([...posOf.values()].map((p) => `${p[2]}:${p[3]}:${p[4]}`))];
+    const poolOf = new Map<string, string>();
+    for (let i = 0; i < triples.length; i += 100) {
+      const batch = triples.slice(i, i + 100);
+      const res = await multicall(
+        batch.map((t) => {
+          const [a, b, f] = t.split(":");
+          return { address: UNISWAP_V3.factory.address, abi: FACTORY_ABI, functionName: "getPool" as const, args: [a as Address, b as Address, Number(f)] as const };
+        }),
+      );
+      batch.forEach((t, j) => {
+        const r = res[j];
+        if (r.status === "success" && r.result !== ZERO_ADDRESS) poolOf.set(t, getAddress(r.result as string));
+      });
+    }
+
+    // Real swap activity per pool (one address-array getLogs per chunk).
+    const pools = [...new Set(poolOf.values())] as Address[];
+    const swaps = new Map<string, number>();
+    for (let i = 0; i < pools.length; i += 50) {
+      const sw = await getLogsChunked({ address: pools.slice(i, i + 50), topics: [SEL.Swap] }, latest - 9_999, latest);
+      for (const l of sw) swaps.set(getAddress(l.address), (swaps.get(getAddress(l.address)) ?? 0) + 1);
+    }
+
+    const rows = entries.map(([wallet, a]) => {
+      const p = posOf.get(wallet);
+      const key = p ? `${p[2]}:${p[3]}:${p[4]}` : null;
+      const poolAddr = key ? poolOf.get(key) ?? null : null;
+      return { wallet, mints: a.mints, lastBlock: a.lastBlock, p, pool: poolAddr, feeTier: p ? Number(p[4]) : null, poolSwaps: poolAddr ? swaps.get(poolAddr) ?? 0 : 0 };
+    });
+    rows.sort((x, y) => Number(y.poolSwaps >= 15) - Number(x.poolSwaps >= 15) || y.poolSwaps - x.poolSwaps || y.mints - x.mints);
+
+    const out: { wallet: string; mints: number; lastBlock: number; pool: string | null; pair: string | null; feeTier: number | null; poolSwaps: number }[] = [];
+    for (const r of rows.slice(0, n * 4)) {
+      const code = await call(() => client.getCode({ address: r.wallet as Address }));
+      if (code && code !== "0x") continue; // EOAs only (people, not router contracts)
+      let pair: string | null = null;
+      if (r.p) {
+        const [t0, t1] = await Promise.all([tokenInfo(r.p[2]), tokenInfo(r.p[3])]);
+        pair = `${t0?.symbol ?? r.p[2].slice(0, 8)}/${t1?.symbol ?? r.p[3].slice(0, 8)}`;
+      }
+      out.push({ wallet: r.wallet, mints: r.mints, lastBlock: r.lastBlock, pool: r.pool, pair, feeTier: r.feeTier, poolSwaps: r.poolSwaps });
       if (out.length >= n) break;
     }
     return out;

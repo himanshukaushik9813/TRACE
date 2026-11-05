@@ -27,8 +27,22 @@ function thin(xs, max) {
     return out;
 }
 export async function runInvestigation(job, db, cfg) {
-    const { investigationId: id, wallet } = job;
+    const { investigationId: id } = job;
     const chain = createTraceClient({ rpcUrl: cfg.sepoliaRpcUrl, fallbackRpcUrls: cfg.sepoliaFallbackRpcUrls });
+    // Live heartbeat: the real RPC call count, so the UI shows work happening during long chain reads.
+    const beat = setInterval(() => {
+        db.query(`update investigations set progress = progress || jsonb_build_object('liveRpcCalls', $2::int), updated_at = now()
+        where id = $1 and status not in ('done','no_positions','failed')`, [id, chain.rpcCallCount()]).catch(() => undefined);
+    }, 2_500);
+    try {
+        await runStages(job, db, cfg, chain);
+    }
+    finally {
+        clearInterval(beat);
+    }
+}
+async function runStages(job, db, cfg, chain) {
+    const { investigationId: id, wallet } = job;
     // 1) Fetch real on-chain history.
     await db.setStatus(id, "fetching", { stage: "Reading Sepolia: position NFTs, lifecycle logs, positions(), receipts" });
     let history;
@@ -37,6 +51,11 @@ export async function runInvestigation(job, db, cfg) {
     }
     catch (err) {
         const e = err;
+        if (e.code === "NO_EVENTS") {
+            // A genuine, completed answer: this wallet has no Uniswap V3 positions in the window.
+            await db.setStatus(id, "no_positions", { stage: "No Uniswap V3 positions found", message: e.message });
+            return;
+        }
         await db.setStatus(id, "failed", { errorCode: e.code ?? "RPC_ERROR" }, `${e.code ?? "RPC_ERROR"}: ${e.message}`);
         return;
     }
