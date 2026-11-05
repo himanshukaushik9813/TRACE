@@ -197,3 +197,4 @@ Plan: `~/.claude/plans/linear-gathering-starlight.md` (from user brief `~/Downlo
 - **2026-11-05** — Reviewed project (README + uncommitted diff). Created this memory.md.
 - **2026-11-05** — Read entire codebase end to end (~11k lines). Ran typecheck (fails) and tests (build fails; 60/64 pass on old dist). Recorded findings in section 4. No code changed.
 - **2026-11-06** — Implemented the full Sepolia migration plan (see 4b): real chain data, 0G Router client, real backtests, Aqua SDK compile + fork-verified ship/dock, EIP-712 auth, 0G Storage SDK, Supabase migrations, wagmi frontend, tests, docs.
+- **2026-11-06** — Committed all work as 485642e on branch `sepolia-testnet-migration` and pushed to GitHub over HTTPS (SSH key not set up on this Mac; remote `origin` is SSH). Not merged into main.
