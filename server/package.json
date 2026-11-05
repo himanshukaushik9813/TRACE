@@ -1,0 +1,25 @@
+{
+  "name": "@trace/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TRACE API + worker: Express routes, BullMQ pipeline jobs, Postgres persistence, and the deterministic pipeline with labelled-fixture fallback.",
+  "dependencies": {
+    "@trace/strategy-ir": "0.1.0",
+    "@trace/uniswap-v3": "0.1.0",
+    "@trace/chain-data": "0.1.0",
+    "@trace/strategy-inference": "0.1.0",
+    "@trace/backtester": "0.1.0",
+    "@trace/aqua-adapter": "0.1.0",
+    "@trace/world-auth": "0.1.0",
+    "@trace/zero-g-storage": "0.1.0",
+    "express": "^4.19.2",
+    "pg": "^8.12.0",
+    "ioredis": "^5.4.1",
+    "bullmq": "^5.12.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "@trace/strategy-ir",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TRACE shared data contract (strategy IR v1): types, schema validation, canonical serialization. Zero runtime dependencies so it runs in the browser, the worker, and node.",
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    ".types": "./dist/index.d.ts"
+  },
+  "types": "dist/index.d.ts"
+}

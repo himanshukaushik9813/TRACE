@@ -1,0 +1,17 @@
+{
+  "name": "@trace/backtester",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Look-ahead-safe, deterministic Uniswap V3 backtest: block-time aligned replay with an explicit train/test split, stated gas/slippage assumptions, and reproducible equity/drawdown series.",
+  "dependencies": {
+    "@trace/strategy-ir": "0.1.0",
+    "@trace/uniswap-v3": "0.1.0"
+  },
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    ".types": "./dist/index.d.ts"
+  },
+  "types": "dist/index.d.ts"
+}

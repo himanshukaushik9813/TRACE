@@ -1,0 +1,16 @@
+{
+  "name": "@trace/world-auth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "World Agent Pass: bound-claims authorization. A proof is bound to (worldId, strategy version, program hash, action, expiry, challenge) and validated server-side. The hackathon path signs with a demo key; the shape is production-identical.",
+  "dependencies": {
+    "@trace/strategy-ir": "0.1.0"
+  },
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    ".types": "./dist/index.d.ts"
+  },
+  "types": "dist/index.d.ts"
+}

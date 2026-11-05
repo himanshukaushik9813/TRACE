@@ -1,0 +1,18 @@
+{
+  "name": "@trace/chain-data",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Live Uniswap V3 data via viem + Ethereum RPC. Decodes NonfungiblePositionManager logs into IR V3Event shapes. Typed errors so callers can fall back to the labelled fixture.",
+  "dependencies": {
+    "@trace/strategy-ir": "0.1.0",
+    "@trace/uniswap-v3": "0.1.0",
+    "viem": "^2.21.0"
+  },
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    ".types": "./dist/index.d.ts"
+  },
+  "types": "dist/index.d.ts"
+}

@@ -1,0 +1,102 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Editorial Luxury Fintech — TRACE design system */
+:root {
+  color-scheme: light;
+  /* Palette (spec 2.1) */
+  --ivory: #f3ebdd;
+  --ivory-50: #faf7f0;
+  --stone: #e9e0d0;
+  --charcoal: #171714;
+  --charcoal-900: #11110f;
+  --graphite: #252520;
+  --gold: #b68a42;
+  --gold-300: #c6a66b;
+  --gold-200: #d9c08f;
+  --sage: #78866b;
+  --sage-600: #344c3a;
+  --ink: #171714;
+  --ink-600: #696356;
+  --cream: #f3ebdd;
+  --cream-muted: #b7b0a2;
+  --forest: #344c3a;
+  --amber: #b07d2e;
+  --brick: #9a4b3a;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  margin: 0;
+  background: var(--ivory);
+  color: var(--ink);
+  font-family: var(--font-sans), Inter, "Geist", system-ui, -apple-system,
+    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-feature-settings: "cv02", "cv03", "cv04", "ss01";
+}
+
+/* Headings are editorial serif */
+h1, h2, h3, .serif {
+  font-family: var(--font-serif), "Playfair Display", "Cormorant Garamond",
+    Georgia, serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* Tabular numerals for financial data */
+.tnum, .tabular, th, td, .stat-value {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* Small uppercase labels */
+.label {
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: var(--ink-600);
+}
+.on-dark .label { color: var(--cream-muted); }
+
+/* Subtle paper grain on light surfaces */
+.paper::before {
+  content: "";
+  position: absolute; inset: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.35'/></svg>");
+  mix-blend-mode: multiply;
+}
+
+/* Hairline hair-rule */
+.hairline { border-color: rgba(23, 23, 20, 0.1); }
+.hairline-dark { border-color: rgba(243, 235, 221, 0.14); }
+
+/* Thin scrollbar in dark panels */
+.dark-scroll { scrollbar-width: thin; scrollbar-color: rgba(182,138,66,0.4) transparent; }
+.dark-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+.dark-scroll::-webkit-scrollbar-thumb { background: rgba(182,138,66,0.35); border-radius: 8px; }
+
+/* SVG chart stroke animation */
+@keyframes trace-in { to { stroke-dashoffset: 0; } }
+.draw {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: trace-in 1.4s ease-out forwards;
+}
+
+/* Gold focus ring */
+:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: rgba(182, 138, 66, 0.22);
+}

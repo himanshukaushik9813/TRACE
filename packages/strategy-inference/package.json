@@ -1,0 +1,17 @@
+{
+  "name": "@trace/strategy-inference",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Deterministic behavioural fingerprints + rule mining → StrategyIR. The 0G client here only PROPOSES a structured IR; the deterministic layer validates it against evidence before it is ever trusted.",
+  "dependencies": {
+    "@trace/strategy-ir": "0.1.0",
+    "@trace/uniswap-v3": "0.1.0"
+  },
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    ".types": "./dist/index.d.ts"
+  },
+  "types": "dist/index.d.ts"
+}
