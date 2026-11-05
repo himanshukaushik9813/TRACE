@@ -1,226 +1,352 @@
 /**
- * Postgres persistence layer (pg Pool, plain SQL — no ORM, so the schema in
- * db/schema.sql is the single source of truth).
- *
- * Every write records the data's `source` (live | demo_fixture |
- * deterministic), which is what the UI's demo badge ultimately derives from.
+ * Postgres persistence (pg Pool, plain SQL; db/migrations is the source of
+ * truth for the schema). Every chain-dependent row is Sepolia; raw events are
+ * immutable and ingested idempotently.
  */
 
-import { Pool, type PoolClient } from "pg";
+import pg from "pg";
+import type {
+  AuthorizationClaims,
+  AuthorizationVerification,
+  BacktestResult,
+  CompatibilityAssessment,
+  ExecutionPlan,
+  PositionAccounting,
+  PositionMeta,
+  ReconstructionSummary,
+  StorageRef,
+  StrategyIR,
+  V3Event,
+} from "@trace/strategy-ir";
+import type { InferenceRun } from "@trace/strategy-inference";
 
-export type DbConfig = {
-  connectionString: string;
-};
+export type DbConfig = { connectionString: string; ssl: boolean };
+
+export type InvestigationStatus = "queued" | "fetching" | "reconstructing" | "inferring" | "backtesting" | "archiving" | "done" | "failed";
+
+const s = (v: unknown) => (v == null ? null : typeof v === "bigint" ? v.toString() : String(v));
 
 export class Db {
-  private pool: Pool;
+  private pool: pg.Pool;
 
   constructor(cfg: DbConfig) {
-    this.pool = new Pool({ connectionString: cfg.connectionString });
+    this.pool = new pg.Pool({
+      connectionString: cfg.connectionString,
+      ssl: cfg.ssl ? { rejectUnauthorized: false } : false,
+      max: 8,
+      idleTimeoutMillis: 30_000,
+    });
+    this.pool.on("error", (err) => console.error("[db] idle client error:", err.message));
   }
 
-  async withClient<T>(fn: (c: PoolClient) => Promise<T>): Promise<T> {
-    const client = await this.pool.connect();
-    try {
-      return await fn(client);
-    } finally {
-      client.release();
-    }
-  }
-
-  /**
-   * Run a parameterised query and return its rows. `T` is the *row* shape
-   * (what `select ... as x` projects to); the default `any` keeps ad-hoc
-   * callers (the API routes) ergonomic while typed callers can narrow.
-   */
   async query<T = any>(text: string, params?: unknown[]): Promise<T[]> {
-    const r = await this.pool.query(text, params as any[]);
+    const r = await this.pool.query(text, params as unknown[]);
     return r.rows as T[];
+  }
+
+  async ping(): Promise<{ ok: boolean; migrations: string[] }> {
+    const rows = await this.query<{ name: string }>(`select name from schema_migrations order by name`);
+    return { ok: true, migrations: rows.map((r) => r.name) };
+  }
+
+  /* ---------------- wallets ---------------- */
+
+  async touchWallet(address: string, connected = false) {
+    await this.query(
+      `insert into wallets (address, last_connected_at) values ($1, case when $2 then now() else null end)
+       on conflict (address) do update set last_seen_at = now(),
+         last_connected_at = case when $2 then now() else wallets.last_connected_at end`,
+      [address, connected],
+    );
   }
 
   /* ---------------- investigations ---------------- */
 
-  async insertInvestigation(row: {
-    wallet: string;
-    chainId?: number;
-    source: "live" | "demo_fixture" | "deterministic";
-    eventsFingerprint: string;
-    summary: unknown;
-    periodFromTs?: number;
-    periodToTs?: number;
-  }): Promise<string> {
-    const r = await this.pool.query(
-      `insert into investigations (wallet, chain_id, source, events_fingerprint, summary_json, period_from_ts, period_to_ts)
-       values ($1,$2,$3,$4,$5,$6,$7) returning id`,
-      [
-        row.wallet,
-        row.chainId ?? 1,
-        row.source,
-        row.eventsFingerprint,
-        JSON.stringify(row.summary),
-        row.periodFromTs ?? null,
-        row.periodToTs ?? null,
-      ],
-    );
-    return String(r.rows[0].id);
+  async insertInvestigation(wallet: string, days: number): Promise<string> {
+    await this.touchWallet(wallet);
+    const r = await this.query<{ id: string }>(`insert into investigations (wallet, window_days) values ($1, $2) returning id`, [wallet, days]);
+    return r[0].id;
   }
 
-  async setInvestigationStatus(id: string, status: "reconstructing" | "done" | "failed", error?: string) {
-    await this.pool.query(
-      `update investigations set status = $2, error = $3, updated_at = now() where id = $1`,
-      [id, status, error ?? null],
+  async setStatus(id: string, status: InvestigationStatus, progress: Record<string, unknown> = {}, error?: string) {
+    await this.query(
+      `update investigations set status = $2, progress = progress || $3::jsonb, error = coalesce($4, error), updated_at = now() where id = $1`,
+      [id, status, JSON.stringify({ ...progress, [`${status}At`]: Math.floor(Date.now() / 1000) }), error ?? null],
     );
   }
 
-  /**
-   * Fill in the investigation row the API created when it queued the job.
-   * The row already exists; this updates its result-bearing columns and the
-   * source label (live vs demo_fixture) so the badge is data-driven.
-   */
-  async updateInvestigationResult(
-    id: string,
-    patch: {
-      source: "live" | "demo_fixture" | "deterministic";
-      eventsFingerprint: string;
-      summary: unknown;
-      periodFromTs?: number;
-      periodToTs?: number;
-    },
-  ) {
-    await this.pool.query(
-      `update investigations
-         set source = $2, events_fingerprint = $3, summary_json = $4,
-             period_from_ts = coalesce($5, period_from_ts),
-             period_to_ts   = coalesce($6, period_to_ts),
-             updated_at = now()
-       where id = $1`,
-      [id, patch.source, patch.eventsFingerprint, JSON.stringify(patch.summary), patch.periodFromTs ?? null, patch.periodToTs ?? null],
+  async saveReconstruction(id: string, r: { summary: ReconstructionSummary; window: { fromBlock: number; toBlock: number; fromTs: number; toTs: number }; notes: string[] }) {
+    await this.query(
+      `update investigations set summary_json = $2, events_fingerprint = $3, window_from_block = $4, window_to_block = $5,
+              period_from_ts = $6, period_to_ts = $7, notes = $8, updated_at = now() where id = $1`,
+      [id, JSON.stringify(r.summary), r.summary.eventsFingerprint, r.window.fromBlock, r.window.toBlock, r.window.fromTs, r.window.toTs, JSON.stringify(r.notes)],
     );
   }
 
-  async getInvestigation(id: string): Promise<{ id: string; wallet: string; status: string; source: string; error: string | null; summary: unknown } | null> {
-    const r = await this.pool.query(
-      `select id, wallet, status, source, error, summary_json as summary from investigations where id = $1`,
+  async setIntegrations(id: string, patch: Record<string, unknown>) {
+    await this.query(`update investigations set integrations_json = integrations_json || $2::jsonb, updated_at = now() where id = $1`, [id, JSON.stringify(patch)]);
+  }
+
+  async getInvestigation(id: string) {
+    const r = await this.query(
+      `select id, wallet, chain_id as "chainId", status, progress, window_days as "windowDays",
+              window_from_block as "fromBlock", window_to_block as "toBlock", period_from_ts as "fromTs", period_to_ts as "toTs",
+              events_fingerprint as "eventsFingerprint", summary_json as summary, notes, integrations_json as integrations,
+              error, created_at as "createdAt", updated_at as "updatedAt"
+         from investigations where id = $1`,
       [id],
     );
-    return r.rows.length ? r.rows[0] : null;
+    return r[0] ?? null;
   }
 
-  async insertEvents(investigation: string, events: unknown[]) {
-    // Bulk-insert via a values list; enough for the hackathon scale.
-    for (const e of events) {
-      const ev = e as Record<string, unknown>;
-      await this.pool.query(
-        `insert into events (investigation, tx, block, log_index, ts, kind, token_id, owner,
-                             liquidity_delta, amount0, amount1, fee0, fee1, tick_lower, tick_upper, note)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+  /** Idempotent ingestion of immutable raw events, linked to the investigation. */
+  async insertEvents(investigation: string, events: V3Event[]) {
+    for (let i = 0; i < events.length; i += 200) {
+      const batch = events.slice(i, i + 200);
+      const values: unknown[] = [];
+      const rows = batch.map((e, j) => {
+        const b = j * 19;
+        values.push(
+          e.tx, e.logIndex, e.block, e.timestamp, e.kind, s(e.tokenId), e.pool ?? null, e.owner ?? null, e.from ?? null, e.to ?? null,
+          s(e.liquidityDelta), s(e.amount0), s(e.amount1), s(e.fee0), s(e.fee1), e.tickLower, e.tickUpper, e.gasUsed ?? null, e.effectiveGasPrice ?? null,
+        );
+        return `(${Array.from({ length: 19 }, (_, k) => `$${b + k + 1}`).join(",")})`;
+      });
+      await this.query(
+        `insert into raw_events (tx_hash, log_index, block, ts, kind, token_id, pool, owner, from_addr, to_addr,
+                                 liquidity_delta, amount0, amount1, fee0, fee1, tick_lower, tick_upper, gas_used, effective_gas_price)
+         values ${rows.join(",")}
+         on conflict (chain_id, tx_hash, log_index, token_id) do nothing`,
+        values,
+      );
+      await this.query(
+        `insert into investigation_events (investigation, raw_event_id)
+         select $1, r.id from raw_events r
+           join unnest($2::text[], $3::int[], $4::numeric[]) as k(tx, li, tid)
+             on r.chain_id = 11155111 and r.tx_hash = k.tx and r.log_index = k.li and r.token_id = k.tid
+         on conflict do nothing`,
+        [investigation, batch.map((e) => e.tx), batch.map((e) => e.logIndex), batch.map((e) => s(e.tokenId))],
+      );
+    }
+  }
+
+  async getEvents(investigation: string, tokenId?: string) {
+    return this.query(
+      `select r.tx_hash as tx, r.log_index as "logIndex", r.block, r.ts as timestamp, r.kind, r.token_id as "tokenId", r.pool, r.owner,
+              r.from_addr as "from", r.to_addr as "to", r.liquidity_delta as "liquidityDelta", r.amount0, r.amount1, r.fee0, r.fee1,
+              r.tick_lower as "tickLower", r.tick_upper as "tickUpper", r.gas_used as "gasUsed", r.effective_gas_price as "effectiveGasPrice"
+         from investigation_events ie join raw_events r on r.id = ie.raw_event_id
+        where ie.investigation = $1 ${tokenId ? "and r.token_id = $2" : ""}
+        order by r.block, r.log_index`,
+      tokenId ? [investigation, tokenId] : [investigation],
+    );
+  }
+
+  async insertPositions(investigation: string, summary: ReconstructionSummary, meta: Record<string, PositionMeta>) {
+    const acct = new Map<number, PositionAccounting>(summary.accounting.map((a) => [a.tokenId, a]));
+    for (const p of summary.positions) {
+      const a = acct.get(p.tokenId);
+      const m = meta[String(p.tokenId)];
+      await this.query(
+        `insert into positions (investigation, token_id, pool, token0, token1, symbol0, symbol1, decimals0, decimals1, fee_tier, tick_lower, tick_upper,
+                                liquidity, status, opened_block, closed_block, history_complete, deposited0, deposited1, withdrawn0, withdrawn1, fees0, fees1)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+         on conflict (investigation, token_id) do nothing`,
         [
-          investigation,
-          ev.tx,
-          ev.block,
-          ev.logIndex,
-          ev.timestamp ?? 0,
-          ev.kind,
-          ev.tokenId,
-          ev.owner ?? null,
-          ev.liquidityDelta ?? 0,
-          ev.amount0 ?? 0,
-          ev.amount1 ?? 0,
-          ev.fee0 ?? 0,
-          ev.fee1 ?? 0,
-          ev.tickLower ?? 0,
-          ev.tickUpper ?? 0,
-          ev.note ?? null,
+          investigation, p.tokenId, p.pool, m?.token0 ?? null, m?.token1 ?? null, p.token0, p.token1, p.decimals0 ?? null, p.decimals1 ?? null,
+          p.feeTier, p.tickLower, p.tickUpper, p.liquidity, p.status, p.openedBlock ?? null, p.closedBlock ?? null, p.historyComplete ?? false,
+          a?.deposited.token0 ?? 0, a?.deposited.token1 ?? 0, a?.withdrawn.token0 ?? 0, a?.withdrawn.token1 ?? 0, a?.feesCollected.token0 ?? 0, a?.feesCollected.token1 ?? 0,
         ],
       );
     }
   }
 
-  /* ---------------- strategies ---------------- */
-
-  async insertStrategy(investigation: string, strategy: unknown, irId: string, versionHash: string, family: string, confidence: number, source: string): Promise<string> {
-    const r = await this.pool.query(
-      `insert into strategies (investigation, ir_json, ir_id, strategy_version_hash, family, confidence, source)
-       values ($1,$2,$3,$4,$5,$6,$7) returning id`,
-      [investigation, JSON.stringify(strategy), irId, versionHash, family, confidence, source],
-    );
-    return String(r.rows[0].id);
-  }
-
-  /* ---------------- backtests / programs / archives ---------------- */
-
-  async insertBacktest(strategyId: string, result: unknown): Promise<void> {
-    const r = result as {
-      split: { trainEndBlock: number; testStartBlock: number; gapBlocks: number; lookaheadGuard: string; waiveReason?: string };
-    };
-    await this.pool.query(
-      `insert into backtests (strategy_id, result_json, train_end_block, test_start_block, gap_blocks, lookahead_guard, waive_reason)
-       values ($1,$2,$3,$4,$5,$6,$7)`,
-      [
-        strategyId,
-        JSON.stringify(result),
-        r.split.trainEndBlock,
-        r.split.testStartBlock,
-        r.split.gapBlocks,
-        r.split.lookaheadGuard,
-        r.split.waiveReason ?? null,
-      ],
+  async saveDna(investigation: string, data: unknown) {
+    await this.query(
+      `insert into strategy_dna (investigation, data) values ($1, $2) on conflict (investigation) do update set data = excluded.data, computed_at = now()`,
+      [investigation, JSON.stringify(data)],
     );
   }
 
-  async insertProgram(strategyId: string, program: unknown, compatibility: unknown): Promise<void> {
-    const p = program as { programHash: string };
-    const c = compatibility as { verdict: string };
-    await this.pool.query(
-      `insert into aqua_programs (strategy_id, program_json, program_hash, compatibility_json, verdict)
-       values ($1,$2,$3,$4,$5)`,
-      [strategyId, JSON.stringify(program), p.programHash, JSON.stringify(compatibility), c.verdict],
+  /* ---------------- inference + strategies ---------------- */
+
+  async insertInferenceRun(investigation: string, run: InferenceRun): Promise<string> {
+    const r = await this.query<{ id: string }>(
+      `insert into inference_runs (investigation, status, request_id, model, provider_address, tee_verified, trust_mode, http_status, error_code, error, usage, response_hash, latency_ms, rules_rejected)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning id`,
+      [investigation, run.status, run.requestId, run.model, run.providerAddress, run.teeVerified, run.trustMode, run.httpStatus, run.errorCode, run.error, run.usage ? JSON.stringify(run.usage) : null, run.responseHash, run.latencyMs, run.rulesRejected],
+    );
+    return r[0].id;
+  }
+
+  async insertStrategy(investigation: string, ir: StrategyIR, versionHash: string, role: "evidence_baseline" | "ai_hypothesis", inferenceRun: string | null): Promise<string> {
+    const r = await this.query<{ id: string }>(
+      `insert into strategies (investigation, ir_id, parent_ir_id, ir_json, version_hash, family, confidence, provider, role, inference_run)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       on conflict (ir_id) do nothing returning id`,
+      [investigation, ir.id, ir.parentId ?? null, JSON.stringify(ir), versionHash, ir.family, ir.confidence, ir.source.provider, role, inferenceRun],
+    );
+    if (r[0]) return r[0].id;
+    const existing = await this.query<{ id: string }>(`select id from strategies where ir_id = $1`, [ir.id]);
+    return existing[0].id; // identical content = identical immutable version
+  }
+
+  async getStrategy(id: string) {
+    const r = await this.query(
+      `select s.id, s.investigation, s.ir_id as "irId", s.ir_json as ir, s.version_hash as "versionHash", s.family, s.confidence, s.provider, s.role,
+              s.created_at as "createdAt", i.wallet
+         from strategies s join investigations i on i.id = s.investigation where s.id = $1`,
+      [id],
+    );
+    return r[0] ?? null;
+  }
+
+  async insertBacktest(strategyId: string, b: BacktestResult) {
+    await this.query(
+      `insert into backtest_runs (strategy_id, status, reason, pool, result_json, train_end_block, test_start_block, gap_blocks, lookahead_guard, waive_reason)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [strategyId, b.status, b.reason ?? null, b.pool, JSON.stringify(b), b.split.trainEndBlock, b.split.testStartBlock, b.split.gapBlocks, b.split.lookaheadGuard, b.split.waiveReason ?? null],
     );
   }
 
-  async issueChallenge(strategyId: string, challenge: string): Promise<void> {
-    await this.pool.query(`insert into challenges (challenge, strategy_id) values ($1,$2) on conflict do nothing`, [
-      challenge,
-      strategyId,
-    ]);
-  }
+  /* ---------------- compatibility, plans, authorizations ---------------- */
 
-  async markChallengeConsumed(challenge: string): Promise<void> {
-    await this.pool.query(`update challenges set consumed_at = now() where challenge = $1`, [challenge]);
-  }
-
-  async consumedChallenges(strategyId: string): Promise<string[]> {
-    const r = await this.pool.query(
-      `select challenge from challenges where strategy_id = $1 and consumed_at is not null`,
-      [strategyId],
+  async insertCompatibility(strategyId: string, maker: string | null, c: CompatibilityAssessment): Promise<string> {
+    const r = await this.query<{ id: string }>(
+      `insert into compatibility_reports (strategy_id, maker, verdict, report_json) values ($1,$2,$3,$4) returning id`,
+      [strategyId, maker, c.verdict, JSON.stringify(c)],
     );
-    return r.rows.map((x: { challenge: string }) => x.challenge);
+    return r[0].id;
   }
 
-  async insertAuthorization(strategyId: string, claims: unknown, signature: string, validated: boolean, verification: unknown): Promise<void> {
-    await this.pool.query(
-      `insert into authorizations (strategy_id, world_id, claims_json, signature, validated, validation_json, status)
-       values ($1,$2,$3,$4,$5,$6,$7)`,
-      [
-        strategyId,
-        (claims as { worldId: string }).worldId,
-        JSON.stringify(claims),
-        signature,
-        validated,
-        JSON.stringify(verification),
-        validated ? "authorized" : "rejected",
-      ],
+  async insertPlan(strategyId: string, plan: ExecutionPlan): Promise<string> {
+    const r = await this.query<{ id: string }>(
+      `insert into execution_plans (strategy_id, maker, plan_hash, strategy_hash, plan_json) values ($1,$2,$3,$4,$5)
+       on conflict (plan_hash) do nothing returning id`,
+      [strategyId, plan.maker, plan.planHash, plan.strategyHash, JSON.stringify(plan)],
+    );
+    if (r[0]) return r[0].id;
+    return (await this.query<{ id: string }>(`select id from execution_plans where plan_hash = $1`, [plan.planHash]))[0].id;
+  }
+
+  async getPlan(id: string) {
+    const r = await this.query(
+      `select p.id, p.strategy_id as "strategyId", p.maker, p.plan_hash as "planHash", p.plan_json as plan, p.created_at as "createdAt",
+              s.version_hash as "strategyVersionHash", s.ir_id as "irId"
+         from execution_plans p join strategies s on s.id = p.strategy_id where p.id = $1`,
+      [id],
+    );
+    return r[0] ?? null;
+  }
+
+  async issueChallenge(planId: string, wallet: string, action: string, challenge: string, ttlSeconds: number) {
+    await this.query(
+      `insert into challenges (challenge, plan_id, wallet, action, expires_at) values ($1,$2,$3,$4, now() + make_interval(secs => $5))`,
+      [challenge, planId, wallet, action, ttlSeconds],
     );
   }
 
-  async insertArchives(investigation: string | null, refs: unknown[]) {
-    for (const a of refs as Array<{ ref: string; kind: string; contentHash: string; sizeBytes: number; demo: boolean }>) {
-      await this.pool.query(
-        `insert into archives (ref, kind, content_hash, size_bytes, source, investigation)
-         values ($1,$2,$3,$4,$5,$6)`,
-        [a.ref, a.kind, a.contentHash, a.sizeBytes, a.demo ? "0G_DEMO" : "0G_LIVE", investigation],
+  /** Atomically consume a challenge; true only if it existed, matched, was unexpired and unused. */
+  async consumeChallenge(challenge: string, planId: string, wallet: string, action: string): Promise<boolean> {
+    const r = await this.query(
+      `update challenges set consumed_at = now()
+        where challenge = $1 and plan_id = $2 and lower(wallet) = lower($3) and action = $4
+          and consumed_at is null and expires_at > now()
+        returning challenge`,
+      [challenge, planId, wallet, action],
+    );
+    return r.length === 1;
+  }
+
+  async insertAuthorization(a: {
+    planId: string;
+    wallet: string;
+    action: string;
+    claims: AuthorizationClaims;
+    signature: string;
+    validated: boolean;
+    verification: AuthorizationVerification;
+    worldStatus: string;
+    worldNullifier: string | null;
+  }): Promise<string> {
+    const r = await this.query<{ id: string }>(
+      `insert into authorizations (plan_id, wallet, action, claims_json, signature, validated, verification_json, world_status, world_nullifier, expires_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9, to_timestamp($10)) returning id`,
+      [a.planId, a.wallet, a.action, JSON.stringify(a.claims), a.signature, a.validated, JSON.stringify(a.verification), a.worldStatus, a.worldNullifier, a.claims.expiresAt],
+    );
+    return r[0].id;
+  }
+
+  async getAuthorization(id: string) {
+    const r = await this.query(
+      `select id, plan_id as "planId", wallet, action, validated, verification_json as verification, world_status as "worldStatus",
+              expires_at as "expiresAt", created_at as "createdAt", (expires_at > now()) as live
+         from authorizations where id = $1`,
+      [id],
+    );
+    return r[0] ?? null;
+  }
+
+  async recordNullifier(nullifier: string, action: string): Promise<boolean> {
+    const r = await this.query(`insert into world_nullifiers (nullifier, action) values ($1,$2) on conflict do nothing returning nullifier`, [nullifier, action]);
+    return r.length === 1;
+  }
+
+  /* ---------------- transactions ---------------- */
+
+  async upsertTransaction(t: {
+    planId: string;
+    authorizationId: string;
+    op: string;
+    txHash: string;
+    status?: string;
+    from?: string | null;
+    to?: string | null;
+    block?: number | null;
+    confirmations?: number | null;
+    gasUsed?: string | null;
+    effectiveGasPrice?: string | null;
+    matchesPlan?: boolean | null;
+    outcome?: string | null;
+  }) {
+    await this.query(
+      `insert into transactions (plan_id, authorization_id, op, tx_hash, status, from_addr, to_addr, block, confirmations, gas_used, effective_gas_price, matches_plan, outcome)
+       values ($1,$2,$3,$4,coalesce($5,'submitted'),$6,$7,$8,$9,$10,$11,$12,$13)
+       on conflict (tx_hash) do update set status = coalesce($5, transactions.status), from_addr = coalesce($6, transactions.from_addr),
+         to_addr = coalesce($7, transactions.to_addr), block = coalesce($8, transactions.block), confirmations = coalesce($9, transactions.confirmations),
+         gas_used = coalesce($10, transactions.gas_used), effective_gas_price = coalesce($11, transactions.effective_gas_price),
+         matches_plan = coalesce($12, transactions.matches_plan), outcome = coalesce($13, transactions.outcome), updated_at = now()`,
+      [t.planId, t.authorizationId, t.op, t.txHash, t.status ?? null, t.from ?? null, t.to ?? null, t.block ?? null, t.confirmations ?? null, t.gasUsed ?? null, t.effectiveGasPrice ?? null, t.matchesPlan ?? null, t.outcome ?? null],
+    );
+  }
+
+  async listTransactions(where: { planId?: string; wallet?: string }) {
+    if (where.planId)
+      return this.query(`select * from transactions where plan_id = $1 order by created_at`, [where.planId]);
+    return this.query(
+      `select t.* from transactions t join execution_plans p on p.id = t.plan_id where lower(p.maker) = lower($1) order by t.created_at desc limit 100`,
+      [where.wallet],
+    );
+  }
+
+  /* ---------------- storage ---------------- */
+
+  async insertStorage(investigation: string, strategyId: string | null, refs: StorageRef[]) {
+    for (const r of refs) {
+      await this.query(
+        `insert into storage_artifacts (investigation, strategy_id, kind, root_hash, tx_hash, content_hash, size_bytes, network, retrievable)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9) on conflict (root_hash, kind) do nothing`,
+        [investigation, strategyId, r.kind, r.rootHash, r.txHash, r.contentHash, r.sizeBytes, r.network, r.retrievable],
       );
     }
+  }
+
+  async listStorage(investigation: string) {
+    return this.query(
+      `select kind, root_hash as "rootHash", tx_hash as "txHash", content_hash as "contentHash", size_bytes as "sizeBytes", network, retrievable, created_at as "createdAt"
+         from storage_artifacts where investigation = $1 order by created_at`,
+      [investigation],
+    );
   }
 
   close() {

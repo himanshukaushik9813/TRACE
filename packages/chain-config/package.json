@@ -1,0 +1,16 @@
+{
+  "name": "@trace/chain-config",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TRACE single source of truth for testnet (Sepolia) chain configuration. Zero runtime dependencies — safe in browser and node.",
+  "main": "dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "dist/index.d.ts"
+}

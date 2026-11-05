@@ -1,87 +1,111 @@
 /**
- * 0G Storage archiving client.
+ * 0G Storage archiving (Galileo testnet) — genuine uploads only.
  *
- *   - Live path: POST the artifact to the 0G storage endpoint and record the
- *     returned reference.
- *   - Demo path (no endpoint configured): produce a labelled
- *     `0G-STOR-arc_… · demo` reference locally.
+ *   upload:   canonical JSON → MemData → Merkle tree → indexer.upload(file, rpc, signer)
+ *             → { rootHash, txHash } (the storage fee is paid on 0G Galileo by the
+ *             server's dedicated burner key)
+ *   verify:   indexer.downloadToBlob(rootHash, { proof: true }) → compare bytes
  *
- * Every returned StorageRef carries `demo: boolean` so the UI can — and must —
- * show whether an archive is a real 0G write or the labelled demo reference.
- * The product rule "never claim a mocked integration is production-verified"
- * is enforced here at the data level, not just in copy.
+ * A StorageRef is only ever returned after a successful upload; `retrievable`
+ * is true only after the Merkle-proof-verified download matched the content.
+ * There is no demo path: without configuration `archive()` reports
+ * `not_configured` and returns no references.
  */
 
-import {
-  contentHash,
-  type StorageRef,
-} from "@trace/strategy-ir";
+import { contentHash, canonicalString, type StorageRef } from "@trace/strategy-ir";
 
-export type ZeroGConfig = {
-  /** 0G storage API endpoint. Omit → demo path. */
-  endpoint?: string;
-  apiKey?: string;
+export type ZeroGStorageConfig = {
+  rpcUrl?: string;
+  indexerUrl?: string;
+  privateKey?: string;
+  /** Skip the read-back verification (default false). */
+  skipVerify?: boolean;
 };
 
-export type Artifact = {
-  kind: string; // "investigation summary" | "inference output" | "backtest report" | …
-  content: unknown; // the IR object to persist
+export type Artifact = { kind: string; content: unknown };
+
+export type ArchiveOutcome = {
+  status: "archived" | "partial" | "failed" | "not_configured";
+  refs: StorageRef[];
+  errors: { kind: string; error: string }[];
+  signer?: string;
 };
 
-export async function archive(opts: {
-  cfg?: ZeroGConfig;
-  artifacts: Artifact[];
-  wallet: string;
-}): Promise<StorageRef[]> {
-  const cfg = opts.cfg ?? {};
-  const base = Date.now();
-
-  if (!cfg.endpoint) {
-    // Demo path: labelled references, content hashed for reproducibility.
-    return opts.artifacts.map((a, i) => ({
-      ref: `0G-STOR-arc_${hex2(base + i)} · demo`,
-      kind: a.kind,
-      contentHash: contentHash(a.content).digest.slice(0, 16),
-      sizeBytes: new TextEncoder().encode(JSON.stringify(a.content)).length,
-      ts: base + i,
-      demo: true,
-    }));
-  }
-
-  // Live path: POST each artifact. A failed live write is a hard error — we
-  // never silently degrade to a demo ref and call it real.
-  const out: StorageRef[] = [];
-  for (const a of opts.artifacts) {
-    const res = await fetch(cfg.endpoint, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...(cfg.apiKey ? { authorization: `Bearer ${cfg.apiKey}` } : {}),
-      },
-      body: JSON.stringify({
-        kind: a.kind,
-        wallet: opts.wallet,
-        content: a.content,
-      }),
-    });
-    if (!res.ok) {
-      throw new Error(`0G storage archive failed (${res.status}) for ${a.kind}`);
-    }
-    const json = (await res.json()) as { ref: string; sizeBytes?: number };
-    out.push({
-      ref: json.ref,
-      kind: a.kind,
-      contentHash: contentHash(a.content).digest.slice(0, 16),
-      sizeBytes: json.sizeBytes ?? new TextEncoder().encode(JSON.stringify(a.content)).length,
-      ts: Math.floor(Date.now() / 1000),
-      demo: false,
-    });
-  }
-  return out;
+/** ethers errors embed the whole transaction; keep the code + node message only. */
+function conciseError(err: unknown): string {
+  const e = err as { code?: string; shortMessage?: string; info?: { error?: { message?: string } }; message?: string };
+  const inner = e?.info?.error?.message;
+  if (e?.code) return `${e.code}: ${inner ?? e.shortMessage ?? "upload failed"}`;
+  return String(e?.message ?? err).split(" (transaction=")[0].slice(0, 300);
 }
 
-function hex2(n: number): string {
-  return n.toString(16).slice(-4);
+export const storageConfigured =(cfg: ZeroGStorageConfig) => Boolean(cfg.rpcUrl && cfg.indexerUrl && cfg.privateKey);
+
+async function sdk() {
+  const [zg, ethers] = await Promise.all([import("@0gfoundation/0g-storage-ts-sdk"), import("ethers")]);
+  return { zg, ethers };
+}
+
+/** Signer address + native balance on 0G Galileo (for /integrations). */
+export async function storageAccount(cfg: ZeroGStorageConfig): Promise<{ address: string; balanceWei: string } | null> {
+  if (!storageConfigured(cfg)) return null;
+  const { ethers } = await sdk();
+  const provider = new ethers.JsonRpcProvider(cfg.rpcUrl);
+  const wallet = new ethers.Wallet(cfg.privateKey!, provider);
+  const bal = await provider.getBalance(wallet.address);
+  return { address: wallet.address, balanceWei: bal.toString() };
+}
+
+export async function archive(opts: { cfg?: ZeroGStorageConfig; artifacts: Artifact[] }): Promise<ArchiveOutcome> {
+  const cfg = opts.cfg ?? {};
+  if (!storageConfigured(cfg)) {
+    return { status: "not_configured", refs: [], errors: opts.artifacts.map((a) => ({ kind: a.kind, error: "0G Storage not configured" })) };
+  }
+  const { zg, ethers } = await sdk();
+  const provider = new ethers.JsonRpcProvider(cfg.rpcUrl);
+  const signer = new ethers.Wallet(cfg.privateKey!, provider);
+  const indexer = new zg.Indexer(cfg.indexerUrl!);
+  const refs: StorageRef[] = [];
+  const errors: { kind: string; error: string }[] = [];
+
+  for (const a of opts.artifacts) {
+    try {
+      const text = canonicalString({ kind: a.kind, content: a.content });
+      const bytes = new TextEncoder().encode(text);
+      const file = new zg.MemData(bytes);
+      const [tree, treeErr] = await file.merkleTree();
+      if (treeErr || !tree) throw new Error(`merkle tree: ${treeErr?.message ?? "failed"}`);
+      const [res, upErr] = await indexer.upload(file, cfg.rpcUrl!, signer as never);
+      if (upErr) throw upErr;
+      if (!("rootHash" in res)) throw new Error("unexpected multi-fragment upload for a small artifact");
+
+      let retrievable = false;
+      if (!cfg.skipVerify) {
+        const [blob, dlErr] = await indexer.downloadToBlob(res.rootHash, { proof: true });
+        if (dlErr) throw new Error(`uploaded (tx ${res.txHash}) but read-back failed: ${dlErr.message}`);
+        const back = new Uint8Array(await blob.arrayBuffer());
+        retrievable = back.length >= bytes.length && new TextDecoder().decode(back.slice(0, bytes.length)) === text;
+      }
+      refs.push({
+        rootHash: res.rootHash,
+        txHash: res.txHash,
+        kind: a.kind,
+        contentHash: contentHash(a.content).digest.slice(0, 32),
+        sizeBytes: bytes.length,
+        ts: Math.floor(Date.now() / 1000),
+        network: "0g-galileo-testnet",
+        retrievable,
+      });
+    } catch (err) {
+      errors.push({ kind: a.kind, error: conciseError(err) });
+    }
+  }
+  return {
+    status: errors.length === 0 ? "archived" : refs.length ? "partial" : "failed",
+    refs,
+    errors,
+    signer: signer.address,
+  };
 }
 
 export type { StorageRef };

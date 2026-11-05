@@ -1,32 +1,34 @@
 /**
- * Deterministic compile: StrategyIR (+ compatibility assessment) → AquaProgram.
+ * Deterministic compile: StrategyIR + its real basis position → ExecutionPlan.
  *
- * Rules the compiler enforces:
- *  - No raw bytecode is ever emitted. The program is structured intent
- *    (observe / adjust / collect / redeploy / swap / stop) that Aqua executes
- *    through its own verified paths.
- *  - Unlimited token approvals are never requested.
- *  - The program hash is a pure function of (strategyId, steps, approvals,
- *    assumptions): recompile the same input → same hash. The World proof
- *    pins this hash, so a silently-changed program can't be authorized under
- *    an old signature.
+ * The SwapVM program is built ONLY with the official typed builders
+ * (@1inch/swap-vm-sdk AquaXYCAmmStrategy), never from model output:
+ *   - range  → newConcentrate({ sqrtPriceMin, sqrtPriceMax }) from the
+ *              position's real ticks (sqrt(P·1e18), P = token1/token0 raw =
+ *              1.0001^tick); a full-range position → plain XYC AMM,
+ *   - fee    → withFeeTokenIn(bps) from the Uniswap fee tier,
+ *   - salt   → derived from (strategy id, maker) so recompiling the same
+ *              inputs yields the same order bytes and strategy hash.
+ * Transactions (exact-amount approvals, ship, dock) are encoded with
+ * @1inch/aqua-sdk against the configured Aqua registry + router.
+ *
+ * planHash = content hash of the canonical plan; the user's EIP-712
+ * authorization pins it, so a changed plan cannot reuse an old signature.
  */
-import { type AquaProgram, type CompatibilityAssessment, type StrategyIR } from "@trace/strategy-ir";
-export type CompileConfig = {
-    /** Schedule interval the whole program runs on (minutes). */
-    intervalMinutes: number;
-    slippageBps: number;
-    gasGweiAssumption: number;
-    minOutPct: number;
-    /**
-     * The position's observed range ticks — the only legitimate source for any
-     * tick value in a compiled program. Omitting it makes trigger/limit rules
-     * compile to "manual" (a human must set the ticks) rather than inventing
-     * numbers.
-     */
-    observedRange?: {
-        tickLower: number;
-        tickUpper: number;
-    };
+import { type CompatibilityAssessment, type ExecutionPlan, type PositionMeta, type StrategyIR } from "@trace/strategy-ir";
+export type CompileInput = {
+    ir: StrategyIR;
+    compat: CompatibilityAssessment;
+    basis: PositionMeta;
+    maker: string;
+    /** Exact amounts to ship, in token base units (decimal strings). */
+    amount0: string;
+    amount1: string;
+    registry: string;
+    app: string;
+    chainId: number;
 };
-export declare function compileAquaProgram(ir: StrategyIR, compat: CompatibilityAssessment, cfg?: Partial<CompileConfig>): AquaProgram;
+/** sqrt(P·1e18) for P = 1.0001^tick, as the on-chain fixed-point bigint. */
+export declare function sqrtPriceFromTick(tick: number): bigint;
+export declare function feeBpsFromTier(feeTier: number): number;
+export declare function compilePlan(input: CompileInput): ExecutionPlan;

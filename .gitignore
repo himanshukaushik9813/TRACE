@@ -27,12 +27,15 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 
-# typecheck scaffolding (only used when offline; real build uses deps)
-/typecheck-stubs.d.ts
-/tsconfig.typecheck.json
-
 # nested node_modules (monorepo packages)
 packages/*/node_modules
 
 # scratch files
 _w.mjs
+
+# test artifacts
+/test-results
+/playwright-report
+
+# build-generated transient check configs (scripts/build-packages.mjs creates + deletes per package)
+packages/*/tsconfig.check.json

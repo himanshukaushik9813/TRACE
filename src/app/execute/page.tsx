@@ -1,371 +1,398 @@
 "use client";
 
-import { useState } from "react";
-import {
-  Terminal,
-  Lock,
-  Boxes,
-  CheckCircle2,
-  ShieldCheck,
-  FileSignature,
-  Loader2,
-  ArrowRight,
-  Boxes as BoxesIcon,
-  Ship,
-  Play,
-} from "lucide-react";
+import { useEffect, useState } from "react";
+import { useSendTransaction, useSignTypedData } from "wagmi";
+import { parseUnits } from "viem";
+import { Check, Loader2, Lock, Ship, Terminal, X } from "lucide-react";
+import { AQUA, AQUA_NOTES } from "@trace/chain-config";
 import { Page } from "@/components/page";
-import { Card, Label, SectionTitle, Pill, DemoBadge, Stat, Button, Tabs } from "@/components/ui";
-import { COMPAT, COMPAT_VERDICT, EXEC_STEPS, EXEC_CONFIG, WORLD_AUTH, STORAGE } from "@/lib/fixture";
-import { authorize, useLastInvestigation } from "@/lib/live";
-import { art } from "@/lib/assets";
+import { InvestigationGate } from "@/components/inv-gate";
+import { useSepoliaWallet } from "@/components/wallet";
+import { Button, Card, EmptyState, ErrorState, ExplorerLink, Label, Pill, SectionTitle, SourceBadge } from "@/components/ui";
+import { fmt } from "@/lib/format";
+import { api, type Compatibility, type ExecutionPlan, type FullInvestigation, type TxRow } from "@/lib/api";
 
-type Auth = "none" | "approved" | "rejected";
+type PlanResponse = { planId: string; plan: ExecutionPlan; compatibility: Compatibility; simulation: Record<string, { ok: boolean; error?: string }> };
+type AuthResponse = { authorizationId: string; validated: boolean; signer: string | null; verification: Record<string, unknown> & { notes: string[] } };
+type StepState = { status: "idle" | "signing" | "pending" | "success" | "reverted" | "error"; hash?: string; message?: string; tx?: TxRow };
 
-export default function ExecutePage() {
-  const [tab, setTab] = useState<"compat" | "compile" | "execute">("compat");
-  const [auth, setAuth] = useState<Auth>("none");
-  const [executing, setExecuting] = useState(false);
-  const [shipped, setShipped] = useState(false);
-  const [authNote, setAuthNote] = useState<string | null>(null);
-  const lastInv = useLastInvestigation();
+const errMsg = (e: unknown) => {
+  const m = (e as { shortMessage?: string }).shortMessage ?? (e as Error).message ?? String(e);
+  return /user rejected|denied/i.test(m) ? "You rejected the request in your wallet." : m;
+};
 
-  const approve = async () => {
-    setExecuting(true);
-    setAuthNote(null);
-    // Authorize against the last finished investigation (live API if
-    // configured, labelled demo flow otherwise). The proof is bound to
-    // strategy version + program hash + action + expiry + challenge and
-    // validated server-side.
-    const target = lastInv?.summary ? lastInv.id : "ir_demo_v04";
-    const r = await authorize(target, "compile+ship+2 swaps");
-    if ("error" in r) {
-      setAuth("rejected");
-      setAuthNote(r.error);
-      setExecuting(false);
-      return;
-    }
-    if (r.validated) {
-      setAuth("approved");
-      setAuthNote(r.note);
-      // A real ship would now submit the compiled program to Aqua and verify
-      // the receipt — the demo labels that receipt accordingly.
-      setTimeout(() => { setExecuting(false); setShipped(true); }, 1400);
-    } else {
-      setAuth("rejected");
-      setAuthNote(r.validation.notes.join(" · ") || "proof rejected server-side");
-      setExecuting(false);
+function Verdict({ v }: { v: string }) {
+  return <Pill tone={v === "FULL" ? "forest" : v === "PARTIAL" ? "amber" : "brick"}>{v === "PARTIAL" ? "PARTIALLY COMPATIBLE" : v === "FULL" ? "FULLY COMPATIBLE" : "INCOMPATIBLE"}</Pill>;
+}
+
+function CompatView({ c }: { c: Compatibility }) {
+  return (
+    <div className="grid lg:grid-cols-[1fr_1fr] gap-5">
+      <Card>
+        <div className="flex items-center justify-between gap-2">
+          <SectionTitle eyebrow="Rule by rule" title="Strategy → Aqua" />
+          <Verdict v={c.verdict} />
+        </div>
+        <div className="space-y-2">
+          {c.rules.length === 0 && <div className="text-[0.84rem] text-ink-600">No rules to compile (inconclusive strategy).</div>}
+          {c.rules.map((r) => (
+            <div key={r.rule} className="rounded-md2 border border-ink/10 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[0.86rem] text-ink">{r.rule}</span>
+                <Pill tone={r.status === "supported" ? "sage" : r.status === "partial" ? "amber" : "brick"}>{r.status}</Pill>
+              </div>
+              {r.gap && <div className="text-[0.72rem] text-ink-600 mt-1">{r.gap}</div>}
+            </div>
+          ))}
+        </div>
+        <ul className="mt-3 text-[0.72rem] text-ink-600 list-disc pl-4 space-y-1">
+          {c.unsupportedNotes.slice(-1).map((n) => <li key={n}>{n}</li>)}
+        </ul>
+      </Card>
+      <Card>
+        <SectionTitle eyebrow="Read from Sepolia just now" title="On-chain checks" />
+        <div className="space-y-1.5">
+          {c.checks.map((k) => (
+            <div key={k.key} className="flex items-start gap-2 text-[0.8rem]">
+              {k.ok ? <Check size={14} className="text-forest mt-0.5 shrink-0" /> : <X size={14} className="text-brick mt-0.5 shrink-0" />}
+              <div className="min-w-0">
+                <div className="text-ink">{k.label}</div>
+                <div className="text-[0.7rem] text-ink-600 break-all">{k.detail}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function ExecuteFlow({ full }: { full: FullInvestigation }) {
+  const w = useSepoliaWallet();
+  const { mutateAsync: signTypedData } = useSignTypedData();
+  const { mutateAsync: sendTransaction } = useSendTransaction();
+  const primary = full.strategies.find((s) => s.id === full.primaryStrategyId);
+  const [compat, setCompat] = useState<Compatibility | null>(full.compatibility?.report ?? null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [plan, setPlan] = useState<PlanResponse | null>(null);
+  const [amt0, setAmt0] = useState("");
+  const [amt1, setAmt1] = useState("");
+  const [auth, setAuth] = useState<Record<string, AuthResponse | null>>({});
+  const [steps, setSteps] = useState<Record<string, StepState>>({});
+
+  const basisTokenId = compat?.basis?.tokenId;
+  const basis = full.investigation.summary?.positions.find((p) => p.tokenId === basisTokenId) ?? null;
+  const walletMatchesPlan = plan && w.address && plan.plan.maker.toLowerCase() === w.address.toLowerCase();
+  const canSign = w.connected && w.onSepolia;
+
+  // Re-check a submitted tx until it is final on Sepolia.
+  useEffect(() => {
+    const pending = Object.entries(steps).filter(([, s]) => s.status === "pending" && s.hash);
+    if (!pending.length) return;
+    const t = setInterval(async () => {
+      for (const [k, s] of pending) {
+        try {
+          const tx = await api<TxRow>(`/transactions/${s.hash}`);
+          if (tx.status !== "submitted") setSteps((prev) => ({ ...prev, [k]: { ...prev[k], status: tx.status === "success" ? "success" : "reverted", tx } }));
+          else setSteps((prev) => ({ ...prev, [k]: { ...prev[k], tx } }));
+        } catch {
+          /* keep polling */
+        }
+      }
+    }, 4_000);
+    return () => clearInterval(t);
+  }, [steps]);
+
+  if (!primary) return <ErrorState message="No strategy version for this investigation." />;
+
+  const runCompat = async () => {
+    setErr(null);
+    setBusy("compat");
+    try {
+      const r = await api<{ compatibility: Compatibility }>(`/strategies/${primary.id}/compatibility`, { method: "POST", body: { maker: w.address ?? undefined } });
+      setCompat(r.compatibility);
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setBusy(null);
     }
   };
 
+  const buildPlan = async () => {
+    setErr(null);
+    if (!w.address) return setErr("Connect your wallet: the plan is compiled for the wallet that will sign it.");
+    if (!basis || basis.decimals0 == null || basis.decimals1 == null) return setErr("The basis position's token decimals are unknown.");
+    let a0: bigint;
+    let a1: bigint;
+    try {
+      a0 = amt0.trim() ? parseUnits(amt0.trim(), basis.decimals0) : 0n;
+      a1 = amt1.trim() ? parseUnits(amt1.trim(), basis.decimals1) : 0n;
+    } catch {
+      return setErr("Amounts must be decimal numbers.");
+    }
+    if (a0 + a1 === 0n) return setErr("Enter an amount for at least one token.");
+    setBusy("plan");
+    try {
+      const r = await api<PlanResponse>(`/strategies/${primary.id}/plan`, { method: "POST", body: { maker: w.address, amount0: a0.toString(), amount1: a1.toString(), tokenId: basis.tokenId } });
+      setPlan(r);
+      setCompat(r.compatibility);
+      setAuth({});
+      setSteps({});
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const authorize = async (action: "aqua:ship" | "aqua:dock") => {
+    if (!plan || !w.address) return;
+    setErr(null);
+    setBusy(action);
+    try {
+      const ch = await api<{ typedData: { domain: { name: string; version: string; chainId: number }; types: Record<string, { name: string; type: string }[]>; primaryType: string; message: Record<string, string> }; claims: Record<string, unknown>; worldStatus: string }>(
+        `/plans/${plan.planId}/challenge`,
+        { method: "POST", body: { wallet: w.address, action } },
+      );
+      const m = ch.typedData.message;
+      const signature = await signTypedData({
+        domain: ch.typedData.domain,
+        types: ch.typedData.types,
+        primaryType: "Authorization",
+        message: { ...m, chainId: BigInt(m.chainId), expiresAt: BigInt(m.expiresAt) },
+      } as never);
+      const r = await fetch(`${process.env.NEXT_PUBLIC_TRACE_API_URL ?? "http://localhost:4000"}/authorizations`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ planId: plan.planId, claims: ch.claims, signature }),
+      });
+      const body = (await r.json()) as AuthResponse & { error?: string };
+      if (body.error) throw new Error(body.error);
+      setAuth((p) => ({ ...p, [action]: body }));
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const send = async (key: string, op: "approve" | "ship" | "dock", step: ExecutionPlan["steps"][number], authorizationId: string) => {
+    setErr(null);
+    setSteps((p) => ({ ...p, [key]: { status: "signing" } }));
+    try {
+      const hash = await sendTransaction({ to: step.to as `0x${string}`, data: step.data as `0x${string}`, value: BigInt(step.value), chainId: 11155111 });
+      setSteps((p) => ({ ...p, [key]: { status: "pending", hash } }));
+      await api(`/transactions`, { method: "POST", body: { authorizationId, op, txHash: hash } });
+    } catch (e) {
+      setSteps((p) => ({ ...p, [key]: { ...(p[key] ?? {}), status: p[key]?.hash ? "pending" : "error", message: errMsg(e) } }));
+    }
+  };
+
+  const StepRow = ({ k, op, step, authId, locked }: { k: string; op: "approve" | "ship" | "dock"; step: ExecutionPlan["steps"][number]; authId?: string; locked?: string }) => {
+    const s = steps[k] ?? { status: "idle" as const };
+    return (
+      <div className="rounded-md2 border border-ink/10 p-3.5 flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <Pill tone={op === "ship" ? "gold" : op === "dock" ? "neutral" : "sage"}>{op}</Pill>
+            <span className="text-[0.84rem] text-ink">{step.description}</span>
+          </div>
+          <div className="text-[0.7rem] text-ink-600 mt-1 break-all">to <ExplorerLink kind="address" value={step.to} /> · calldata {step.data.slice(0, 18)}…</div>
+          {s.hash && (
+            <div className="text-[0.74rem] mt-1.5 flex flex-wrap gap-x-3">
+              <ExplorerLink kind="tx" value={s.hash}>tx {fmt.hash(s.hash)}</ExplorerLink>
+              {s.tx?.block && <span className="text-ink-600">block {Number(s.tx.block).toLocaleString("en-US")} · {s.tx.confirmations ?? 0} confirmations</span>}
+              {s.tx?.matches_plan != null && <span className={s.tx.matches_plan ? "text-forest" : "text-brick"}>{s.tx.matches_plan ? "calldata matches the authorized plan" : "does NOT match the plan"}</span>}
+            </div>
+          )}
+          {s.tx?.outcome && <div className="text-[0.72rem] text-ink-600 mt-1">{s.tx.outcome}</div>}
+          {s.message && <div className="text-[0.72rem] text-brick mt-1">{s.message}</div>}
+        </div>
+        <div className="shrink-0">
+          {s.status === "success" ? (
+            <Pill tone="forest"><Check size={12} /> Confirmed on Sepolia</Pill>
+          ) : s.status === "reverted" ? (
+            <Pill tone="brick">Reverted</Pill>
+          ) : s.status === "pending" ? (
+            <Pill tone="gold"><Loader2 size={12} className="animate-spin" /> Pending receipt</Pill>
+          ) : locked ? (
+            <span className="inline-flex items-center gap-1 text-[0.72rem] text-ink-600"><Lock size={12} /> {locked}</span>
+          ) : (
+            <Button variant={op === "ship" ? "gold" : "primary"} disabled={!canSign || !authId || s.status === "signing" || !walletMatchesPlan} onClick={() => authId && send(k, op, step, authId)}>
+              {s.status === "signing" ? "Confirm in wallet…" : `Sign ${op}`}
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const shipAuth = auth["aqua:ship"];
+  const dockAuth = auth["aqua:dock"];
+  const approvals = plan?.plan.steps.filter((s) => s.op === "approve") ?? [];
+  const ship = plan?.plan.steps.find((s) => s.op === "ship");
+  const dock = plan?.plan.steps.find((s) => s.op === "dock");
+  const approvalsDone = approvals.every((_, i) => steps[`approve-${i}`]?.status === "success");
+  const shipped = steps["ship"]?.status === "success";
+  const kyc = compat?.checks.find((c) => c.key === "taker.kyc");
+
+  return (
+    <>
+      <div className="mt-3 rounded-md2 border border-ink/10 bg-ivory-50 p-4 flex gap-3 text-[0.8rem] text-ink-600">
+        <Ship size={16} className="text-gold shrink-0 mt-0.5" />
+        <p>
+          A Uniswap V3 NFT and an Aqua strategy are <strong className="text-ink">different instruments</strong>. TRACE compiles the supported rules into a 1inch SwapVM concentrated-liquidity order and ships it to Aqua as a compatible implementation — it does not migrate the NFT. {AQUA_NOTES.deployment}
+        </p>
+      </div>
+
+      {err && <div className="mt-4"><ErrorState message={err} /></div>}
+
+      <SectionTitle eyebrow="Step 1" title="Compatibility" />
+      <div className="flex flex-wrap items-center gap-3 mb-3">
+        <Button onClick={runCompat} disabled={busy === "compat"}>{busy === "compat" ? "Reading Sepolia…" : compat ? "Re-run on-chain checks" : "Run on-chain compatibility checks"}</Button>
+        <span className="text-[0.74rem] text-ink-600">{w.address ? `Maker checks for ${fmt.addr(w.address)}` : "Connect a wallet to include maker balance/allowance checks"}</span>
+      </div>
+      {compat ? <CompatView c={compat} /> : <EmptyState title="Not assessed yet">Runs live reads against the Aqua registry, router, token contracts and your wallet.</EmptyState>}
+
+      {compat && compat.verdict !== "INCOMPATIBLE" && basis && (
+        <>
+          <SectionTitle eyebrow="Step 2" title="Compile the execution plan" />
+          <Card>
+            <div className="text-[0.82rem] text-ink-600">
+              Basis: real position #{basis.tokenId} ({basis.token0}/{basis.token1}, {fmt.feeTier(basis.feeTier)}, ticks {basis.tickLower} → {basis.tickUpper}). Choose how much of each token the Aqua strategy may use. Tokens stay in your wallet; Aqua pulls them only when a swap fills, so the approvals are exactly these amounts.
+            </div>
+            <div className="grid sm:grid-cols-[1fr_1fr_auto] gap-3 mt-4 items-end">
+              <label className="text-[0.78rem]">
+                <Label>{basis.token0} amount</Label>
+                <input value={amt0} onChange={(e) => setAmt0(e.target.value)} inputMode="decimal" placeholder="0.0" className="mt-1 w-full rounded-md2 border border-ink/15 bg-ivory-50 px-3 py-2 tabular" />
+              </label>
+              <label className="text-[0.78rem]">
+                <Label>{basis.token1} amount</Label>
+                <input value={amt1} onChange={(e) => setAmt1(e.target.value)} inputMode="decimal" placeholder="0.0" className="mt-1 w-full rounded-md2 border border-ink/15 bg-ivory-50 px-3 py-2 tabular" />
+              </label>
+              <Button variant="dark" onClick={buildPlan} disabled={busy === "plan" || !w.address}>{busy === "plan" ? "Compiling + simulating…" : "Compile plan"}</Button>
+            </div>
+          </Card>
+        </>
+      )}
+
+      {plan && (
+        <>
+          <Card dark className="mt-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <Label onDark>Deterministic SwapVM order (official 1inch SDK)</Label>
+                <div className="text-cream text-[0.86rem] mt-2 tabular break-all">Plan hash {plan.plan.planHash}</div>
+                <div className="text-cream-muted text-[0.74rem] mt-1 break-all">Aqua strategy hash {plan.plan.strategyHash}</div>
+                <div className="text-cream-muted text-[0.74rem] mt-1">
+                  Price range {plan.plan.params.priceHigh ? `${fmt.amt(plan.plan.params.priceLow, 8)} – ${fmt.amt(plan.plan.params.priceHigh, 8)}` : "full range"} · fee {plan.plan.params.feeBps} bps · order {(plan.plan.order.length - 2) / 2} bytes
+                </div>
+                <div className="text-cream-muted text-[0.74rem] mt-1">
+                  Registry <ExplorerLink kind="address" value={AQUA.registry.address} className="text-cream-muted" /> · router <ExplorerLink kind="address" value={AQUA.swapVmRouter.address} className="text-cream-muted" />
+                </div>
+              </div>
+              <div className="text-[0.72rem] text-cream-muted space-y-1">
+                {Object.entries(plan.simulation).map(([k, v]) => (
+                  <div key={k} className={v.ok ? "text-sage-300" : "text-gold-300"}>
+                    simulate {k.split(":")[0]}: {v.ok ? "ok" : v.error}
+                  </div>
+                ))}
+              </div>
+            </div>
+            {plan.plan.notCompiled.length > 0 && (
+              <ul className="mt-3 text-[0.72rem] text-gold-300 list-disc pl-4">
+                {plan.plan.notCompiled.map((n) => <li key={n}>Not compiled: {n}</li>)}
+              </ul>
+            )}
+          </Card>
+
+          {!walletMatchesPlan && <div className="mt-3"><ErrorState title="Wallet mismatch" message={`This plan was compiled for ${plan.plan.maker}; connect that wallet to sign.`} /></div>}
+
+          <SectionTitle eyebrow="Step 3 — server-verified, bound to this exact plan" title="Authorize shipping" />
+          <Card>
+            {!shipAuth ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <Button variant="gold" disabled={!canSign || !walletMatchesPlan || busy === "aqua:ship"} onClick={() => authorize("aqua:ship")}>
+                  {busy === "aqua:ship" ? "Sign in your wallet…" : "Sign authorization (EIP-712)"}
+                </Button>
+                <span className="text-[0.74rem] text-ink-600">Binds wallet, Sepolia chain id, strategy version, plan hash, action and a single-use challenge (10 min expiry). No transaction, no gas.</span>
+              </div>
+            ) : (
+              <AuthResult a={shipAuth} />
+            )}
+          </Card>
+
+          {shipAuth?.validated && (
+            <>
+              <SectionTitle eyebrow="Step 4 — each transaction is signed in your wallet and verified from its receipt" title="Execute on Sepolia" />
+              <div className="space-y-2">
+                {approvals.map((s, i) => <StepRow key={`approve-${i}`} k={`approve-${i}`} op="approve" step={s} authId={shipAuth.authorizationId} />)}
+                {ship && <StepRow k="ship" op="ship" step={ship} authId={shipAuth.authorizationId} locked={approvalsDone ? undefined : "after approvals"} />}
+              </div>
+            </>
+          )}
+
+          {shipped && dock && (
+            <>
+              <SectionTitle eyebrow="Step 5 — optional" title="Dock (withdraw the strategy)" />
+              <Card>
+                {!dockAuth ? (
+                  <Button disabled={!canSign || busy === "aqua:dock"} onClick={() => authorize("aqua:dock")}>
+                    {busy === "aqua:dock" ? "Sign in your wallet…" : "Authorize dock (EIP-712)"}
+                  </Button>
+                ) : (
+                  <AuthResult a={dockAuth} />
+                )}
+                {dockAuth?.validated && <div className="mt-3"><StepRow k="dock" op="dock" step={dock} authId={dockAuth.authorizationId} /></div>}
+              </Card>
+            </>
+          )}
+
+          <SectionTitle eyebrow="Taker side" title="Swap against the shipped strategy" />
+          <Card>
+            <div className="flex items-center gap-2">
+              <Pill tone={kyc?.ok ? "amber" : "brick"}>{kyc?.ok ? "IMPLEMENTED BUT NOT VERIFIED" : "BLOCKED BY EXTERNAL DEPENDENCY"}</Pill>
+              <span className="text-[0.8rem] text-ink-600">{AQUA_NOTES.takerGate} {kyc?.detail ?? ""}</span>
+            </div>
+          </Card>
+        </>
+      )}
+    </>
+  );
+}
+
+function AuthResult({ a }: { a: AuthResponse }) {
+  const v = a.verification as Record<string, unknown>;
+  const keys = ["signatureOk", "signerMatches", "chainOk", "notExpired", "challengeFresh", "strategyVersionMatches", "planHashMatches"];
+  return (
+    <div>
+      <div className="flex items-center gap-2">
+        <Pill tone={a.validated ? "forest" : "brick"}>{a.validated ? "Authorized — verified by the server" : "Rejected by the server"}</Pill>
+        <span className="text-[0.72rem] text-ink-600 tabular">id {a.authorizationId.slice(0, 8)} · signer {a.signer ? fmt.addr(a.signer) : "—"} · World ID: {String(v.worldId)}</span>
+      </div>
+      <div className="grid sm:grid-cols-4 gap-1.5 mt-3 text-[0.74rem]">
+        {keys.map((k) => (
+          <span key={k} className={`inline-flex items-center gap-1 ${v[k] ? "text-forest" : "text-brick"}`}>
+            {v[k] ? <Check size={12} /> : <X size={12} />} {k}
+          </span>
+        ))}
+      </div>
+      {a.verification.notes.length > 0 && <div className="text-[0.72rem] text-brick mt-2">{a.verification.notes.join(" · ")}</div>}
+    </div>
+  );
+}
+
+export default function ExecutePage() {
   return (
     <Page>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
         <div className="text-[0.78rem] text-ink-600 flex items-center gap-2">
-          <Terminal size={15} className="text-gold" />
-          Aqua Execution Console · 1inch Aqua / SwapVM
+          <Terminal size={15} className="text-gold" /> Aqua execution console · 1inch Aqua / SwapVM on Sepolia
         </div>
-        <DemoBadge />
+        <SourceBadge />
       </div>
-
-      <div className="mt-3 rounded-md2 border border-ink/10 bg-ivory-50 p-4 flex gap-3 text-[0.8rem] text-ink-600">
-        <Ship size={16} className="text-gold shrink-0" />
-        <p>Historical Uniswap V3 NFTs and Aqua strategies are <strong className="text-ink">different financial instruments</strong>. TRACE compiles
-        a versioned, protocol-independent Strategy IR through an explicit compatibility adapter and a
-        deterministic compiler. It never pretends an Aqua strategy recreates the historical NFT.</p>
-      </div>
-
-      <Tabs
-        className="mt-4"
-        value={tab}
-        onChange={setTab}
-        tabs={[
-          { id: "compat", label: "Compatibility" },
-          { id: "compile", label: "Compile" },
-          { id: "execute", label: "Execute" },
-        ]}
-      />
-
-      {tab === "compat" && <Compat />}
-      {tab === "compile" && <Compile onRun={() => setTab("execute")} />}
-      {tab === "execute" && (
-        <Execute
-          auth={auth}
-          approve={approve}
-          executing={executing}
-          shipped={shipped}
-          authNote={authNote}
-        />
-      )}
+      <InvestigationGate>{(full) => <ExecuteFlow full={full} />}</InvestigationGate>
     </Page>
-  );
-}
-
-/* ---------------------------------------------------------------- */
-function Compat() {
-  const counts = {
-    full: COMPAT.filter((c) => c.status === "full").length,
-    partial: COMPAT.filter((c) => c.status === "partial").length,
-    unsupported: COMPAT.filter((c) => c.status === "unsupported").length,
-  };
-  return (
-    <div className="mt-4 grid lg:grid-cols-[1fr_320px] gap-5">
-      <Card pad={false} className="p-5">
-        <div className="flex items-center justify-between">
-          <SectionTitle eyebrow="Compatibility report" title="Rule coverage" />
-          <Pill tone={COMPAT_VERDICT === "FULL" ? "forest" : COMPAT_VERDICT === "PARTIAL" ? "amber" : "brick"}>
-            {COMPAT_VERDICT === "PARTIAL" ? "PARTIALLY COMPATIBLE" : COMPAT_VERDICT + " COMPATIBLE"}
-          </Pill>
-        </div>
-        <div className="space-y-2">
-          {COMPAT.map((c) => (
-            <div key={c.rule} className="flex items-center gap-3 rounded-md2 border border-ink/8 bg-ivory px-3.5 py-3">
-              <span
-                className={`h-2.5 w-2.5 rounded-full shrink-0 ${
-                  c.status === "full" ? "bg-forest" : c.status === "partial" ? "bg-amber" : "bg-brick"
-                }`}
-              />
-              <span className="text-[0.88rem] text-ink flex-1">{c.rule}</span>
-              <Pill tone={c.status === "full" ? "forest" : c.status === "partial" ? "amber" : "brick"}>
-                {c.status}
-              </Pill>
-            </div>
-          ))}
-        </div>
-        <div className="mt-4 rounded-md2 bg-ivory border border-ink/8 p-3 text-[0.78rem] text-ink-600 leading-relaxed">
-          Unsupported rules are <strong className="text-ink">never silently discarded</strong> — they are listed, and the
-          differences from historical behaviour are flagged. Required user parameters: capital split,
-          price trigger threshold, out-of-range cap.
-        </div>
-      </Card>
-
-      <Card dark pad={false} className="p-5">
-        <Label onDark>Coverage</Label>
-        <div className="mt-4 space-y-4">
-          <CovRow label="Fully compatible" value={counts.full} tone="text-forest" />
-          <CovRow label="Partially compatible" value={counts.partial} tone="text-amber" />
-          <CovRow label="Unsupported" value={counts.unsupported} tone="text-brick" />
-        </div>
-        <div className="mt-5 pt-4 border-t border-cream/10 text-[0.74rem] text-cream-muted leading-relaxed">
-          The two directional / price-trigger rules have no equivalent Aqua primitive today, so the
-          program ships with the supported subset and the rest deferred to a future adapter version.
-        </div>
-      </Card>
-    </div>
-  );
-}
-
-function CovRow({ label, value, tone }: { label: string; value: number; tone: string }) {
-  const total = 4;
-  return (
-    <div>
-      <div className="flex items-center justify-between text-[0.78rem]">
-        <span className="text-cream-muted">{label}</span>
-        <span className={`tabular font-semibold ${tone}`}>{value}/{total}</span>
-      </div>
-      <div className="mt-1.5 h-1.5 rounded-full bg-cream/12 overflow-hidden">
-        <div className={`h-full rounded-full ${tone === "text-forest" ? "bg-forest" : tone === "text-amber" ? "bg-amber" : "bg-brick"}`} style={{ width: (value / total) * 100 + "%" }} />
-      </div>
-    </div>
-  );
-}
-
-/* ---------------------------------------------------------------- */
-function Compile({ onRun }: { onRun: () => void }) {
-  const pipeline = [
-    { icon: BoxesIcon, label: "Inferred Strategy IR", d: "v0.4 · 4 rules" },
-    { icon: ShieldCheck, label: "Validation", d: "schema + evidence checks pass" },
-    { icon: Boxes, label: "Compatibility adapter", d: "strip unsupported, map primitives" },
-    { icon: Terminal, label: "Deterministic compiler", d: "no LLM-generated bytecode" },
-    { icon: Ship, label: "Aqua program", d: "ship-dock-swap · signed plan" },
-  ];
-  return (
-    <div className="mt-4 space-y-5">
-      <Card dark pad={false} className="p-6">
-        <Label onDark>Deterministic compilation</Label>
-        <h3 className="serif text-2xl text-cream mt-2">IR → Aqua program</h3>
-        <p className="text-[0.84rem] text-cream-muted mt-1.5 max-w-2xl leading-relaxed">
-          The AI proposes the IR; the compiler is deterministic. The LLM never emits executable
-          bytecode — it can only feed a validated, schema-checked structure.
-        </p>
-        <div className="mt-5 grid grid-cols-2 md:grid-cols-5 gap-2">
-          {pipeline.map((p, i) => {
-            const Icon = p.icon;
-            return (
-              <div key={i} className="rounded-md2 border border-cream/12 bg-charcoal-800/50 p-3 relative">
-                <div className="flex items-center gap-2">
-                  <Icon size={16} className="text-gold-300" />
-                  <span className="text-[0.6rem] text-cream-muted tabular">0{i + 1}</span>
-                </div>
-                <div className="text-[0.82rem] text-cream font-medium mt-2 leading-snug">{p.label}</div>
-                <div className="text-[0.68rem] text-cream-muted mt-1">{p.d}</div>
-                {i < pipeline.length - 1 && <ArrowRight size={12} className="absolute top-4 -right-2 text-gold-300/60" />}
-              </div>
-            );
-          })}
-        </div>
-      </Card>
-
-      <div className="grid md:grid-cols-2 gap-5">
-        <Card pad={false} className="p-5">
-          <Label>Execution configuration</Label>
-          <div className="mt-3 space-y-2.5">
-            {(
-              [
-                ["Token pair", EXEC_CONFIG.tokenPair],
-                ["Capital allocation", EXEC_CONFIG.capitalAllocation],
-                ["Price conditions", EXEC_CONFIG.priceConditions],
-                ["Risk limits", EXEC_CONFIG.riskLimits],
-                ["Minimum output", EXEC_CONFIG.minOutput],
-                ["Slippage", EXEC_CONFIG.slippage],
-              ] as [string, string][]
-            ).map(([k, v]) => (
-              <div key={k} className="flex items-center justify-between gap-3 border-b border-ink/8 pb-2.5">
-                <span className="text-[0.78rem] text-ink-600">{k}</span>
-                <span className="text-[0.82rem] text-ink font-medium tabular text-right">{v}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-        <Card pad={false} className="p-5 flex flex-col">
-          <Label>Est. execution quote</Label>
-          <div className="grid grid-cols-2 gap-4 mt-3">
-            <Stat label="Gas est." value="184k" sub="~$9.2 @ 32gwei" />
-            <Stat label="Swap legs" value="2" sub="ship + dock" />
-            <Stat label="Min. output" value={EXEC_CONFIG.minOutput} />
-            <Stat label="Window" value="14d" sub="out-of-range cap" />
-          </div>
-          <div className="mt-auto pt-5 flex gap-2">
-            <Button variant="ghost" onClick={onRun} className="flex-1">
-              <Play size={15} /> Run full pipeline
-            </Button>
-          </div>
-          <div className="text-[0.68rem] text-ink-600/70 mt-2">
-            No unlimited token approvals. Explicit slippage + min-output enforced at compile.
-          </div>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-/* ---------------------------------------------------------------- */
-function Execute({ auth, approve, executing, shipped, authNote }: { auth: Auth; approve: () => void; executing: boolean; shipped: boolean; authNote?: string | null }) {
-  const canShip = auth === "approved" && !shipped;
-  return (
-    <div className="mt-4 grid lg:grid-cols-[1fr_360px] gap-5">
-      {/* Lifecycle */}
-      <Card pad={false} className="p-5">
-        <div className="flex items-center justify-between">
-          <SectionTitle eyebrow="Aqua execution lifecycle" title="Ship · dock · swap" />
-          {shipped && <Pill tone="forest"><CheckCircle2 size={12} /> Shipped & verified</Pill>}
-        </div>
-        <div className="space-y-1.5">
-          {EXEC_STEPS.map((s, i) => {
-            // After World approval, step 5 (auth) becomes done.
-            const done = s.done || (i === 4 && (auth === "approved" || shipped));
-            const isAuthStep = i === 4;
-            return (
-              <div key={i} className={`flex items-center gap-3 rounded-md2 px-3.5 py-3 border transition-colors ${done ? "border-forest/25 bg-forest/8" : isAuthStep && auth === "rejected" ? "border-brick/25 bg-brick/8" : "border-ink/8 bg-ivory"}`}>
-                <div className={`h-7 w-7 grid place-items-center rounded-full border shrink-0 ${done ? "bg-forest text-ivory border-forest" : "bg-ink/5 border-ink/12 text-ink-600"}`}>
-                  {done ? <CheckCircle2 size={15} /> : <span className="text-[0.72rem] tabular text-ink-600">{i + 1}</span>}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[0.88rem] text-ink font-medium">{s.label}</div>
-                  {s.detail && <div className="text-[0.7rem] text-ink-600 mt-0.5">{s.detail}</div>}
-                </div>
-                {isAuthStep && auth === "approved" && <span className="text-[0.66rem] text-forest">approved</span>}
-                {isAuthStep && auth === "rejected" && <span className="text-[0.66rem] text-brick">rejected</span>}
-              </div>
-            );
-          })}
-        </div>
-
-        {shipped && (
-          <div className="mt-4 rounded-md2 border border-forest/25 bg-forest/8 p-4 flex items-center gap-3">
-            <div className="h-12 w-12 overflow-hidden rounded-md shrink-0 border border-forest/30">
-              <img src={art.confirmation} alt="execution confirmation" className="h-full w-full object-cover" />
-            </div>
-            <div>
-              <div className="text-forest font-medium text-[0.9rem] flex items-center gap-1.5">
-                <Ship size={15} /> Program shipped to Aqua
-              </div>
-              <div className="text-[0.72rem] text-ink-600 tabular mt-0.5">
-                tx 0x4c8a…e91f · receipt verified · 210,412 gas · 0x… (demo receipt, labelled)
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div className="mt-4 flex flex-wrap gap-2">
-          <Button variant="gold" disabled={shipped} onClick={approve} className="flex-1 min-w-[180px]">
-            {executing ? <Loader2 size={15} className="animate-spin" /> : <Lock size={15} />}
-            {shipped ? "Authorized & shipped" : executing ? "Authorizing…" : "Authorize with World Agent Pass"}
-          </Button>
-        </div>
-        {authNote && auth === "rejected" && (
-          <div className="mt-3 rounded-md2 border border-brick/30 bg-brick/8 p-3 text-[0.74rem] text-brick">
-            Authorization rejected: {authNote}
-          </div>
-        )}
-        {authNote && auth === "approved" && (
-          <div className="mt-3 rounded-md2 border border-forest/30 bg-forest/8 p-3 text-[0.74rem] text-forest">
-            {authNote}
-          </div>
-        )}
-      </Card>
-
-      {/* World Agent Pass */}
-      <div className="space-y-4">
-        <Card dark pad={false} className="p-5 relative overflow-hidden">
-          <img src={art.ethEmblem} alt="" aria-hidden className="absolute -right-5 -top-4 w-24 opacity-20 mix-blend-screen" />
-          <div className="relative">
-            <div className="flex items-center gap-2">
-              <Pill tone="gold"><FileSignature size={12} /> World Agent Pass</Pill>
-              <Pill tone={auth === "approved" ? "forest" : auth === "rejected" ? "brick" : "neutral"}>
-                {auth === "approved" ? "AUTHORIZED" : auth === "rejected" ? "REJECTED" : WORLD_AUTH.status}
-              </Pill>
-            </div>
-            <h3 className="serif text-lg text-cream mt-3">Human authorization</h3>
-            <div className="mt-3 space-y-2">
-              {WORLD_AUTH.bound.map(([k, v]) => (
-                <div key={k} className="flex items-center justify-between gap-2 border-b border-cream/10 pb-2">
-                  <span className="text-[0.7rem] text-cream-muted">{k}</span>
-                  <span className="text-[0.76rem] text-cream tabular text-right break-words">{v}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </Card>
-
-        <Card pad={false} className="p-4">
-          <div className="flex items-start gap-2">
-            <ShieldCheck size={16} className="text-gold shrink-0 mt-0.5" />
-            <p className="text-[0.76rem] text-ink-600 leading-relaxed">{WORLD_AUTH.note}</p>
-          </div>
-          <div className="mt-3 rounded-md2 bg-ivory border border-ink/8 p-3 text-[0.72rem] text-ink-600 leading-relaxed">
-            The backend independently validates the proof: rejects expired, cancelled, replayed, wrong
-            strategy-version, or wrong-plan authorizations. World approval is an extra human layer — it
-            does not by itself enforce every on-chain action.
-          </div>
-        </Card>
-      </div>
-
-      {/* 0G storage refs */}
-      <Card pad={false} className="p-5 lg:col-span-2">
-        <Label>0G Storage references</Label>
-        <div className="mt-3 grid sm:grid-cols-2 gap-2">
-          {STORAGE.map((s) => (
-            <div key={s.ref} className="flex items-center gap-3 rounded-md2 border border-ink/8 bg-ivory px-3 py-2.5">
-              <CheckCircle2 size={15} className="text-forest" />
-              <div className="flex-1 min-w-0">
-                <div className="text-[0.8rem] text-ink font-medium truncate">{s.kind}</div>
-                <div className="text-[0.68rem] text-ink-600 tabular">{s.ref} · {s.ts}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Card>
-    </div>
   );
 }

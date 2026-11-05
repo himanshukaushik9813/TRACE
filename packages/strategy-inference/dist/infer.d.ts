@@ -1,34 +1,35 @@
 /**
- * Deterministic inference: turn Fingerprints + events into a StrategyIR draft.
+ * Deterministic, evidence-only inference: Fingerprints + events → StrategyIR v2.
  *
- * This is the *ground-truth* producer. The 0G layer can add nuance and
- * alternative framings, but every concrete rule it keeps must still map to
- * evidence the deterministic layer can point to. `buildStrategyIR` is the
- * fallback the product always has: a wallet with no 0G access still gets an
- * honest, evidence-anchored strategy.
+ * This is the ground truth the 0G proposal is audited against, and the
+ * analysis shown (labelled "evidence-only, no AI") when the model is not
+ * available. Every rule cites the real transaction hashes it was drawn from.
+ * When the evidence cannot support a hypothesis the family is "inconclusive"
+ * and no rule is invented.
  */
-import { type StrategyIR } from "@trace/strategy-ir";
+import { type PositionMeta, type StrategyFamily, type StrategyIR, type V3Event } from "@trace/strategy-ir";
 import { type Fingerprints } from "./fingerprints.js";
-import type { V3Event } from "@trace/strategy-ir";
+export type EvidenceWindow = {
+    fromBlock: number;
+    toBlock: number;
+    fromTs: number;
+    toTs: number;
+};
 export type InferenceInput = {
     events: V3Event[];
     wallet: string;
-    /** Optional deterministic fingerprints; computed if omitted. */
+    window: EvidenceWindow;
+    meta?: Record<string, PositionMeta>;
     fingerprints?: Fingerprints;
 };
-/**
- * Build a StrategyIR from deterministic evidence alone.
- * Confidence values are calibrated to how well the observed behaviour fits
- * the family, and every rule carries its own evidence string.
- */
+export declare const CONFIDENCE_NOTE = "Heuristic fit of the hypothesis to the observed on-chain evidence (0\u20131). It is not the probability that this is the wallet's actual strategy.";
 export declare function inferFromEvidence(input: InferenceInput): {
     ir: StrategyIR;
     fingerprints: Fingerprints;
 };
-type Family = StrategyIR["family"];
+export declare function familyLabel(f: StrategyFamily): string;
 export declare function scoreFamilies(fp: Fingerprints): {
-    family: Family;
+    family: StrategyFamily;
     score: number;
     why: string;
 }[];
-export {};

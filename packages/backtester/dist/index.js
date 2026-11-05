@@ -1,1 +1,1 @@
-export { assertNoLookAhead, simulateRun, positionValue, buildBacktestResult, passiveRunner, buyHoldRunner, observedReplayRunner, } from "./engine.js";
+export { runBacktest, positionValue, assertNoLookAhead, MIN_TRAIN_POINTS, MIN_TEST_POINTS } from "./engine.js";

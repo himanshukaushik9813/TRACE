@@ -28,40 +28,114 @@ export type ChainRef = {
 
 export type V3EventKind = "MINT" | "INCREASE" | "DECREASE" | "COLLECT" | "TRANSFER" | "BURN";
 
-/** A reconstructed Uniswap V3 lifecycle event, in strict chronological order. */
+/**
+ * A reconstructed Uniswap V3 lifecycle event, in strict chronological order.
+ *
+ * Mapping from the real NonfungiblePositionManager logs:
+ *   MINT      = ERC-721 Transfer(from 0x0) merged with the IncreaseLiquidity of the same tx
+ *   INCREASE  = IncreaseLiquidity
+ *   DECREASE  = DecreaseLiquidity (principal is credited to tokensOwed, not yet transferred)
+ *   COLLECT   = Collect, split into the principal portion (amount0/1, already counted at
+ *               DECREASE) and the fee portion (fee0/1 = collected − principal owed)
+ *   BURN      = ERC-721 Transfer(to 0x0)
+ *   TRANSFER  = any other ERC-721 Transfer of the position NFT
+ */
 export type V3Event = ChainRef & {
   kind: V3EventKind;
   tokenId: number;
   owner: string;
-  /** Liquidity delta in 1e12 units as reported on-chain (base units of liquidity). */
+  /** Liquidity delta (uint128 base units of liquidity) as reported on-chain. */
   liquidityDelta: bigint | number;
-  /** Principal moved by the tx, per token, in token base units. 0 for COLLECT. */
+  /** Principal moved by the tx, per token, in token base units. */
   amount0: bigint | number;
   amount1: bigint | number;
-  /** Fees collected by the tx, per token. 0 except for COLLECT. */
+  /** Fees collected by the tx, per token base units. 0 except for COLLECT. */
   fee0: bigint | number;
   fee1: bigint | number;
+  /** Position range (constant per NFT in V3; read from positions(tokenId)). */
   tickLower: number;
   tickUpper: number;
+  /** Pool address the position lives in, when resolved. */
+  pool?: string;
+  /** ERC-721 transfer endpoints for MINT/BURN/TRANSFER. */
+  from?: string;
+  to?: string;
+  /** Real gas paid by the tx (from its receipt), as decimal strings. */
+  gasUsed?: string;
+  effectiveGasPrice?: string;
   /** Human-readable summary; never used for computation. */
   note?: string;
+};
+
+/** Real per-position metadata read from the chain (positions(), factory, ERC-20). */
+export type PositionMeta = {
+  tokenId: number;
+  pool: string | null;
+  token0: string;
+  token1: string;
+  symbol0: string;
+  symbol1: string;
+  /** null when the token does not expose ERC-20 metadata (amounts stay in base units). */
+  decimals0: number | null;
+  decimals1: number | null;
+  /** Fee tier in hundredths of a bip (500 = 0.05%, 3000 = 0.3%). */
+  feeTier: number;
+  tickLower: number;
+  tickUpper: number;
+  /** Liquidity currently in the position (0 when closed/burned). */
+  currentLiquidity: string;
+  burned: boolean;
+  /** False when the position existed before the observation window (partial history). */
+  historyComplete: boolean;
+};
+
+/** Real pool price history derived from Swap events (price = token1 per token0). */
+export type PriceSeries = {
+  pool: string;
+  symbol0: string;
+  symbol1: string;
+  fromBlock: number;
+  toBlock: number;
+  /**
+   * One point per Swap event. price = token1 per token0 in human units;
+   * sqrtPriceX96 / amount0 / amount1 / liquidity are the raw on-chain values
+   * (decimal strings; amounts are signed from the pool's perspective).
+   */
+  points: { block: number; timestamp: number; price: number; tick: number; sqrtPriceX96: string; amount0: string; amount1: string; liquidity: string }[];
+  /** Pool fee tier (hundredths of a bip) and token decimals used for the price. */
+  feeTier?: number;
+  decimals0?: number | null;
+  decimals1?: number | null;
+  /** Timestamps between sampled anchor blocks are linearly interpolated. */
+  timestampsInterpolated: boolean;
+  /** True when the swap count hit the configured cap (series truncated). */
+  truncated: boolean;
 };
 
 /** A reconstructed Uniswap V3 position (state at end of the observation window). */
 export type V3Position = {
   tokenId: number;
+  /** Pool address, or "unresolved" when it could not be read from the factory. */
   pool: string;
+  /** Token symbols (or the address when the token has no readable symbol). */
   token0: string;
   token1: string;
-  feeTier: number; // bps
+  token0Address?: string;
+  token1Address?: string;
+  decimals0?: number | null;
+  decimals1?: number | null;
+  /** Fee tier in hundredths of a bip (500 = 0.05%, 3000 = 0.3%); 0 = unresolved. */
+  feeTier: number;
   tickLower: number;
   tickUpper: number;
-  /** Human units; derived from base liquidity with the pool's sqrtP at snapshot time. */
+  /** Liquidity (uint128 units) at the end of the window, from replayed events. */
   liquidity: number;
   status: "active" | "closed";
   openedBlock?: number;
   closedBlock?: number;
   lastActivityBlock?: number;
+  /** False when the position was opened before the observation window. */
+  historyComplete?: boolean;
 };
 
 /** Principal vs fees kept strictly distinct. Human units, not base units. */
@@ -98,44 +172,73 @@ export type ReconstructionSummary = {
 /*  Strategy IR — the inferred, but evidence-anchored, strategy       */
 /* ------------------------------------------------------------------ */
 
+export type StrategyFamily =
+  | "passive_concentrated"
+  | "passive_full_range"
+  | "periodic_range_adjustment"
+  | "active_range_management"
+  | "capital_redeployment"
+  /** Evidence is insufficient to support any hypothesis — never padded with a guess. */
+  | "inconclusive";
+
+/**
+ * Strategy IR v2 — a versioned, immutable, evidence-anchored hypothesis.
+ *
+ * `id` is a content hash: any change produces a new id (a new version). A
+ * revision records `parentId`. The IR is never edited in place.
+ */
 export type StrategyIR = {
-  version: "1";
-  /** Deterministic id = hash of canonical content (not the LLM's own claim). */
+  version: "2";
+  /** Deterministic id = hash of canonical content (not the model's own claim). */
   id: string;
+  parentId?: string;
   wallet: string;
-  family:
-    | "passive_concentrated"
-    | "periodic_range_adjustment"
-    | "active_range_management"
-    | "capital_redeployment"
-    | "unknown";
-  /** 0..1; must be justified by rule evidence, not asserted by the model. */
+  chainId: number;
+  sourceProtocol: "uniswap-v3";
+  /** The on-chain window the evidence was drawn from. */
+  evidencePeriod: { fromBlock: number; toBlock: number; fromTs: number; toTs: number };
+  family: StrategyFamily;
+  /**
+   * 0..1 heuristic/model confidence that the hypothesis fits the observed
+   * evidence. NOT the probability that the strategy is objectively correct.
+   */
   confidence: number;
+  confidenceNote: string;
+  /** Rules grouped by `category` (entry / adjustment / exit / risk / fee). */
   rules: StrategyRule[];
-  alternatives: { label: string; family: StrategyIR["family"]; score: number; why: string }[];
-  /** Every claim must cite deterministic evidence. */
-  evidenceRefs: string[]; // tx hashes or event fingerprints
+  alternatives: { label: string; family: StrategyFamily; score: number; why: string }[];
+  /** Every claim must cite deterministic evidence (tx hashes). */
+  evidenceRefs: string[];
   limitations: string[];
   source: {
     model: string;
-    provider: "0G_PRIVATE_COMPUTER" | "DETERMINISTIC_ONLY";
+    provider: "0G_ROUTER" | "DETERMINISTIC_ONLY";
+    /** Real 0G Router request id (x_0g_trace.request_id) when the model was called. */
     requestRef?: string;
     schemaValid: boolean;
+    /** True only when the 0G Router reported tee_verified=true for this response. */
     attested: boolean;
     ts: number;
   };
 };
 
+export type StrategyRuleCategory = "entry" | "adjustment" | "exit" | "risk" | "fee";
+
 export type StrategyRule = {
+  category: StrategyRuleCategory;
   rule: string;
   /** The observed evidence that supports it (deterministic, not model-invented). */
   evidence: string;
-  confidence: number; // 0..1
+  /** Tx hashes the rule is drawn from — every one must exist in the evidence set. */
+  evidenceRefs: string[];
+  confidence: number; // 0..1 (heuristic fit, not probability of truth)
   /** A competing explanation the rule does not rule out. */
   alternative: string;
   uncertainty: string;
-  /** Which compatibility capability this rule maps to, if any. */
+  /** Which execution capability this rule maps to, if any. */
   mapsTo?: "trigger" | "schedule" | "allocation" | "limit" | "action";
+  /** Machine-readable parameters observed on-chain (e.g. range width in ticks). */
+  params?: Record<string, number | string>;
 };
 
 /* ------------------------------------------------------------------ */
@@ -143,65 +246,81 @@ export type StrategyRule = {
 /* ------------------------------------------------------------------ */
 
 export type AquaCapability =
+  | "concentrated_range"
+  | "fee_on_input"
   | "on_price_trigger"
-  | "on_schedule"
-  | "range_adjust"
-  | "collect_fees"
-  | "redeploy"
+  | "scheduled_rebalance"
+  | "fee_collection"
+  | "redeploy_after_exit"
   | "stop_loss"
-  | "tpo_swap"
-  | "limit_orders"
   | "unlimited_token_approval";
+
+export type CompatibilityCheck = {
+  key: string;
+  label: string;
+  ok: boolean;
+  detail: string;
+  /** Where the fact came from: an on-chain read, the strategy IR, or the protocol docs. */
+  source: "chain" | "ir" | "docs";
+};
 
 export type CompatibilityAssessment = {
   strategyId: string;
   verdict: "FULL" | "PARTIAL" | "INCOMPATIBLE";
   /** Rule-by-rule: which strategy rules Aqua can express, with gaps. */
-  rules: { rule: string; status: "supported" | "partial" | "unsupported"; gap?: string }[];
+  rules: { rule: string; category: string; status: "supported" | "partial" | "unsupported"; gap?: string }[];
   capabilities: { name: AquaCapability; usable: boolean; note: string }[];
-  /** Approval scoping policy — TRACE never requests unlimited approvals by default. */
-  approvals: { token: string; amount: string; unlimited: boolean; reason: string }[];
+  /** On-chain / structural checks performed for this assessment. */
+  checks: CompatibilityCheck[];
+  /** The Uniswap position the Aqua strategy is derived from (never claimed identical). */
+  basis?: { tokenId: number; pool: string; token0: string; token1: string; tickLower: number; tickUpper: number; feeTier: number };
   unsupportedNotes: string[];
+  assessedAt: number;
+};
+
+/** One transaction the user's wallet will be asked to sign, in order. */
+export type ExecutionStep = {
+  op: "approve" | "ship" | "dock" | "swap";
+  description: string;
+  to: string;
+  data: string;
+  value: string;
+  /** Approvals are always exact amounts — never unlimited. */
+  approval?: { token: string; spender: string; amount: string };
 };
 
 /**
- * The compiled, deterministic execution plan. Produced by the Aqua adapter,
- * not by the LLM. Contains no raw bytecode — only structured intent.
+ * The deterministic execution plan: a 1inch SwapVM order (program built with
+ * the official AquaProgramBuilder) plus the exact transactions to ship and
+ * later dock it on Aqua. Produced by the compiler, never by a model; no
+ * free-form bytecode — the program comes only from typed SDK builders.
  */
-export type AquaProgram = {
+export type ExecutionPlan = {
   strategyId: string;
-  programHash: string; // hash of canonical program content
-  format: "aqua_program_v1";
-  steps: AquaStep[];
-  approvals: { token: string; amount: string; unlimited: boolean }[];
-  assumptions: { slippageBps: number; gasGweiAssumption: number; minOutPct: number };
-  /** Deterministic; regenerating from the same inputs must yield the same hash. */
+  /** Hash of the canonical plan content — authorizations pin this. */
+  planHash: string;
+  format: "aqua_swapvm_order_v1";
+  chainId: number;
+  maker: string;
+  registry: string;
+  app: string;
+  tokens: { address: string; symbol: string; decimals: number; amount: string }[];
+  /** SwapVM order bytes (shipped as the Aqua strategy) and its keccak256. */
+  order: string;
+  strategyHash: string;
+  params: {
+    priceLow: number;
+    priceHigh: number;
+    sqrtPriceMin: string;
+    sqrtPriceMax: string;
+    feeBps: number;
+    salt: string;
+  };
+  steps: ExecutionStep[];
+  /** Strategy rules that could not be compiled (kept visible, never silently dropped). */
+  notCompiled: string[];
   deterministic: true;
 };
-
-export type AquaStep =
-  | {
-      op: "observe";
-      intervalMinutes: number;
-      source: "pool_price" | "external_feed";
-      ref: string;
-    }
-  | {
-      op: "adjust_range";
-      when: TriggerExpr;
-      newRange: { tickLower: number; tickUpper: number };
-      liquidityDelta?: number;
-    }
-  | { op: "collect_fees"; when: TriggerExpr }
-  | { op: "redeploy"; when: TriggerExpr; targetPool: string; allocationPct: number }
-  | { op: "execute_swap"; when: TriggerExpr; inToken: string; outToken: string; slippageBps: number }
-  | { op: "stop"; when: TriggerExpr; reason: string };
-
-export type TriggerExpr =
-  | { kind: "schedule"; everyMinutes: number }
-  | { kind: "price_exit"; side: "above" | "below"; refTick: number; widthTicks: number }
-  | { kind: "max_out_of_range_days"; days: number }
-  | { kind: "manual"; note: string };
 
 /* ------------------------------------------------------------------ */
 /*  Backtest — look-ahead-safe by construction                        */
@@ -209,16 +328,29 @@ export type TriggerExpr =
 
 export type BacktestRun = {
   label: string;
-  /** Net return, fraction. */
+  kind: "observed" | "counterfactual" | "benchmark";
+  /** Net return, fraction (under the stated assumptions). */
   net: number;
-  maxDrawdown: number; // fraction
-  sharpe?: number;
-  finalEquity: number;
+  maxDrawdown: number;
+  finalValue: number;
+  /** Fraction of test points where the price was inside the run's range. */
+  rangeOccupancy: number | null;
+  outOfRangeHours: number | null;
+  rebalances: number;
+  feesEarned: number;
+  gasCost: number;
+  impermanentLoss: number | null;
+  capitalUtilization: number | null;
 };
 
 export type BacktestResult = {
   strategyId: string;
-  period: { fromBlock: number; toBlock: number };
+  status: "completed" | "insufficient_data";
+  /** Why the backtest could not run (when status = insufficient_data). */
+  reason?: string;
+  pool: string;
+  pair: string;
+  period: { fromBlock: number; toBlock: number; fromTs: number; toTs: number };
   /**
    * The integrity guarantee: inference (train) window is strictly before the
    * backtest (test) window. The backtester refuses to run otherwise.
@@ -231,57 +363,59 @@ export type BacktestResult = {
     waiveReason?: string;
   };
   assumptions: {
+    valuationToken: string;
     startCapital: number;
-    gasGwei: number;
-    slippagePct: number;
     feeModel: string;
+    gasModel: string;
+    slippagePct: number;
+    priceSource: string;
   };
   runs: BacktestRun[];
-  /** Deterministic series for charting. */
-  equitySeries: { label: string; points: number[] }[];
+  /** Real price points (test window) and each run's value path, aligned by index. */
+  series: { blocks: number[]; timestamps: number[]; prices: number[]; values: { label: string; points: number[] }[] };
 };
 
 /* ------------------------------------------------------------------ */
-/*  Authorization — World Agent Pass bound claims                      */
+/*  Authorization — EIP-712 wallet signature (+ optional World ID)     */
 /* ------------------------------------------------------------------ */
 
-export type AgentPassClaims = {
-  worldId: string;
+/** The exact claims the user's wallet signs (EIP-712 typed data). */
+export type AuthorizationClaims = {
+  wallet: string;
+  chainId: number;
   strategyId: string;
-  strategyVersionHash: string; // hash of the canonical StrategyIR
-  programHash: string; // hash of the canonical AquaProgram
-  action: string; // e.g. "compile+ship+swap"
-  expiresAt: number; // unix seconds
-  /** A fresh nonce per authorization request — replay protection. */
+  strategyVersionHash: string;
+  planHash: string;
+  action: string;
   challenge: string;
-  issuedAt: number;
+  expiresAt: number;
 };
 
-export type AgentPassProof = {
-  claims: AgentPassClaims;
-  /** Ed25519 signature over the canonical claims (mock in the hackathon path). */
-  signature: string;
-  validated: boolean;
-  /** What the server-side validator checked and found. */
-  validation: {
-    signatureOk: boolean;
-    notExpired: boolean;
-    challengeUsed: boolean;
-    strategyVersionMatches: boolean;
-    programHashMatches: boolean;
-    notes: string[];
-  };
+export type AuthorizationVerification = {
+  signatureOk: boolean;
+  signerMatches: boolean;
+  chainOk: boolean;
+  notExpired: boolean;
+  challengeFresh: boolean;
+  strategyVersionMatches: boolean;
+  planHashMatches: boolean;
+  worldId: "verified" | "not_configured" | "failed" | "skipped";
+  notes: string[];
 };
 
 /* ------------------------------------------------------------------ */
 /*  Storage                                                            */
 /* ------------------------------------------------------------------ */
 
+/** A genuine 0G Storage upload (only ever created after a successful upload). */
 export type StorageRef = {
-  ref: string; // provider reference (e.g. 0G-STOR-arc_…)
+  rootHash: string;
+  txHash: string;
   kind: string;
   contentHash: string;
   sizeBytes: number;
   ts: number;
-  demo: boolean; // labelled demo path vs live 0G storage
+  network: "0g-galileo-testnet";
+  /** True once the object was downloaded back with Merkle-proof verification. */
+  retrievable: boolean;
 };

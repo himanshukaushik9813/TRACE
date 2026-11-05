@@ -1,77 +1,115 @@
 /**
- * 0G Private Computer inference client — with a hard validation gate.
+ * 0G Private Computer inference via the 0G Router (OpenAI-compatible) — with
+ * a hard deterministic validation gate.
  *
- * Product rule: "the LLM is NOT the source of blockchain truth." The 0G
- * model receives a *structured, deterministic evidence pack* (fingerprint
- * values + event references) and returns a structured IR *proposal*. That
- * proposal is then:
+ * Product rule: the model is NOT the source of blockchain truth. It receives
+ * a structured evidence pack (fingerprints + citable tx hashes + position
+ * facts) and returns a structured hypothesis. The gate then:
+ *   1. parses + schema-checks the proposal,
+ *   2. audits every rule's evidenceRefs against the citable set — refs not
+ *      in the set are stripped; a rule left with no valid ref is rejected,
+ *   3. caps each confidence at the deterministic support level,
+ *   4. validates the final IR (validateStrategyIR) and stamps its content id.
  *
- *   1. schema-validated (validateStrategyIR),
- *   2. evidence-audited: every evidence ref it cites must exist in the
- *      deterministic evidence pack; unknown refs are stripped and the rule
- *      is flagged,
- *   3. re-anchored: rule confidences are capped at what the deterministic
- *      layer supports for that evidence,
- *   4. finalized (deterministic id) only if all of the above pass.
- *
- * On any failure the caller falls back to `inferFromEvidence` — an honest
- * deterministic strategy — and the UI labels the source accordingly.
+ * There is NO demo transport. If the router is not configured or the call
+ * fails, the result is `ok:false` with the real error and the run metadata;
+ * the caller shows the error and (separately labelled) the evidence-only
+ * deterministic analysis — never a fabricated AI answer.
  */
-import { type StrategyIR, type StrategyRule } from "@trace/strategy-ir";
+import { type StrategyIR, type StrategyRule, type V3Event } from "@trace/strategy-ir";
 import type { Fingerprints } from "./fingerprints.js";
-import type { V3Event } from "@trace/strategy-ir";
+import { type EvidenceWindow } from "./infer.js";
 export type EvidencePack = {
     fingerprints: Fingerprints;
-    /** The tx hashes the model is *allowed* to cite. */
+    /** The only tx hashes the model may cite. */
     citableEvents: string[];
+    /** Compact event + position facts (no free-form text from the chain). */
+    events: {
+        kind: string;
+        tx: string;
+        block: number;
+        tokenId: number;
+        pool?: string;
+    }[];
+    positions: {
+        tokenId: number;
+        pool: string;
+        pair: string;
+        feeTier: number;
+        tickLower: number;
+        tickUpper: number;
+        status: string;
+    }[];
+    window: EvidenceWindow;
 };
-export declare function buildEvidencePack(events: V3Event[], fp: Fingerprints): EvidencePack;
+export declare function buildEvidencePack(events: V3Event[], fp: Fingerprints, window: EvidenceWindow, positions?: EvidencePack["positions"]): EvidencePack;
 export type ZeroGConfig = {
-    /** The 0G inference endpoint. Omit or pass the demo transport to run offline. */
-    endpoint?: string;
+    /** e.g. https://router-api.0g.ai/v1 */
+    routerUrl?: string;
     apiKey?: string;
+    model?: string;
+    /** Optional X-0G-Provider-Trust-Mode header: standard | verified | private. */
+    trustMode?: "standard" | "verified" | "private";
+    /** Ask the router to verify the provider's TEE signature (verify_tee). */
+    verifyTee?: boolean;
     requestTimeoutMs?: number;
+};
+export type InferenceRun = {
+    status: "succeeded" | "failed" | "rejected" | "not_configured";
+    requestId: string | null;
+    model: string | null;
+    providerAddress: string | null;
+    teeVerified: boolean | null;
+    trustMode: string | null;
+    httpStatus: number | null;
+    errorCode: string | null;
+    error: string | null;
+    usage: {
+        promptTokens?: number;
+        completionTokens?: number;
+        totalCostNeuron?: string;
+    } | null;
+    responseHash: string | null;
+    latencyMs: number;
+    startedAt: number;
+    rulesRejected: number;
 };
 export type ZeroGResult = {
     ok: true;
     ir: StrategyIR;
-    proposalsRejected: number;
+    run: InferenceRun;
 } | {
     ok: false;
-    reason: "schema_invalid" | "no_citable_evidence" | "transport_error";
+    reason: "not_configured" | "transport_error" | "provider_error" | "unparseable" | "schema_invalid" | "no_citable_evidence";
     detail: string;
-    /** The honest deterministic fallback, always present so the UI degrades gracefully. */
-    fallback: StrategyIR;
+    run: InferenceRun;
 };
-/** Prompt: deterministic evidence pack in, structured IR out. */
-export declare function buildZeroGPrompt(pack: EvidencePack, wallet: string): string;
 type RawProposal = {
-    family: StrategyIR["family"];
-    confidence: number;
-    rules: StrategyRule[];
+    family?: string;
+    confidence?: number;
+    rules?: Partial<StrategyRule>[];
     alternatives?: StrategyIR["alternatives"];
-    evidenceRefs?: string[];
     limitations?: string[];
 };
-/**
- * The transport. The default "demo" transport returns a deterministic
- * proposal derived *from the evidence pack itself* (not from a real model),
- * so the whole pipeline — including validation — is exercised offline and is
- * clearly labelled as the demo path. A production deployment swaps in a real
- * 0G endpoint via `endpoint` + `apiKey`.
- */
+/** Real router call. Throws nothing: every failure becomes ok:false with the real error. */
 export declare function runZeroGInference(opts: {
     pack: EvidencePack;
     wallet: string;
-    events: V3Event[];
     cfg?: ZeroGConfig;
+    /** Deterministic baseline, used only to cap confidences. */
+    baseline: StrategyIR;
 }): Promise<ZeroGResult>;
-/**
- * THE GATE. Returns a validated, evidence-anchored StrategyIR, or a typed
- * failure carrying the deterministic fallback.
- */
+/** THE GATE: a validated, evidence-anchored StrategyIR, or a typed rejection. */
 export declare function gateProposal(raw: RawProposal, pack: EvidencePack, ctx: {
-    events: V3Event[];
     wallet: string;
-}, provider?: "0G_PRIVATE_COMPUTER" | "DETERMINISTIC_ONLY"): ZeroGResult;
+    baseline: StrategyIR;
+    run: InferenceRun;
+}): {
+    ok: true;
+    ir: StrategyIR;
+} | {
+    ok: false;
+    reason: "schema_invalid" | "no_citable_evidence";
+    detail: string;
+};
 export type { StrategyIR, StrategyRule, V3Event };

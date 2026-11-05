@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { DEMO_MODE } from "@/lib/assets";
-import { X } from "lucide-react";
+import { AlertTriangle, ExternalLink, Inbox, Loader2, X } from "lucide-react";
+import { explorer } from "@trace/chain-config";
 
 /** Card surface — light ivory or dark charcoal. */
 export function Card({
@@ -88,23 +88,94 @@ export function Pill({
   );
 }
 
-/** Clear "demo data" marker — the spec forbids presenting fixtures as real. */
-export function DemoBadge({ onDark }: { onDark?: boolean }) {
-  if (!DEMO_MODE) return null;
+/**
+ * Data-source badge. TRACE has no demo mode: every figure comes from a live
+ * Sepolia read through the API, and this badge says so (with the block).
+ */
+export function SourceBadge({ onDark, block, label }: { onDark?: boolean; block?: number | null; label?: string }) {
   return (
     <span
       className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[0.62rem] font-semibold uppercase tracking-wide2 border ${
-        onDark
-          ? "border-gold/40 bg-gold/10 text-gold-300"
-          : "border-gold/40 bg-gold/10 text-gold"
+        onDark ? "border-sage/40 bg-sage/10 text-sage-300" : "border-sage/40 bg-sage/10 text-sage-600"
       }`}
-      title="Figures shown are a labelled known-good fixture, not a live chain read."
+      title="Read live from Ethereum Sepolia through the TRACE API"
     >
-      <span
-        className={`h-1.5 w-1.5 rounded-full ${onDark ? "bg-gold-300" : "bg-gold"}`}
-      />
-      Demo data
+      <span className={`h-1.5 w-1.5 rounded-full ${onDark ? "bg-sage-300" : "bg-sage"}`} />
+      {label ?? "Live · Sepolia"}
+      {block ? ` · #${block.toLocaleString("en-US")}` : ""}
     </span>
+  );
+}
+
+const STATUS_TONE: Record<string, "forest" | "sage" | "amber" | "brick" | "neutral"> = {
+  "VERIFIED LIVE": "forest",
+  "VERIFIED TESTNET": "sage",
+  "IMPLEMENTED BUT NOT VERIFIED": "amber",
+  "BLOCKED BY EXTERNAL DEPENDENCY": "brick",
+  "NOT IMPLEMENTED": "neutral",
+};
+
+/** Honest integration status label. */
+export function StatusChip({ status }: { status: string }) {
+  return <Pill tone={STATUS_TONE[status] ?? "neutral"}>{status}</Pill>;
+}
+
+/** Sepolia Etherscan link for a tx / address / block / token / NFT. */
+export function ExplorerLink({
+  kind,
+  value,
+  children,
+  className = "",
+}: {
+  kind: "tx" | "address" | "block" | "token" | "nft";
+  value: string | number;
+  children?: ReactNode;
+  className?: string;
+}) {
+  const href =
+    kind === "tx" ? explorer.tx(String(value))
+    : kind === "address" ? explorer.address(String(value))
+    : kind === "block" ? explorer.block(Number(value))
+    : kind === "token" ? explorer.token(String(value))
+    : explorer.nft(String(value));
+  const text = children ?? (typeof value === "string" && value.startsWith("0x") ? `${value.slice(0, 6)}…${value.slice(-4)}` : `#${value}`);
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className={`inline-flex items-center gap-1 tabular underline decoration-gold/40 underline-offset-2 hover:text-gold ${className}`}>
+      {text}
+      <ExternalLink size={11} className="opacity-60" />
+    </a>
+  );
+}
+
+export function LoadingState({ label = "Loading…", onDark }: { label?: string; onDark?: boolean }) {
+  return (
+    <div className={`flex items-center gap-2 text-[0.85rem] py-6 ${onDark ? "text-cream-muted" : "text-ink-600"}`}>
+      <Loader2 size={16} className="animate-spin text-gold" /> {label}
+    </div>
+  );
+}
+
+export function EmptyState({ title, children, icon }: { title: string; children?: ReactNode; icon?: ReactNode }) {
+  return (
+    <div className="rounded-panel border border-dashed border-ink/15 bg-ivory-50/60 p-6 flex gap-4 items-start min-w-0">
+      <div className="h-9 w-9 grid place-items-center rounded-md2 bg-ink/5 text-ink-600 shrink-0">{icon ?? <Inbox size={17} />}</div>
+      <div className="min-w-0">
+        <div className="text-ink font-medium">{title}</div>
+        {children && <div className="text-[0.84rem] text-ink-600 mt-1 leading-relaxed break-words [overflow-wrap:anywhere]">{children}</div>}
+      </div>
+    </div>
+  );
+}
+
+export function ErrorState({ title = "Something went wrong", message }: { title?: string; message: string }) {
+  return (
+    <div className="rounded-panel border border-brick/30 bg-brick/8 p-4 flex gap-3 items-start" role="alert">
+      <AlertTriangle size={17} className="text-brick shrink-0 mt-0.5" />
+      <div className="min-w-0">
+        <div className="text-brick font-medium text-[0.9rem]">{title}</div>
+        <div className="text-[0.82rem] text-brick/90 mt-0.5 break-words">{message}</div>
+      </div>
+    </div>
   );
 }
 

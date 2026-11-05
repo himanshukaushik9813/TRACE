@@ -8,7 +8,7 @@
 export * from "./types.js";
 export * as canonical from "./canonical.js";
 export { contentHash, canonicalString, shortHash } from "./canonical.js";
-export { validateStrategyIR, validateCompatibility, validateBacktest, validateProgram, } from "./validate.js";
+export { validateStrategyIR, validateCompatibility, validateBacktest, validatePlan } from "./validate.js";
 export type { ValidationIssue, ValidationResult } from "./validate.js";
 import type { StrategyIR } from "./types.js";
 /**
@@ -24,3 +24,5 @@ export declare function finalizeStrategyIR(draft: Omit<StrategyIR, "id"> & {
 export declare function strategyVersionHash(ir: StrategyIR): string;
 /** Deterministic fingerprint of an event set — the evidence anchor. */
 export declare function eventsFingerprint(events: unknown[]): string;
+/** Group a strategy's rules by category (entry / adjustment / exit / risk / fee). */
+export declare function rulesByCategory(ir: StrategyIR): Record<"entry" | "adjustment" | "exit" | "risk" | "fee", import("./types.js").StrategyRule[]>;

@@ -1,338 +1,460 @@
 /**
- * TRACE Express API.
+ * TRACE Express API (Sepolia only).
  *
- * Routes:
- *   POST /investigations          queue a wallet investigation (BullMQ job)
- *   GET  /investigations/:id      poll status + result (pipeline output)
- *   GET  /strategies/:id/compatibility   rule-by-rule Aqua compatibility
- *   POST /authorizations          issue + verify a World Agent Pass proof
- *   GET  /archives/:id           0G storage refs for an investigation
- *
- * The API never claims a result is "live" that the pipeline produced
- * degraded — every response carries `source` and `degraded`/`degradedSteps`
- * straight from the pipeline.
+ *   GET  /health                               liveness + config summary
+ *   GET  /integrations                         live integration probes (honest labels)
+ *   GET  /wallets/suggested                    real active Sepolia LP wallets (found live)
+ *   POST /investigations                       queue an investigation {wallet, days}
+ *   GET  /investigations/recent
+ *   GET  /investigations/:id                   status + progress
+ *   GET  /investigations/:id/full              everything the screens render
+ *   GET  /investigations/:id/events            raw lifecycle evidence (?tokenId=)
+ *   GET  /investigations/:id/positions/:tokenId
+ *   POST /investigations/:id/archive           retry 0G Storage archiving
+ *   GET  /strategies/by-wallet/:wallet         immutable strategy versions
+ *   POST /strategies/:id/compatibility         on-chain Aqua compatibility {maker?}
+ *   POST /strategies/:id/plan                  compile an execution plan {maker, amount0, amount1}
+ *   GET  /plans/:id                            plan + authorizations + transactions
+ *   POST /plans/:id/challenge                  single-use challenge + EIP-712 payload {wallet, action}
+ *   POST /authorizations                       verify a signed authorization {planId, claims, signature, world?}
+ *   POST /transactions                         record a submitted tx {authorizationId, op, txHash}
+ *   GET  /transactions/:hash                   re-verify a tx from its receipt
+ *   GET  /activity/:wallet                     investigations + transactions
  */
 
-import express, { type Express, type Request, type Response } from "express";
-import type { V3Event } from "@trace/strategy-ir";
-import { issueAgentPassClaims, signProof, verifyProof, type WorldAuthConfig } from "@trace/world-auth";
+import express, { type Express, type NextFunction, type Request, type Response } from "express";
+import { AQUA, SEPOLIA_CHAIN_ID, isAddress } from "@trace/chain-config";
+import { createTraceClient, scrubSecrets } from "@trace/chain-data";
+import { assessCompatibility, aquaClient, compilePlan } from "@trace/aqua-adapter";
+import { buildTypedData, newChallenge, verifyAuthorization, verifyWorldProof, worldConfigured, worldRpRequest, worldSignal } from "@trace/world-auth";
+import { archive } from "@trace/zero-g-storage";
+import type { AuthorizationClaims, ExecutionPlan, PositionMeta, StrategyIR } from "@trace/strategy-ir";
 import type { Db } from "./db.js";
-import type { PipelineQueue } from "./worker.js";
+import type { TraceConfig } from "./config.js";
+import type { InvestigationQueue } from "./worker.js";
+import { integrationSnapshot } from "./integrations.js";
 
-export type ApiDeps = {
-  db: Db;
-  /** BullMQ queue (Redis) or the in-memory fallback — same minimal surface. */
-  queue: PipelineQueue;
-  /** Declared so /health never claims a durable queue when it isn't one. */
-  queueBackend?: "bullmq" | "in-memory";
-  worldCfg: WorldAuthConfig;
-  demoKey?: string;
+export type ApiDeps = { db: Db; queue: InvestigationQueue; cfg: TraceConfig };
+
+/** Actions a signed authorization can cover, and the plan steps each allows. */
+export const ACTIONS: Record<string, ("approve" | "ship" | "dock" | "swap")[]> = {
+  "aqua:ship": ["approve", "ship"],
+  "aqua:dock": ["dock"],
 };
 
-/** 0G storage refs for an investigation, shaped for the UI (demo-labelled). */
-async function getArchivesFor(
-  deps: ApiDeps,
-  investigationId: string,
-): Promise<Array<{ ref: string; kind: string; contentHash: string; sizeBytes: number; demo: boolean; ts: string }>> {
-  const rows = await deps.db.query(
-    `select ref, kind, content_hash as "contentHash", size_bytes as "sizeBytes", source, created_at as "ts"
-       from archives where investigation = $1 order by created_at`,
-    [investigationId],
+const AUTH_TTL_SECONDS = 600;
+
+const json = (v: unknown) => JSON.parse(JSON.stringify(v, (_k, x) => (typeof x === "bigint" ? x.toString() : x)));
+const P = (req: Request, k: string): string => String(req.params[k] ?? "");
+const bad = (res: Response, msg: string, code = 400) => res.status(code).json({ error: msg });
+
+type Handler = (req: Request, res: Response) => Promise<unknown>;
+const h = (fn: Handler) => (req: Request, res: Response, next: NextFunction) => fn(req, res).catch(next);
+
+/** Very small fixed-window limiter for expensive routes. */
+function limiter(max: number, windowMs: number) {
+  const hits = new Map<string, { n: number; reset: number }>();
+  return (req: Request, res: Response, next: NextFunction) => {
+    const k = req.ip ?? "unknown";
+    const now = Date.now();
+    const e = hits.get(k);
+    if (!e || e.reset < now) hits.set(k, { n: 1, reset: now + windowMs });
+    else if (++e.n > max) return res.status(429).json({ error: "rate limit exceeded — try again shortly" });
+    next();
+  };
+}
+
+/** Rebuild PositionMeta rows for an investigation (basis selection for compile). */
+async function positionMetas(db: Db, investigation: string): Promise<PositionMeta[]> {
+  const rows = await db.query(
+    `select token_id, pool, token0, token1, symbol0, symbol1, decimals0, decimals1, fee_tier, tick_lower, tick_upper, liquidity, status, history_complete
+       from positions where investigation = $1 order by token_id desc`,
+    [investigation],
   );
   return rows.map((r) => ({
-    ref: r.ref,
-    kind: r.kind,
-    contentHash: r.contentHash,
-    sizeBytes: r.sizeBytes,
-    demo: r.source === "0G_DEMO",
-    ts: r.ts,
+    tokenId: Number(r.token_id),
+    pool: r.pool && r.pool !== "unresolved" ? r.pool : null,
+    token0: r.token0,
+    token1: r.token1,
+    symbol0: r.symbol0,
+    symbol1: r.symbol1,
+    decimals0: r.decimals0,
+    decimals1: r.decimals1,
+    feeTier: r.fee_tier,
+    tickLower: r.tick_lower,
+    tickUpper: r.tick_upper,
+    currentLiquidity: String(r.liquidity ?? "0"),
+    burned: r.status === "closed",
+    historyComplete: r.history_complete,
   }));
 }
 
-export function createApi(deps: ApiDeps): Express {
-  const app = express();
-  app.use(express.json({ limit: "8mb" }));
+function pickBasis(metas: PositionMeta[], tokenId?: number): PositionMeta | null {
+  const usable = metas.filter((m) => m.pool && m.token0 && m.decimals0 != null && m.decimals1 != null);
+  if (tokenId != null) return usable.find((m) => m.tokenId === tokenId) ?? null;
+  return usable.find((m) => !m.burned) ?? usable[0] ?? null;
+}
 
-  // Browser (Next on :3000) → API (:4000) is cross-origin. Without CORS the
-  // fetch fails before it reaches any route — the "Failed to fetch" the UI
-  // reports is almost always this. Dev allows any origin; pin in prod.
+export function createApi(deps: ApiDeps): Express {
+  const { db, queue, cfg } = deps;
+  const app = express();
+  app.disable("x-powered-by");
+  app.use(express.json({ limit: "1mb" }));
+
   app.use((req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*");
+    const origin = req.headers.origin;
+    if (origin && cfg.corsOrigins.includes(origin)) {
+      res.header("Access-Control-Allow-Origin", origin);
+      res.header("Vary", "Origin");
+    }
     res.header("Access-Control-Allow-Headers", "content-type");
     res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-    if (req.method === "OPTIONS") {
-      res.status(204).end();
-      return;
-    }
+    if (req.method === "OPTIONS") return void res.status(204).end();
     next();
   });
 
-  app.get("/health", (_req, res) => {
-    res.json({
-      ok: true,
-      source: "trace",
-      queue: deps.queueBackend ?? "bullmq",
-      rpcConfigured: Boolean(process.env.TRACE_RPC_URL),
-      note: deps.queueBackend === "in-memory" ? "queue is in-process (no Redis); no job durability" : undefined,
-    });
-  });
+  /* ---------------- health / integrations ---------------- */
 
-  // ------------------------------------------------------------------
-  app.post("/investigations", async (req: Request, res: Response) => {
-    const { wallet, rpcUrl, days, fromBlock, toBlock, events, priceSeries, observedRange } = req.body ?? {};
-
-    if (!wallet || !/^0x[0-9a-fA-F]{40}$/.test(String(wallet))) {
-      res.status(400).json({ error: "wallet must be a 0x-prefixed 40-hex address" });
-      return;
+  app.get("/health", h(async (_req, res) => {
+    let database = "ok";
+    try {
+      await db.ping();
+    } catch (err) {
+      database = `error: ${(err as Error).message}`;
     }
+    res.json({ ok: database === "ok", chainId: SEPOLIA_CHAIN_ID, network: "Ethereum Sepolia", database, queue: queue.backend });
+  }));
 
-    const investigationId = await deps.db.insertInvestigation({
-      wallet: String(wallet),
-      source: events ? "demo_fixture" : "live",
-      eventsFingerprint: "", // filled by the worker
-      summary: {},
-    });
+  app.get("/integrations", h(async (req, res) => {
+    res.json(await integrationSnapshot(cfg, db, queue.backend, req.query.refresh === "1"));
+  }));
 
-    await deps.queue.add(
-      "pipeline",
-      {
-        wallet: String(wallet),
-        investigationId,
-        events: events as V3Event[] | undefined,
-        rpcUrl,
-        days,
-        fromBlock,
-        toBlock,
-        priceSeries,
-        observedRange,
-      },
-      { jobId: investigationId },
-    );
-
-    res.status(202).json({ investigationId, status: "queued" });
-  });
-
-  // NOTE: registered before "/investigations/:id" — exact segments must win.
-  app.get("/investigations/recent", async (req: Request, res: Response) => {
-    const limit = Math.min(Number(req.query.limit ?? 10) || 10, 50);
-    const rows = await deps.db.query(
-      `select id, wallet, status, source, events_fingerprint as fingerprint,
-              period_from_ts as "fromTs", period_to_ts as "toTs", error, created_at as "createdAt"
-         from investigations
-        where status in ('done','failed')
-        order by created_at desc limit $1`,
-      [limit],
-    );
-    res.json({
-      investigations: rows.map((r) => ({
-        id: r.id,
-        wallet: r.wallet,
-        status: r.status,
-        source: r.source,
-        fingerprint: r.fingerprint,
-        fromTs: r.fromTs ?? null,
-        toTs: r.toTs ?? null,
-        error: r.error ?? null,
-        createdAt: r.createdAt,
-      })),
-    });
-  });
-
-  app.get("/investigations/:id", async (req: Request, res: Response) => {
-    const row = await deps.db.getInvestigation(req.params.id);
-    if (!row) {
-      res.status(404).json({ error: "investigation not found" });
-      return;
+  let suggested: { at: number; data: unknown } | null = null;
+  app.get("/wallets/suggested", h(async (_req, res) => {
+    if (!suggested || Date.now() - suggested.at > 10 * 60_000) {
+      const chain = createTraceClient({ rpcUrl: cfg.sepoliaRpcUrl, fallbackRpcUrls: cfg.sepoliaFallbackRpcUrls });
+      const wallets = await chain.findActiveLpWallets(5, 50_000);
+      suggested = { at: Date.now(), data: { wallets, source: "Live scan of Uniswap V3 position mints on Sepolia (last ~50,000 blocks)", computedAt: new Date().toISOString() } };
     }
-    res.json({
-      id: row.id,
-      wallet: row.wallet,
-      status: row.status,
-      source: row.source, // 'live' | 'demo_fixture' — drives the UI badge
-      error: row.error ?? null,
-      summary: row.summary,
-    });
-  });
+    res.json(suggested.data);
+  }));
 
-  /** The full pipeline payload for one investigation: everything the UI screens render. */
-  app.get("/investigations/:id/full", async (req: Request, res: Response) => {
-    const row = await deps.db.getInvestigation(req.params.id);
-    if (!row) {
-      res.status(404).json({ error: "investigation not found" });
-      return;
+  /* ---------------- investigations ---------------- */
+
+  app.post("/investigations", limiter(10, 60_000), h(async (req, res) => {
+    const { wallet, days } = req.body ?? {};
+    if (!isAddress(wallet)) return bad(res, "wallet must be a 0x-prefixed 40-hex address");
+    const d = days == null ? 30 : Number(days);
+    if (!Number.isInteger(d) || d < 1 || d > 365) return bad(res, "days must be an integer between 1 and 365");
+    const id = await db.insertInvestigation(wallet, d);
+    await queue.add({ investigationId: id, wallet, days: d });
+    res.status(202).json({ investigationId: id, status: "queued" });
+  }));
+
+  app.get("/investigations/recent", h(async (req, res) => {
+    const limit = Math.min(Number(req.query.limit ?? 20) || 20, 100);
+    const wallet = typeof req.query.wallet === "string" && isAddress(req.query.wallet) ? req.query.wallet : null;
+    const rows = await db.query(
+      `select id, wallet, status, progress, error, period_from_ts as "fromTs", period_to_ts as "toTs", created_at as "createdAt", updated_at as "updatedAt",
+              (summary_json->'counts') as counts
+         from investigations ${wallet ? "where lower(wallet) = lower($2)" : ""} order by created_at desc limit $1`,
+      wallet ? [limit, wallet] : [limit],
+    );
+    res.json({ investigations: rows });
+  }));
+
+  app.get("/investigations/:id", h(async (req, res) => {
+    const inv = await db.getInvestigation(P(req, "id")).catch(() => null);
+    if (!inv) return bad(res, "investigation not found", 404);
+    res.json(inv);
+  }));
+
+  app.get("/investigations/:id/full", h(async (req, res) => {
+    const inv = await db.getInvestigation(P(req, "id")).catch(() => null);
+    if (!inv) return bad(res, "investigation not found", 404);
+    const [strategies, runs, dna, positions, storage] = await Promise.all([
+      db.query(
+        `select id, ir_id as "irId", parent_ir_id as "parentIrId", ir_json as ir, version_hash as "versionHash", family, confidence, provider, role, created_at as "createdAt"
+           from strategies where investigation = $1 order by created_at`,
+        [inv.id],
+      ),
+      db.query(
+        `select id, status, request_id as "requestId", model, provider_address as "providerAddress", tee_verified as "teeVerified", trust_mode as "trustMode",
+                http_status as "httpStatus", error_code as "errorCode", error, usage, latency_ms as "latencyMs", rules_rejected as "rulesRejected", created_at as "createdAt"
+           from inference_runs where investigation = $1 order by created_at desc`,
+        [inv.id],
+      ),
+      db.query(`select data, computed_at as "computedAt" from strategy_dna where investigation = $1`, [inv.id]),
+      db.query(`select * from positions where investigation = $1 order by token_id desc`, [inv.id]),
+      db.listStorage(inv.id),
+    ]);
+    const primary = strategies.find((s) => s.role === "ai_hypothesis") ?? strategies.find((s) => s.role === "evidence_baseline") ?? null;
+    const backtest = primary
+      ? (await db.query(`select result_json as result, status, created_at as "createdAt" from backtest_runs where strategy_id = $1 order by created_at desc limit 1`, [primary.id]))[0] ?? null
+      : null;
+    const compatibility = primary
+      ? (await db.query(`select id, maker, verdict, report_json as report, created_at as "createdAt" from compatibility_reports where strategy_id = $1 order by created_at desc limit 1`, [primary.id]))[0] ?? null
+      : null;
+    const plans = primary
+      ? await db.query(`select id, maker, plan_hash as "planHash", plan_json as plan, created_at as "createdAt" from execution_plans where strategy_id = $1 order by created_at desc limit 5`, [primary.id])
+      : [];
+    res.json(json({ investigation: inv, strategies, primaryStrategyId: primary?.id ?? null, inferenceRuns: runs, dna: dna[0] ?? null, positions, backtest, compatibility, plans, storage }));
+  }));
+
+  app.get("/investigations/:id/events", h(async (req, res) => {
+    const tokenId = typeof req.query.tokenId === "string" && /^\d+$/.test(req.query.tokenId) ? req.query.tokenId : undefined;
+    res.json({ events: await db.getEvents(P(req, "id"), tokenId) });
+  }));
+
+  app.get("/investigations/:id/positions/:tokenId", h(async (req, res) => {
+    if (!/^\d+$/.test(P(req, "tokenId"))) return bad(res, "tokenId must be numeric");
+    const [pos] = await db.query(`select * from positions where investigation = $1 and token_id = $2`, [P(req, "id"), P(req, "tokenId")]);
+    if (!pos) return bad(res, "position not found in this investigation", 404);
+    const events = await db.getEvents(P(req, "id"), P(req, "tokenId"));
+    const [dna] = await db.query(`select data from strategy_dna where investigation = $1`, [P(req, "id")]);
+    const series = pos.pool ? (dna?.data?.priceSeries?.[pos.pool] ?? null) : null;
+    res.json({ position: pos, events, priceSeries: series });
+  }));
+
+  app.post("/investigations/:id/archive", limiter(5, 60_000), h(async (req, res) => {
+    const inv = await db.getInvestigation(P(req, "id")).catch(() => null);
+    if (!inv || inv.status !== "done") return bad(res, "investigation not found or not finished", 404);
+    const [strategy] = await db.query(`select id, ir_json as ir from strategies where investigation = $1 order by (role = 'ai_hypothesis') desc, created_at desc limit 1`, [inv.id]);
+    const [dna] = await db.query(`select data from strategy_dna where investigation = $1`, [inv.id]);
+    const outcome = await archive({
+      cfg: cfg.storage,
+      artifacts: [
+        { kind: "investigation-summary", content: { investigation: inv.id, summary: inv.summary } },
+        { kind: "strategy-dna", content: { investigation: inv.id, fingerprints: dna?.data?.fingerprints ?? null } },
+        ...(strategy ? [{ kind: `strategy-ir:${strategy.ir.id}`, content: strategy.ir }] : []),
+      ],
+    });
+    await db.insertStorage(inv.id, strategy?.id ?? null, outcome.refs);
+    await db.setIntegrations(inv.id, { storage: { status: outcome.status, errors: outcome.errors.slice(0, 4), uploaded: outcome.refs.length } });
+    res.json(outcome);
+  }));
+
+  /* ---------------- strategies ---------------- */
+
+  app.get("/strategies/by-wallet/:wallet", h(async (req, res) => {
+    if (!isAddress(P(req, "wallet"))) return bad(res, "invalid wallet");
+    const rows = await db.query(
+      `select s.id, s.ir_id as "irId", s.parent_ir_id as "parentIrId", s.version_hash as "versionHash", s.family, s.confidence, s.provider, s.role,
+              s.created_at as "createdAt", s.investigation
+         from strategies s join investigations i on i.id = s.investigation
+        where lower(i.wallet) = lower($1) order by s.created_at desc limit 50`,
+      [P(req, "wallet")],
+    );
+    res.json({ strategies: rows });
+  }));
+
+  const loadForCompile = async (strategyId: string, tokenId?: number) => {
+    const st = await db.getStrategy(strategyId).catch(() => null);
+    if (!st) return null;
+    const metas = await positionMetas(db, st.investigation);
+    return { st, ir: st.ir as StrategyIR, basis: pickBasis(metas, tokenId) };
+  };
+
+  app.post("/strategies/:id/compatibility", limiter(20, 60_000), h(async (req, res) => {
+    const maker = req.body?.maker;
+    if (maker != null && !isAddress(maker)) return bad(res, "maker must be an address");
+    const ctx = await loadForCompile(P(req, "id"), req.body?.tokenId != null ? Number(req.body.tokenId) : undefined);
+    if (!ctx) return bad(res, "strategy not found", 404);
+    const aq = aquaClient(cfg.sepoliaRpcUrl);
+    const checks = ctx.basis
+      ? await aq.makerChecks(maker ?? null, [
+          { address: ctx.basis.token0, symbol: ctx.basis.symbol0 },
+          { address: ctx.basis.token1, symbol: ctx.basis.symbol1 },
+        ])
+      : [];
+    const compat = assessCompatibility(ctx.ir, ctx.basis, checks);
+    const reportId = await db.insertCompatibility(P(req, "id"), maker ?? null, compat);
+    res.json({ reportId, compatibility: compat });
+  }));
+
+  app.post("/strategies/:id/plan", limiter(20, 60_000), h(async (req, res) => {
+    const { maker, amount0, amount1, tokenId } = req.body ?? {};
+    if (!isAddress(maker)) return bad(res, "maker must be the connected wallet address");
+    if (!/^\d+$/.test(String(amount0 ?? "")) || !/^\d+$/.test(String(amount1 ?? ""))) return bad(res, "amount0/amount1 must be non-negative integer strings (token base units)");
+    const ctx = await loadForCompile(P(req, "id"), tokenId != null ? Number(tokenId) : undefined);
+    if (!ctx) return bad(res, "strategy not found", 404);
+    if (!ctx.basis) return bad(res, "no position with a resolvable pool and token decimals to base an Aqua strategy on", 422);
+    const aq = aquaClient(cfg.sepoliaRpcUrl);
+    const checks = await aq.makerChecks(maker, [
+      { address: ctx.basis.token0, symbol: ctx.basis.symbol0, amount: BigInt(amount0) },
+      { address: ctx.basis.token1, symbol: ctx.basis.symbol1, amount: BigInt(amount1) },
+    ]);
+    const compat = assessCompatibility(ctx.ir, ctx.basis, checks);
+    await db.insertCompatibility(P(req, "id"), maker, compat);
+    let plan: ExecutionPlan;
+    try {
+      plan = compilePlan({ ir: ctx.ir, compat, basis: ctx.basis, maker, amount0: String(amount0), amount1: String(amount1), registry: AQUA.registry.address, app: AQUA.swapVmRouter.address, chainId: SEPOLIA_CHAIN_ID });
+    } catch (err) {
+      return res.status(422).json({ error: (err as Error).message, compatibility: compat });
     }
-    const s = await deps.db.query(
-      `select s.ir_json as strategy, s.strategy_version_hash as "strategyVersionHash",
-              s.family, s.confidence,
-              p.program_json as program, p.program_hash as "programHash",
-              p.compatibility_json as compatibility, p.verdict,
-              b.result_json as backtest, b.lookahead_guard as "lookaheadGuard"
-         from strategies s
-         left join aqua_programs p on p.strategy_id = s.id
-         left join backtests b on b.strategy_id = s.id
-        where s.investigation = $1
-        order by s.created_at desc limit 1`,
-      [req.params.id],
-    );
-    const latest = s[0];
-    res.json({
-      id: row.id,
-      wallet: row.wallet,
-      status: row.status,
-      source: row.source,
-      error: row.error ?? null,
-      reconstruction: row.summary,
-      strategy: latest?.strategy ?? null,
-      strategyVersionHash: latest?.strategyVersionHash ?? null,
-      program: latest?.program ?? null,
-      programHash: latest?.programHash ?? null,
-      compatibility: latest?.compatibility ?? null,
-      compatibilityVerdict: latest?.verdict ?? null,
-      backtest: latest?.backtest ?? null,
-      archives: await getArchivesFor(deps, req.params.id),
-    });
-  });
+    // Simulate every pre-ship step from the maker before anyone is asked to sign.
+    const simulation: Record<string, { ok: boolean; error?: string }> = {};
+    for (const s of plan.steps.filter((x) => x.op !== "dock")) simulation[`${s.op}:${s.to}`] = await aq.simulateStep(maker, s);
+    const planId = await db.insertPlan(P(req, "id"), plan);
+    res.json({ planId, plan, compatibility: compat, simulation });
+  }));
 
-  /** Raw reconstructed events (the blockchain evidence), optionally per position. */
-  app.get("/investigations/:id/events", async (req: Request, res: Response) => {
-    const params: unknown[] = [];
-    let filter = "";
-    if (req.query.tokenId) {
-      params.push(String(req.query.tokenId));
-      filter = " and token_id = $2";
-      params.unshift(req.params.id);
-    } else {
-      params.push(req.params.id);
+  /* ---------------- plans, challenges, authorizations ---------------- */
+
+  app.get("/plans/:id", h(async (req, res) => {
+    const p = await db.getPlan(P(req, "id")).catch(() => null);
+    if (!p) return bad(res, "plan not found", 404);
+    const auths = await db.query(
+      `select id, wallet, action, validated, verification_json as verification, world_status as "worldStatus", expires_at as "expiresAt", created_at as "createdAt"
+         from authorizations where plan_id = $1 order by created_at desc limit 10`,
+      [p.id],
+    );
+    res.json({ ...p, authorizations: auths, transactions: await db.listTransactions({ planId: p.id }) });
+  }));
+
+  app.post("/plans/:id/challenge", limiter(30, 60_000), h(async (req, res) => {
+    const { wallet, action } = req.body ?? {};
+    if (!isAddress(wallet)) return bad(res, "wallet must be an address");
+    if (!ACTIONS[action]) return bad(res, `action must be one of ${Object.keys(ACTIONS).join(", ")}`);
+    const p = await db.getPlan(P(req, "id")).catch(() => null);
+    if (!p) return bad(res, "plan not found", 404);
+    if (p.maker.toLowerCase() !== wallet.toLowerCase()) return bad(res, "this plan was compiled for a different wallet", 403);
+    const challenge = newChallenge();
+    await db.issueChallenge(p.id, wallet, action, challenge, AUTH_TTL_SECONDS);
+    const claims: AuthorizationClaims = {
+      wallet,
+      chainId: SEPOLIA_CHAIN_ID,
+      strategyId: p.irId,
+      strategyVersionHash: p.strategyVersionHash,
+      planHash: p.planHash,
+      action,
+      challenge,
+      expiresAt: Math.floor(Date.now() / 1000) + AUTH_TTL_SECONDS,
+    };
+    const world = worldConfigured(cfg.world) ? { ...(await worldRpRequest(cfg.world)), signal: worldSignal(claims) } : null;
+    res.json(json({ claims, typedData: buildTypedData(claims), world, worldStatus: world ? "required" : "not_configured" }));
+  }));
+
+  app.post("/authorizations", limiter(30, 60_000), h(async (req, res) => {
+    const { planId, claims, signature, world } = req.body ?? {};
+    if (typeof planId !== "string" || typeof signature !== "string" || !/^0x[0-9a-fA-F]+$/.test(signature)) return bad(res, "planId and a hex signature are required");
+    const c = claims as AuthorizationClaims;
+    if (!c || !isAddress(c.wallet) || typeof c.challenge !== "string" || !ACTIONS[c.action]) return bad(res, "malformed claims");
+    const p = await db.getPlan(planId).catch(() => null);
+    if (!p) return bad(res, "plan not found", 404);
+    const expected = { wallet: p.maker, strategyVersionHash: p.strategyVersionHash, planHash: p.planHash, action: c.action, chainId: SEPOLIA_CHAIN_ID };
+
+    // 1) Check signature + bindings first (no state change), 2) then consume the challenge atomically.
+    const pre = await verifyAuthorization({ claims: c, signature: signature as `0x${string}`, expected, challengeFresh: true });
+    const fresh = pre.validated ? await db.consumeChallenge(c.challenge, p.id, c.wallet, c.action) : false;
+    const result = pre.validated ? await verifyAuthorization({ claims: c, signature: signature as `0x${string}`, expected, challengeFresh: fresh }) : pre;
+
+    let worldStatus: "verified" | "not_configured" | "failed" | "skipped" = worldConfigured(cfg.world) ? "failed" : "not_configured";
+    let nullifier: string | null = null;
+    if (worldConfigured(cfg.world) && result.validated) {
+      if (!world) {
+        result.validated = false;
+        result.verification.notes.push("World ID proof required by server configuration but not provided");
+      } else {
+        const w = await verifyWorldProof(cfg.world, world, worldSignal(c));
+        nullifier = w.nullifier;
+        if (w.ok && nullifier && (await db.recordNullifier(nullifier, cfg.world.action))) worldStatus = "verified";
+        else {
+          result.validated = false;
+          result.verification.notes.push(w.ok ? "World ID nullifier already used for this action" : w.detail);
+        }
+      }
     }
-    const rows = await deps.db.query(
-      `select tx, block, log_index as "logIndex", ts, kind, token_id as "tokenId", owner,
-              liquidity_delta as "liquidityDelta", amount0 as "amount0", amount1 as "amount1",
-              fee0 as "fee0", fee1 as "fee1", tick_lower as "tickLower", tick_upper as "tickUpper", note
-         from events where investigation = $1${filter}
-        order by block, log_index`,
-      params,
-    );
-    res.json({ events: rows });
-  });
-
-  // ------------------------------------------------------------------
-  /** Immutable strategy versions for a wallet — the Saved page's version history. */
-  app.get("/strategies/by-wallet/:wallet", async (req: Request, res: Response) => {
-    const rows = await deps.db.query(
-      `select s.ir_id as "ir", s.strategy_version_hash as "versionHash", s.family, s.confidence,
-              s.source, s.created_at as "createdAt"
-         from strategies s
-         join investigations i on i.id = s.investigation
-        where lower(i.wallet) = lower($1) and i.status = 'done'
-        order by s.created_at desc limit 20`,
-      [req.params.wallet],
-    );
-    res.json({
-      strategies: rows.map((r) => ({
-        ir: r.ir,
-        versionHash: r.versionHash,
-        family: r.family,
-        confidence: Number(r.confidence),
-        source: r.source,
-        createdAt: r.createdAt,
-      })),
+    result.verification.worldId = worldStatus;
+    const authorizationId = await db.insertAuthorization({
+      planId: p.id,
+      wallet: c.wallet,
+      action: c.action,
+      claims: c,
+      signature,
+      validated: result.validated,
+      verification: result.verification,
+      worldStatus,
+      worldNullifier: nullifier,
     });
-  });
+    if (result.validated) await db.touchWallet(c.wallet, true);
+    res.status(result.validated ? 200 : 403).json({ authorizationId, validated: result.validated, signer: result.signer, verification: result.verification });
+  }));
 
-  app.get("/strategies/:id/compatibility", async (req: Request, res: Response) => {
-    const r = await deps.db.query(
-      `select s.ir_json as strategy, p.compatibility_json as compatibility
-         from strategies s
-         left join aqua_programs p on p.strategy_id = s.id
-        where s.id = $1`,
-      [req.params.id],
-    );
-    const row = r[0];
-    if (!row) {
-      res.status(404).json({ error: "strategy not found" });
-      return;
+  /* ---------------- transactions ---------------- */
+
+  const verifyAndStore = async (planRow: { id: string; plan: ExecutionPlan }, authorizationId: string, op: "approve" | "ship" | "dock" | "swap", txHash: string, wallet: string) => {
+    const aq = aquaClient(cfg.sepoliaRpcUrl);
+    try {
+      const v = await aq.verifyTx(txHash, planRow.plan, op);
+      const fromOk = v.from.toLowerCase() === wallet.toLowerCase();
+      await db.upsertTransaction({
+        planId: planRow.id,
+        authorizationId,
+        op,
+        txHash,
+        status: v.status === "success" ? "success" : "reverted",
+        from: v.from,
+        to: v.to,
+        block: v.blockNumber,
+        confirmations: v.confirmations,
+        gasUsed: v.gasUsed,
+        effectiveGasPrice: v.effectiveGasPrice,
+        matchesPlan: v.matchesPlan && fromOk,
+        outcome: fromOk ? v.outcome : `${v.outcome}; WARNING: sent by ${v.from}, not the authorized wallet`,
+      });
+      return { ...v, fromMatchesAuthorization: fromOk };
+    } catch (err) {
+      const msg = scrubSecrets((err as Error).message);
+      if (/could not be found|not found|TransactionReceiptNotFound/i.test(msg)) return { status: "pending" as const };
+      throw err;
     }
-    res.json({
-      strategyId: row.strategy?.id ?? req.params.id,
-      compatibility: row.compatibility,
-      verdict: row.compatibility?.verdict ?? null,
-    });
-  });
+  };
 
-  // ------------------------------------------------------------------
-  app.post("/authorizations", async (req: Request, res: Response) => {
-    const { strategyId, action } = req.body ?? {};
-    if (!strategyId || !action) {
-      res.status(400).json({ error: "strategyId and action are required" });
-      return;
+  app.post("/transactions", limiter(60, 60_000), h(async (req, res) => {
+    const { authorizationId, op, txHash } = req.body ?? {};
+    if (typeof txHash !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(txHash)) return bad(res, "txHash must be a 32-byte hex hash");
+    if (!["approve", "ship", "dock", "swap"].includes(op)) return bad(res, "unknown op");
+    const auth = await db.getAuthorization(authorizationId).catch(() => null);
+    if (!auth || !auth.validated) return bad(res, "a validated authorization is required before any execution step", 403);
+    if (!ACTIONS[auth.action]?.includes(op)) return bad(res, `authorization for "${auth.action}" does not cover "${op}"`, 403);
+    const p = await db.getPlan(auth.planId);
+    if (!p.plan.steps.some((s: { op: string }) => s.op === op)) return bad(res, `plan has no "${op}" step`, 422);
+    if (!auth.live && op === "ship") return bad(res, "authorization expired — sign a new one", 403);
+    await db.upsertTransaction({ planId: p.id, authorizationId, op, txHash });
+    const result = await verifyAndStore({ id: p.id, plan: p.plan }, authorizationId, op, txHash, auth.wallet);
+    res.status(202).json(json({ txHash, ...result }));
+  }));
+
+  app.get("/transactions/:hash", h(async (req, res) => {
+    const [t] = await db.query(`select t.*, a.wallet from transactions t left join authorizations a on a.id = t.authorization_id where t.tx_hash = $1`, [P(req, "hash")]);
+    if (!t) return bad(res, "transaction not recorded", 404);
+    if (t.status === "submitted" || (t.confirmations ?? 0) < 3) {
+      const p = await db.getPlan(t.plan_id);
+      await verifyAndStore({ id: p.id, plan: p.plan }, t.authorization_id, t.op, t.tx_hash, t.wallet).catch(() => null);
     }
+    const [fresh] = await db.query(`select * from transactions where tx_hash = $1`, [P(req, "hash")]);
+    res.json(fresh);
+  }));
 
-    const sr = await deps.db.query(
-      `select s.strategy_version_hash, p.program_hash
-         from strategies s
-         left join aqua_programs p on p.strategy_id = s.id
-        where s.id = $1`,
-      [strategyId],
-    );
-    const row = sr[0];
-    if (!row || !row.program_hash) {
-      res.status(404).json({ error: "strategy has no compiled program — nothing to authorize" });
-      return;
-    }
+  app.get("/activity/:wallet", h(async (req, res) => {
+    if (!isAddress(P(req, "wallet"))) return bad(res, "invalid wallet");
+    const [investigations, transactions] = await Promise.all([
+      db.query(
+        `select id, wallet, status, error, created_at as "createdAt", updated_at as "updatedAt", (summary_json->'counts') as counts
+           from investigations where lower(wallet) = lower($1) order by created_at desc limit 50`,
+        [P(req, "wallet")],
+      ),
+      db.listTransactions({ wallet: P(req, "wallet") }),
+    ]);
+    res.json({ investigations, transactions });
+  }));
 
-    // 1) Issue bound claims with a fresh challenge.
-    const claims = issueAgentPassClaims(deps.worldCfg, {
-      strategyId: String(strategyId),
-      strategyVersionHash: String(row.strategy_version_hash),
-      programHash: String(row.program_hash),
-      action: String(action),
-    });
-    await deps.db.issueChallenge(String(strategyId), claims.challenge);
-
-    // 2) Sign (demo HMAC path; production replaces this with World's
-    //    Ed25519 verification against the registry).
-    const signed = signProof(claims, { ...deps.worldCfg, demoKey: deps.demoKey });
-
-    // 3) Server-side verification of every binding.
-    const verified = verifyProof(signed, {
-      expectedStrategyVersionHash: String(row.strategy_version_hash),
-      expectedProgramHash: String(row.program_hash),
-      expectedAction: String(action),
-      worldId: claims.worldId,
-      challenge: claims.challenge,
-      usedChallenges: await deps.db.consumedChallenges(String(strategyId)),
-      demoKey: deps.demoKey,
-    });
-
-    // 4) Record + consume the challenge (replay protection).
-    await deps.db.markChallengeConsumed(claims.challenge);
-    await deps.db.insertAuthorization(
-      String(strategyId),
-      verified.claims,
-      verified.signature,
-      verified.validated,
-      verified.validation,
-    );
-
-    res.json({
-      worldId: claims.worldId,
-      strategyId,
-      challenge: claims.challenge,
-      validated: verified.validated,
-      validation: verified.validation,
-      note: "Mock proof flow (hackathon-supported). Not production identity verification.",
-    });
-  });
-
-  // ------------------------------------------------------------------
-  app.get("/archives/:id", async (req: Request, res: Response) => {
-    const rows = await getArchivesFor(deps, req.params.id);
-    const demo = rows.some((r) => r.demo);
-    res.json({
-      archives: rows,
-      // The UI must show the demo label when any ref is a demo archive.
-      allDemo: demo && rows.length > 0,
-    });
+  // Error handler: scrubbed message, no stack traces to clients.
+  app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+    const msg = scrubSecrets(err?.message ?? String(err));
+    console.error("[api] error:", msg);
+    res.status(500).json({ error: msg.slice(0, 300) });
   });
 
   return app;

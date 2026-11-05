@@ -1,179 +1,87 @@
 /**
- * BullMQ worker: runs the deterministic pipeline as a background job.
+ * Job queue for investigations.
  *
- * Job shape:
- *   {
- *     wallet,
- *     events?: V3Event[],      // supplied when already fetched
- *     rpcUrl?,
- *     priceSeries?,
- *     observedRange?,
- *     db: investigationId      // the investigations row to update
- *   }
- *
- * The worker is the *only* place a job failure turns into a `failed`
- * investigation row; API requests return the investigation id immediately
- * and the client polls it (GET /investigations/:id).
- *
- * Two queue backends exist:
- *   - BullMQ (Redis) — the default, durable path.
- *   - createInMemoryPipelineQueue — a same-process fallback used when Redis
- *     is unreachable (index.ts probes on boot). It runs the identical
- *     runPipelineJob body so behaviour never depends on the backend; the
- *     trade-off (no durability, no cross-process workers) is labelled in
- *     /health and the startup log — never implied away.
+ *   - BullMQ on Redis (default, durable). The Upstash URL is `rediss://` (TLS +
+ *     password), so the connection is an ioredis client built from the FULL
+ *     URL — never a host/port pair that silently drops TLS and auth.
+ *   - In-process FIFO fallback when Redis is unreachable, reported as
+ *     "in-memory" in /health and /integrations.
  */
-import { Queue, Worker, QueueEvents } from "bullmq";
-import { createTraceClient, makeChainError } from "@trace/chain-data";
-import { runPipeline } from "./pipeline.js";
-export const QUEUE_NAME = "trace-pipeline";
-/**
- * The pipeline job body, shared by the BullMQ worker and the in-memory
- * queue. Keeping it in one place guarantees both backends run identical
- * reconstruction + persistence semantics.
- */
-export async function runPipelineJob(data, db, cfg) {
-    const { wallet, investigationId } = data;
-    await db.setInvestigationStatus(investigationId, "reconstructing");
-    // 1) Events: supplied, or fetched live. A live fetch failure falls
-    //    back to the caller-supplied events (the labelled fixture) and the
-    //    investigation's source is recorded as demo_fixture.
-    let events;
-    let source = "live";
-    if (data.events) {
-        events = data.events;
-        source = "demo_fixture"; // caller-supplied = labelled fixture
-    }
-    else {
-        try {
-            if (!data.rpcUrl)
-                throw makeChainError("RPC_UNREACHABLE", "no RPC endpoint configured");
-            const client = createTraceClient({ rpcUrl: data.rpcUrl });
-            events = await client.fetchV3Events(wallet, { fromBlock: data.fromBlock, toBlock: data.toBlock });
-        }
-        catch (err) {
-            if (!data.events) {
-                await db.setInvestigationStatus(investigationId, "failed", `no live events and no fallback: ${err.message}`);
-                throw err;
-            }
-            events = data.events;
-            source = "demo_fixture";
-        }
-    }
-    // 2) Deterministic pipeline.
-    const result = await runPipeline({
-        events,
-        wallet,
-        cfg: {
-            ...cfg,
-            priceSeries: data.priceSeries,
-            observedRange: data.observedRange,
-        },
-    });
-    // 3) Persist under the investigation row the API created. Postgres is
-    //    the source of record the UI reads back; if it's down the job
-    //    still resolves with the in-memory result and the API surfaces the
-    //    outage honestly (no silent degradation of the UI).
+import { Queue, Worker } from "bullmq";
+import { Redis as IORedis } from "ioredis";
+import { runInvestigation } from "./pipeline.js";
+export const QUEUE_NAME = "trace-investigations";
+export function redisConnection(url) {
+    return new IORedis(url, { maxRetriesPerRequest: null, enableReadyCheck: true, lazyConnect: true });
+}
+export async function redisReachable(url) {
+    if (!url)
+        return false;
+    const r = redisConnection(url);
     try {
-        await db.updateInvestigationResult(investigationId, {
-            source,
-            eventsFingerprint: result.reconstruction.eventsFingerprint,
-            summary: result.reconstruction,
-            periodFromTs: result.reconstruction.period.fromTs,
-            periodToTs: result.reconstruction.period.toTs,
-        });
-        await db.insertEvents(investigationId, events);
-        const strategyId = await db.insertStrategy(investigationId, result.strategy, result.strategy.id, result.strategyVersionHash, result.strategy.family, result.strategy.confidence, result.strategy.source.provider);
-        if (result.backtest)
-            await db.insertBacktest(strategyId, result.backtest);
-        if (result.program && result.compatibility) {
-            await db.insertProgram(strategyId, result.program, result.compatibility);
-        }
-        await db.insertArchives(investigationId, result.archives);
-        await db.setInvestigationStatus(investigationId, "done");
+        await r.connect();
+        return (await r.ping()) === "PONG";
     }
-    catch (dbErr) {
-        console.error("[worker] persistence unavailable, resolving with result only:", dbErr.message);
+    catch {
+        return false;
     }
+    finally {
+        r.disconnect();
+    }
+}
+async function guarded(job, db, cfg) {
+    try {
+        await runInvestigation(job, db, cfg);
+    }
+    catch (err) {
+        const msg = String(err?.message ?? err).slice(0, 500);
+        console.error(`[worker] investigation ${job.investigationId} failed:`, msg);
+        await db.setStatus(job.investigationId, "failed", { errorCode: "PIPELINE_ERROR" }, `PIPELINE_ERROR: ${msg}`).catch(() => { });
+    }
+}
+export function createBullQueue(cfg, db) {
+    const queue = new Queue(QUEUE_NAME, {
+        connection: redisConnection(cfg.redisUrl),
+        defaultJobOptions: { attempts: 1, removeOnComplete: 200, removeOnFail: 500 },
+    });
+    const worker = new Worker(QUEUE_NAME, async (job) => guarded(job.data, db, cfg), {
+        connection: redisConnection(cfg.redisUrl),
+        concurrency: 2,
+        // Investigations spend minutes in rate-limited RPC reads. A short lock lets
+        // BullMQ mark the job "stalled" and run it twice; never re-run a job — a
+        // crashed run is marked failed by guarded()/the stale check instead.
+        lockDuration: 15 * 60_000,
+        stalledInterval: 5 * 60_000,
+        maxStalledCount: 0,
+        // Upstash bills per command: poll an empty queue slowly.
+        drainDelay: 30,
+    });
+    worker.on("error", (err) => console.error("[worker] bullmq error:", err.message));
     return {
-        investigationId,
-        source,
-        degraded: result.degraded,
-        degradedSteps: result.degradedSteps,
-        result,
+        backend: "bullmq",
+        add: async (job) => {
+            await queue.add("investigate", job, { jobId: job.investigationId });
+        },
     };
 }
-/** Default backend: durable jobs on Redis via BullMQ. */
-export function startPipelineWorker(connection, db, cfg) {
-    const worker = new Worker(QUEUE_NAME, async (job) => runPipelineJob(job.data, db, cfg), { connection: { host: connection.host, port: connection.port } });
-    worker.on("failed", async (job, err) => {
-        if (job?.data.investigationId) {
-            await db.setInvestigationStatus(job.data.investigationId, "failed", err.message).catch(() => { });
-        }
-    });
-    return worker;
-}
-export function createPipelineQueue(connection) {
-    return new Queue(QUEUE_NAME, {
-        connection: { host: connection.host, port: connection.port },
-        defaultJobOptions: {
-            attempts: 2,
-            backoff: { type: "exponential", delay: 5000 },
-            removeOnComplete: 200,
-            removeOnFail: 500,
-        },
-    });
-}
-/**
- * Fallback backend: an in-process FIFO queue running the same
- * runPipelineJob body. No durability — a process restart loses queued
- * jobs, and there is no cross-process scaling. index.ts reports
- * `queue: "in-memory"` in /health so the degraded capability is visible,
- * not implied.
- */
-export function createInMemoryPipelineQueue(db, cfg) {
+export function createInMemoryQueue(cfg, db) {
     const pending = [];
-    let draining = false;
-    async function drain() {
-        if (draining)
-            return;
-        draining = true;
-        try {
-            for (;;) {
-                const entry = pending.shift();
-                if (!entry)
-                    break;
-                try {
-                    await runPipelineJob(entry.data, db, cfg);
-                }
-                catch (err) {
-                    if (entry.retries < 1 && entry.data.investigationId) {
-                        // one retry, mirroring BullMQ's defaultJobOptions.attempts: 2
-                        entry.retries += 1;
-                        pending.push(entry);
-                    }
-                    else {
-                        if (entry.data.investigationId) {
-                            await db.setInvestigationStatus(entry.data.investigationId, "failed", err.message).catch(() => { });
-                        }
-                    }
-                }
-            }
+    let running = 0;
+    const pump = () => {
+        while (running < 2 && pending.length) {
+            const job = pending.shift();
+            running++;
+            void guarded(job, db, cfg).finally(() => {
+                running--;
+                pump();
+            });
         }
-        finally {
-            draining = false;
-            if (pending.length > 0)
-                void drain(); // work arrived mid-drain
-        }
-    }
-    return {
-        add: async (_jobId, data) => {
-            pending.push({ data, retries: 0 });
-            void drain();
-        },
-        backend: "in-memory",
     };
-}
-export function investigationEvents(connection) {
-    return new QueueEvents(QUEUE_NAME, { connection: { host: connection.host, port: connection.port } });
+    return {
+        backend: "in-memory",
+        add: async (job) => {
+            pending.push(job);
+            pump();
+        },
+    };
 }

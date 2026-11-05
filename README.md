@@ -1,237 +1,117 @@
-# TRACE — On-Chain Strategy Intelligence
+# TRACE — On-Chain Strategy Intelligence (Ethereum Sepolia)
 
-> **Understand the strategy behind any wallet.**
-> Reconstruct Uniswap V3 liquidity behaviour. Discover recurring patterns.
-> Validate them against history. Compile the compatible rules into executable
-> 1inch Aqua programs.
+> **Understand the strategy behind any wallet.** TRACE reconstructs real Uniswap V3 liquidity behaviour on Sepolia, infers the strategy from on-chain evidence, backtests it on real pool swaps, and ships the compatible rules to **1inch Aqua** as a strategy signed by your own wallet.
 
-Category: On-Chain Strategy Intelligence · Built for ETHGlobal Mumbai 2026.
-
-The central experience is a single continuous pipeline:
+Built for ETHGlobal Mumbai 2026. **Testnet only** (Sepolia, 11155111). There are no demo data, mock chain responses or simulated successes anywhere in the product. Every integration is either live or labelled with exactly why it is not.
 
 ```
-INVESTIGATE  →  RECONSTRUCT  →  DISCOVER  →  VALIDATE  →  EXECUTE
+INVESTIGATE → RECONSTRUCT → DISCOVER (Strategy DNA + 0G) → VALIDATE (backtest) → EXECUTE (Aqua)
 ```
 
-A user enters a wallet, TRACE reconstructs what happened on-chain, discovers the
-recurring behaviour, explains the possible strategy with evidence, tests it
-against history, and translates the compatible rules into a new executable Aqua
-strategy with explicit human authorization.
+## The problem
+LP strategies are visible on-chain only as raw logs: mints, liquidity changes and collects across NFTs and pools. Copying "what a good LP does" today means guessing.
 
----
+TRACE turns those logs into an evidence-backed, versioned **Strategy IR**. Every claim links to a transaction. The IR is tested on real pool history and compiled into an executable Aqua strategy. TRACE never pretends the Aqua strategy *is* the original NFT.
 
-## Quick start (exact commands)
+## Features
+- **Real wallet connectivity.** MetaMask via wagmi + viem, Sepolia-only config, wrong-network detection and switching, account and chain change handling.
+- **Real Uniswap V3 data.**
+  - Sources: ERC-721 discovery, lifecycle logs, `positions()`, pool metadata, receipts (real gas), and pool `Swap` price history.
+  - Addresses are verified against the official Uniswap docs and probed with `eth_getCode`.
+- **Reconstruction.** Order-independent, with principal and fees strictly separate (V3 `Collect` = owed principal + fees, split correctly) and real token decimals.
+- **Strategy DNA.** Range width, re-set frequency, duration, time in range, capital changes, fee cadence, withdraw → redeploy, gas.
+- **0G Private Computer inference.**
+  - Real 0G Router calls with `verify_tee`. The output is gated deterministically: tx-cited evidence only, capped confidence, `inconclusive` when evidence is thin.
+  - Real request IDs are stored. Failures are shown as failures.
+- **Strategy IR v2.** Immutable, content-addressed versions with entry / adjustment / exit / risk / fee rules, evidence references, alternatives and limitations.
+- **Backtesting on real swaps.**
+  - Runs: observed replay, inferred counterfactual, passive LP, buy & hold.
+  - Uses canonical V3 math and a fee model built from the real swap flow.
+  - The look-ahead guard is enforced in code *and* in the database.
+- **1inch Aqua / SwapVM.**
+  - Rule-by-rule compatibility with on-chain checks.
+  - A deterministic SwapVM order compiled with the official SDKs.
+  - Exact-amount approvals, ship and dock signed in MetaMask, and receipt and event verification.
+- **Authorization.** An EIP-712 signature bound to the strategy version, plan hash, action, a single-use challenge and an expiry, verified server-side. World ID v4 (staging) can be layered on top.
+- **0G Storage.** Genuine Galileo uploads with Merkle-proof read-back. A reference is shown only after a successful upload.
 
-### 1. The web app (the demo)
+## Integration status (2026-11-06)
+| | |
+|---|---|
+| Sepolia RPC, Uniswap V3 data | **VERIFIED TESTNET** |
+| Postgres (Supabase), BullMQ (Upstash Redis) | **VERIFIED LIVE** |
+| 1inch Aqua ship/dock | **IMPLEMENTED BUT NOT VERIFIED** on Sepolia (simulates OK; full cycle passes on a Sepolia fork against the real contracts) |
+| Aqua swap (taker) | **BLOCKED BY EXTERNAL DEPENDENCY**: 1inch KycNFT required |
+| 0G inference | **BLOCKED BY EXTERNAL DEPENDENCY**: key fixed to *private* trust mode, no private providers available |
+| 0G Storage | **BLOCKED BY EXTERNAL DEPENDENCY**: uploader wallet needs testnet 0G |
+| World ID v4 | **BLOCKED BY EXTERNAL DEPENDENCY**: credentials not configured |
 
-```bash
-npm install          # installs next/react/tailwind + symlinks the @trace/* workspaces
-npm run dev          # → http://localhost:3000
-```
-
-That is the whole demo: every screen runs on the labelled fixture with the
-**DEMO DATA** badge, fully offline, no env file needed.
-
-### 2. Everything that can be run without network access
-
-The offline scaffolding (`typecheck-stubs.d.ts`, `tsconfig.typecheck.json`,
-`tsconfig.server.json`, `packages/tsconfig.check.json`, `packages/types/*.d.ts`)
-was written because this project was scaffolded without registry access. All of
-it still works and is the fastest way to verify a change in a minute:
-
-```bash
-npm run typecheck          # frontend + engine packages + server, three tsc projects
-npm test                   # build engine dist + run the whole suite (node:test, 64 tests)
-```
-
-`npm test` covers the engine packages, the **complete wallet-investigation
-pipeline workflow** (`runPipeline` + the Express API routes in-process), strategy
-inference, backtesting, evidence validation, Aqua compatibility/compile, World
-Agent Pass sign/verify (including tamper + replay rejection), 0G storage
-labelling, and the frontend data layer + navigation surface.
-
-### 3. The full stack (API + worker + Postgres + Redis)
-
-```bash
-# one-time
-npm install                              # installs server deps (express, pg, bullmq, viem)
-createdb trace
-psql trace -f db/schema.sql             # load the schema (the server exits if it isn't there)
-
-# server (API on :4000 + BullMQ worker in the same process)
-npm run build:packages                   # engines → dist/
-npm run build:server                     # + server → server/dist/
-DATABASE_URL=postgres://postgres:postgres@localhost:5432/trace \
-REDIS_URL=redis://localhost:6379 \
-npm run start:server
-
-# web app wired to the API (new terminal)
-cp .env.example .env.local               # then:
-#   NEXT_PUBLIC_TRACE_API_URL=http://localhost:4000
-npm run dev                              # → http://localhost:3000
-```
-
-With `NEXT_PUBLIC_TRACE_API_URL` set, the UI queues real investigations against
-the API and shows the **live** source label; with it unset, the same screens
-run the labelled demo path and the badge stays on.
-
----
-
-## What is real and what is mocked
-
-TRACE is designed so the **intelligence pipeline is the product**, and it is
-important to be precise about which parts are live integrations and which are
-clearly-labelled demo fixtures.
-
-| Capability | Status | Where it lives |
-|---|---|---|
-| Uniswap V3 position reconstruction (order-independent replay, principal ≠ fees) | **Real, deterministic** | `packages/uniswap-v3` |
-| Behavioural fingerprints + rule mining + family scoring | **Real, deterministic** | `packages/strategy-inference` |
-| 0G inference *gate* (schema validation + evidence audit + deterministic id) | **Real** — gates any LLM proposal; the **model call** is the demo path unless `ZERO_G_ENDPOINT`+`ZERO_G_API_KEY` are set | `packages/strategy-inference/src/zero-g.ts` |
-| Look-ahead-safe backtester (canonical V3 position math, train/test split enforced) | **Real, deterministic** | `packages/backtester` |
-| 1inch Aqua compatibility + deterministic IR→program compile | **Real logic** — the capability model is structural; a live build verifies it against Aqua's actual capabilities | `packages/aqua-adapter` |
-| World Agent Pass bound-claims (sign + server-side verify, replay protection) | **Real verification logic, demo signature** (HMAC demo key, not World's Ed25519 registry) | `packages/world-auth` |
-| 0G Storage archiving | **Real client; demo refs** when `ZERO_G_STORAGE_ENDPOINT` is unset — every ref carries `demo: true` and the UI must label it | `packages/zero-g-storage` |
-| Live chain reads (NPM log decode via viem) | **Real client, needs an RPC** per request; typed errors fall back to the labelled fixture | `packages/chain-data` |
-| Express API + BullMQ worker + Postgres persistence | **Real** — routes, queue, and `db/schema.sql` | `server/`, `db/` |
-| Frontend data layer (queue/poll, live↔demo badge, fixture→wire adapter) | **Real** | `src/lib/live.ts` |
-| Editorial design system (ivory/charcoal/gold/sage) + 8 screens + SVG charts | **Real** | `src/components/`, `src/app/`, `tailwind.config.js` |
-| The investigation dataset itself (positions, events, equity series) | **Labelled demo fixture** | `src/lib/fixture.ts` — **DEMO DATA badge on every screen that renders it** |
-
-The rule the product lives by: **no fabricated data is presented as real.**
-Degradation is explicit: if a live step fails, the pipeline falls back to the
-labelled fixture *for that step* and flags the result `degraded` with the exact
-reasons — it is never labelled "live".
-
----
+Live status: `GET /integrations`, or the **Reports** screen. Details are in [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
 
 ## Architecture
-
-A modular monorepo (npm workspaces): the web app, eight deterministic engine
-packages, and a single Express/BullMQ/Postgres deployable.
-
 ```
-src/                      Next.js 14 App Router web app (8 pages)
-  app/                    investigate · positions/[id] · strategy · backtest
-                         execute · reports · activity · saved
-  components/             app-shell, ui, charts, investigate
-  lib/                    fixture.ts (labelled demo data) · live.ts (API data layer)
-
-packages/                 The engine — zero-runtime-dependency TS, runs in
-  strategy-ir             shared data contract, canonical hashing, schema gates
-  uniswap-v3              event → position ledger + accounting
-  strategy-inference      fingerprints, rule mining, 0G gate
-  backtester              look-ahead-safe simulation
-  aqua-adapter            NFT→Aqua compatibility + deterministic compile
-  world-auth              Agent Pass bound-claims sign/verify
-  zero-g-storage          archiving client (live + labelled demo paths)
-  chain-data              viem client: NPM logs → IR V3Event shapes
-  types/                  offline ambient stubs (only used without node_modules)
-
-server/                   Express API + BullMQ worker + pg persistence
-db/schema.sql             Postgres schema (incl. a DB-level no-look-ahead trigger)
-test/                     node:test suite — engines, pipeline, API workflow, UI
-scripts/build-packages.mjs offline two-phase build → each package's dist/
+Next.js (wagmi, Sepolia) ──► Express API ──► BullMQ worker ──► chain-data (viem, Sepolia)
+        │  wallet signs txs        │                │            uniswap-v3 · strategy-inference (+0G Router)
+        ▼                          ▼                ▼            backtester · zero-g-storage (0G Galileo)
+   Sepolia (Aqua, ERC-20)     Postgres (Supabase)  aqua-adapter (1inch SDKs) · world-auth (EIP-712 + World ID)
 ```
+More detail in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-Key integrity rules encoded in the product:
+**Stack:**
+- Frontend: Next.js 14, React 18, Tailwind, wagmi 3, viem 2, TanStack Query.
+- Backend: Express, BullMQ, ioredis, pg.
+- Integrations: @1inch/aqua-sdk, @1inch/swap-vm-sdk, @0gfoundation/0g-storage-ts-sdk, @worldcoin/idkit-core.
+- Testing: Foundry (anvil), node:test, Playwright.
 
-- **Blockchain evidence is first-class.** Every lifecycle event links to a
-  tx hash, block, and block-explorer link. Position accounting keeps principal
-  withdrawals strictly distinct from fees.
-- **The AI is not the source of blockchain truth.** Deterministic behavioural
-  fingerprints are computed from events first; the 0G model only proposes a
-  structured Strategy IR, which is then schema-validated and evidence-audited
-  against the deterministic layer before it is ever trusted.
-- **No look-ahead bias.** Backtests align on block time, separate the
-  inference (train) window from the backtest (test) window, and state all
-  gas/slippage assumptions. The invariant is enforced in the engine, the IR
-  validator, and again in the database (trigger).
-- **Human authorization is real and required.** No transaction ships without a
-  World Agent Pass proof bound to the user, strategy version, execution plan,
-  action, expiry, and a unique challenge — independently validated server-side,
-  with replay protection.
-- **No arbitrary bytecode.** The compiler is deterministic (same input → same
-  program hash, which the proof pins); the LLM only feeds a validated
-  structure. No unlimited token approvals by default.
-
----
-
-## Environment
-
-See `.env.example` (committed template; copy to `.env` / `.env.local`).
-
-| Variable | Consumed by | Meaning when set |
-|---|---|---|
-| `DATABASE_URL` | server | Postgres for investigations/strategies/backtests/authorizations/archives |
-| `REDIS_URL` | server | BullMQ queue (default `redis://localhost:6379`) |
-| `PORT` | server | API+worker port (default 4000) |
-| `ZERO_G_ENDPOINT` / `ZERO_G_API_KEY` | server | live 0G Private Computer inference (unset → labelled deterministic demo path) |
-| `ZERO_G_STORAGE_ENDPOINT` / `ZERO_G_STORAGE_KEY` | server | live 0G archiving (unset → labelled `… · demo` refs, never called live) |
-| `WORLD_DEMO_ID` / `WORLD_DEMO_KEY` | server | Agent Pass world id + demo HMAC key |
-| `NEXT_PUBLIC_TRACE_API_URL` | web (browser) | points the UI at the API; unset → every screen runs the labelled fixture |
-
-No RPC key is required anywhere: live chain reads take an `rpcUrl` **per
-request** on `POST /investigations`, so a deployment can read any chain without
-baking a key into env.
-
----
-
-## Design system
-
-The visual direction is **editorial luxury fintech × institutional research
-terminal × on-chain intelligence** — not a generic dark-mode SaaS dashboard.
-
-- **Surfaces** — warm ivory `#F3EBDD` / paper `#FAF7F0`, charcoal `#171714` /
-  deep `#11110F`, stone `#E9E0D0`, graphite `#252520`.
-- **Accents** — antique gold `#B68A42` (used sparingly, for importance), muted
-  gold `#C6A66B`, sage `#78866B`, deep forest `#344C3A`.
-- **Typography** — Playfair Display (serif headings) + Inter (body), tabular
-  numerals for all financial figures, small uppercase letter-spaced labels.
-- **Illustration** — fine-line engravings, topographic contours, restrained
-  gold line work, subtle paper grain. One coherent icon family (Lucide,
-  consistent stroke weight).
-- **Charts** — dark analytical surfaces with muted gold/sage data; live data is
-  always real SVG/HTML, never a generated image.
-
----
-
-## Testing
-
+## Setup
 ```bash
-npm test                      # build engine dist + 64 tests (node:test)
-npm test:engines              # the suite without rebuilding dist
+npm install
+cp .env.example .env.local     # see docs/TESTNET_SETUP.md for every variable
+npm run db:migrate
+npm run build:server && npm run start:server   # API + worker  → :4000
+npm run build && npm run start                 # web app       → :3000
 ```
 
-Coverage map: `strategy-ir` (canonical hashing, schema gates), `uniswap-v3`
-(reconstruction invariants), `strategy-inference` (fingerprints + 0G gate,
-including the no-evidence and schema-invalid rejection paths), `backtester`
-(look-ahead guard, canonical V3 value formula, determinism), `aqua-adapter`
-(compatibility verdicts, deterministic compile, no unlimited approvals),
-`world-auth` (valid proof / tampered hash / replay / wrong key / expiry),
-`zero-g-storage` (demo labelling, hard-fail live writes), `pipeline`
-(the full reconstruction→inference→backtest→compile→archive workflow with and
-without a price series), `api` (the same workflow through the Express route
-handlers, with in-memory db/queue stand-ins since Postgres/Redis aren't in
-this environment), and `frontend` (data-layer demo paths + navigation).
+**Environment variables:**
+- Required: `SEPOLIA_RPC_URL`, `DATABASE_URL`.
+- Recommended: `REDIS_URL`.
+- Optional (0G): `ZERO_G_ROUTER_URL`, `ZERO_G_API_KEY`, `ZERO_G_MODEL`, `OG_STORAGE_*`.
+- Optional (World ID): `WORLD_*`.
 
----
+The full template is [.env.example](.env.example). The server validates its configuration at startup, prints which variables are set (never their values), and refuses a non-Sepolia setup.
 
-## Three-minute demo script
+## Using TRACE
+1. **Connect your wallet.** Click **Connect wallet**. TRACE requests Sepolia and blocks signing on other networks.
+2. **Run an investigation.** Enter an address, use your connected wallet, or pick a live-discovered LP. Choose a window and click **Investigate**.
+3. **How inference works.** Deterministic Strategy DNA comes first. Then the 0G model proposes a hypothesis, and the gate keeps only rules that cite real transactions, with confidence capped at the deterministic support. If 0G is unavailable, the evidence-only analysis is shown and labelled as such.
+4. **How backtesting works.** The pool's real Swap events are split into train and test windows; the test window starts strictly after training. Each decision uses only earlier swaps. Fees come from the real swap flow × fee tier × liquidity share. With too few swaps, the result is *insufficient data*.
+5. **How Aqua works.**
+   - Compatibility is checked rule by rule, alongside on-chain checks.
+   - The supported rules compile into an `AquaXYCAmmStrategy.newConcentrate` order built from the position's real ticks and fee tier.
+   - You sign an EIP-712 authorization, then approve (exact amounts), ship and, optionally, dock in MetaMask. Each transaction is verified from its receipt.
 
-- **0:00–0:20** — "Blockchain shows us transactions. TRACE reveals the strategy
-  behind them." Introduce the problem on the Investigate hero.
-- **0:20–0:45** — Load the sample public Uniswap V3 LP (`0x2C…E37C`), run
-  Investigate Wallet, watch the five-stage reconstruction pipeline.
-- **0:45–1:10** — Open Position Intelligence: reconstructed range occupancy,
-  lifecycle events, and the transaction-evidence drawer.
-- **1:10–1:35** — Reveal the 0G strategy hypothesis on Strategy Intelligence.
-- **1:35–2:00** — Show Strategy DNA and the Strategy Lab equity/drawdown
-  comparison against benchmarks.
-- **2:00–2:25** — Aqua compatibility + deterministic compilation.
-- **2:25–2:45** — World Agent Pass human authorization.
-- **2:45–3:00** — Verified execution receipt and the 0G Storage reference.
+The step-by-step judge flow is in [docs/DEMO_FLOW.md](docs/DEMO_FLOW.md).
 
-The demo runs end-to-end on the labelled fixture, so it is repeatable without
-network access. Where live integrations are wired up, the same screens swap the
-fixture for real data and the badges switch off.
+## Tests
+```bash
+npm run typecheck   # frontend + 9 packages + server
+npm test            # unit + API security tests on real captured Sepolia data
+npm run test:live   # live Sepolia integration
+npm run test:fork   # real 1inch Aqua contracts on an Anvil Sepolia fork: approve → ship → dock
+npm run test:e2e    # Playwright against the running app
+```
+
+## Security
+Sepolia-only enforcement, user-held keys only, server-verified EIP-712 with replay protection, exact approvals, simulation before signing, scrubbed secrets, CORS and rate limits, and immutable evidence in the database. See [docs/SECURITY.md](docs/SECURITY.md).
+
+## Known limitations
+See [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md). In short:
+- The current 0G key has no available private-tier providers.
+- The 0G Storage uploader needs faucet funds.
+- Aqua's taker side needs the KycNFT.
+- Aqua on Sepolia uses 1inch's documented test deployment.
+- Free-tier RPC limits make large wallets slow.
+- Many Sepolia pools have no swaps to backtest against.
+
+## Design
+Editorial luxury fintech: ivory and charcoal surfaces, antique gold accents, sage for verified states, Playfair Display + Inter, fine-line borders, and hand-built SVG charts drawn from real data only.

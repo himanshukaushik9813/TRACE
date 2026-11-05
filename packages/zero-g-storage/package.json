@@ -3,14 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "0G Storage archiving client. Live path POSTs to the 0G storage endpoint; demo path records a labelled ref. Every StorageRef is flagged demo=true/false so archives are never mistaken for live 0G writes.",
+  "description": "Genuine 0G Storage (Galileo testnet) archiving: upload → rootHash/txHash, Merkle-proof read-back verification. No demo references.",
   "dependencies": {
-    "@trace/strategy-ir": "0.1.0"
+    "@trace/strategy-ir": "0.1.0",
+    "@0gfoundation/0g-storage-ts-sdk": "^1.2.13",
+    "ethers": "6.13.1"
   },
   "main": "dist/index.js",
   "exports": {
-    ".": "./dist/index.js",
-    ".types": "./dist/index.d.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
   },
   "types": "dist/index.d.ts"
 }

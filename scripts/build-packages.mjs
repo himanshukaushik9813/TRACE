@@ -32,6 +32,7 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("..", import.meta.url));
 // Strict dependency order: every entry may only depend on earlier ones.
 const order = [
+  "chain-config",
   "strategy-ir",
   "uniswap-v3",
   "strategy-inference",

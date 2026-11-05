@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022"],
+    "lib": ["ES2022", "DOM"],
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "outDir": "dist",
@@ -11,9 +11,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    // Deliberately no "types": [] — a real build relies on @types/node
-    // (installed at the workspace root) for `process`. The offline check
-    // (tsconfig.server.json) instead pulls in packages/types/*.d.ts stubs.
+    "types": ["node"]
   },
   "include": ["src/**/*.ts"]
 }

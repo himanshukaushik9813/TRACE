@@ -14,10 +14,11 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "types": []
+    "types": [
+      "node"
+    ]
   },
   "include": [
-    "src/**/*.ts",
-    "../types/viem.d.ts"
+    "src/**/*.ts"
   ]
 }

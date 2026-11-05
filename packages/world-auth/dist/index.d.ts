@@ -1,1 +1,1 @@
-export { issueAgentPassClaims, signProof, verifyProof, type WorldAuthConfig, type VerifyInput, } from "./proof.js";
+export { AUTH_DOMAIN, AUTH_TYPES, buildTypedData, newChallenge, worldSignal, verifyAuthorization, worldConfigured, worldRpRequest, verifyWorldProof, type VerifyInput, type WorldConfig, } from "./proof.js";

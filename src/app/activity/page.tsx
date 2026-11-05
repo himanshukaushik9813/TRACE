@@ -1,95 +1,77 @@
 "use client";
 
-import { useState } from "react";
-import {
-  Activity,
-  ScanSearch,
-  BrainCircuit,
-  Terminal,
-  FileText,
-  Filter,
-} from "lucide-react";
+import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Activity } from "lucide-react";
+import { isAddress } from "@trace/chain-config";
 import { Page } from "@/components/page";
-import { Card, Pill, DemoBadge, Tabs } from "@/components/ui";
-import { DEMO } from "@/lib/fixture";
+import { useSepoliaWallet } from "@/components/wallet";
+import { Card, EmptyState, ErrorState, ExplorerLink, LoadingState, Pill, SectionTitle, SourceBadge } from "@/components/ui";
+import { fmt } from "@/lib/format";
+import { api, useCurrentInvestigationId, useInvestigationStatus, withInv, type TxRow } from "@/lib/api";
+import Link from "next/link";
 
-type Kind = "position" | "inference" | "execution" | "report";
-const KIND_DEFAULT: Record<Kind, any> = {
-  position: ScanSearch,
-  inference: BrainCircuit,
-  execution: Terminal,
-  report: FileText,
-};
-
-const FEED: { kind: Kind; text: string; sub: string; when: string; tone?: "gold" | "sage" | "amber" }[] = [
-  { kind: "position", text: "Range re-set on ETH/USDC #12841", sub: "0x9f3a…b21c · block 21,834,102 · 3,080→3,920", when: "2024-06-11 09:24" },
-  { kind: "position", text: "Collected $412 fees on #12841", sub: "0x7c1d…40aa · block 21,890,551", when: "2024-07-03 14:11" },
-  { kind: "inference", text: "Strategy v0.3 inferred", sub: "0G-PC · TraceInfer · top: periodic range adj (61%)", when: "2024-12-02 06:40", tone: "gold" },
-  { kind: "position", text: "Decreased liquidity on #12841", sub: "0x12b8…9e01 · −1,180 liq · withdrew 301,500 USDC", when: "2024-08-01 20:47" },
-  { kind: "execution", text: "Compatibility report generated", sub: "partial · 1 full, 1 partial, 2 unsupported", when: "2025-09-14 11:02", tone: "amber" },
-  { kind: "inference", text: "Strategy v0.4 inferred", sub: "0G-PC · TraceInfer · top: active range mgmt (78%)", when: "2025-11-02 07:14", tone: "gold" },
-  { kind: "position", text: "Re-entered ETH/USDC after pullback", sub: "0xa4f0…c3d7 · +980 liq · 26h after exit", when: "2024-08-27 02:19" },
-  { kind: "report", text: "Investigation report archived", sub: "0G-STOR-arc_11a3 · dossier + backtest", when: "2025-11-02 07:20" },
-  { kind: "execution", text: "Execution plan signed (awaiting auth)", sub: "plan_8812 · ship-dock-swap · World pending", when: "2025-11-05 01:02", tone: "amber" },
-];
+type ActivityResp = { investigations: { id: string; status: string; error: string | null; createdAt: string; counts: { positions: number; events: number } | null }[]; transactions: TxRow[] };
 
 export default function ActivityPage() {
-  const [filter, setFilter] = useState<"all" | Kind>("all");
-  const rows = FEED.filter((f) => filter === "all" || f.kind === filter);
-  const kindLabel: Record<Kind, string> = { position: "Position", inference: "Inference", execution: "Execution", report: "Report" };
+  const w = useSepoliaWallet();
+  const [invId] = useCurrentInvestigationId();
+  const inv = useInvestigationStatus(invId);
+  const [wallet, setWallet] = useState<string>("");
+  useEffect(() => {
+    if (!wallet && (w.address || inv.data?.wallet)) setWallet(w.address ?? inv.data!.wallet);
+  }, [w.address, inv.data, wallet]);
+  const q = useQuery({ queryKey: ["activity", wallet], queryFn: () => api<ActivityResp>(`/activity/${wallet}`), enabled: isAddress(wallet), refetchInterval: 15_000 });
 
   return (
     <Page>
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
-        <div className="text-[0.78rem] text-ink-600 flex items-center gap-2">
-          <Activity size={15} className="text-gold" />
-          Activity · <span className="text-ink font-medium">{DEMO.wallet.display}</span>
-        </div>
-        <DemoBadge />
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+        <div className="text-[0.78rem] text-ink-600 flex items-center gap-2"><Activity size={15} className="text-gold" /> Activity</div>
+        <SourceBadge label="Postgres + Sepolia receipts" />
       </div>
-
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-        <Tabs
-          value={filter as any}
-          onChange={(v) => setFilter(v)}
-          tabs={[
-            { id: "all", label: "All" },
-            { id: "position", label: "Position" },
-            { id: "inference", label: "Inference" },
-            { id: "execution", label: "Execution" },
-            { id: "report", label: "Report" },
-          ]}
-        />
-        <div className="text-[0.72rem] text-ink-600 flex items-center gap-2">
-          <Filter size={13} /> {rows.length} events · sorted by time
-        </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <input value={wallet} onChange={(e) => setWallet(e.target.value.trim())} placeholder="0x… wallet" aria-label="Wallet" className="rounded-md2 border border-ink/15 bg-ivory-50 px-3 py-2 text-[0.85rem] tabular w-full sm:w-[440px]" />
+        {w.address && <button onClick={() => setWallet(w.address!)} className="text-[0.76rem] underline text-ink-600">connected wallet</button>}
+        {inv.data?.wallet && <button onClick={() => setWallet(inv.data!.wallet)} className="text-[0.76rem] underline text-ink-600">investigated wallet</button>}
       </div>
-
-      <div className="mt-5">
-        <Card pad={false} className="divide-y divide-ink/8">
-          {rows.map((f, i) => {
-            const Icon = KIND_DEFAULT[f.kind];
-            return (
-              <div key={i} className="flex items-center gap-4 px-5 py-3.5">
-                <div className={`h-9 w-9 grid place-items-center rounded-md border shrink-0 ${f.tone === "gold" ? "bg-gold/12 border-gold/30 text-gold" : f.tone === "amber" ? "bg-amber/12 border-amber/30 text-amber" : f.tone === "sage" ? "bg-forest/12 border-forest/30 text-forest" : "bg-ink/5 border-ink/10 text-ink-600"}`}>
-                  <Icon size={16} />
+      {!isAddress(wallet) && <div className="mt-4"><EmptyState title="Choose a wallet">Connect your wallet or enter an address to see its investigations and TRACE-recorded transactions.</EmptyState></div>}
+      {q.isLoading && <LoadingState />}
+      {q.isError && <ErrorState message={(q.error as Error).message} />}
+      {q.data && (
+        <>
+          <SectionTitle eyebrow="Signed in your wallet, verified from receipts" title="Transactions" />
+          {q.data.transactions.length === 0 ? (
+            <EmptyState title="No transactions recorded">Transactions appear here after you approve / ship / dock from the Execute screen.</EmptyState>
+          ) : (
+            <Card pad={false} className="divide-y divide-ink/8">
+              {q.data.transactions.map((t) => (
+                <div key={t.tx_hash} className="px-5 py-3 flex flex-col md:flex-row md:items-center gap-2 text-[0.8rem]">
+                  <Pill tone={t.op === "ship" ? "gold" : "neutral"}>{t.op}</Pill>
+                  <ExplorerLink kind="tx" value={t.tx_hash} />
+                  <span className="text-ink-600 flex-1">{t.outcome ?? ""}</span>
+                  <span className="text-ink-600 tabular">{t.block ? `block ${Number(t.block).toLocaleString("en-US")} · ${t.confirmations} conf.` : "pending"}</span>
+                  <Pill tone={t.status === "success" ? "forest" : t.status === "reverted" ? "brick" : "amber"}>{t.status}</Pill>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[0.9rem] text-ink font-medium">{f.text}</div>
-                  <div className="text-[0.72rem] text-ink-600 tabular mt-0.5 truncate">{f.sub}</div>
-                </div>
-                <Pill tone="neutral">{kindLabel[f.kind]}</Pill>
-                <span className="text-[0.7rem] text-ink-600/70 tabular w-32 text-right shrink-0">{f.when}</span>
-              </div>
-            );
-          })}
-        </Card>
-        <p className="text-[0.72rem] text-ink-600/70 mt-3 flex items-center gap-2">
-          <ScanSearch size={13} />
-          Timeline reconstructed from public event logs; inference and execution entries are model/backend
-          actions, clearly separated from on-chain position events.
-        </p>
-      </div>
+              ))}
+            </Card>
+          )}
+          <SectionTitle eyebrow="Persisted" title="Investigations" />
+          {q.data.investigations.length === 0 ? (
+            <EmptyState title="No investigations for this wallet" />
+          ) : (
+            <Card pad={false} className="divide-y divide-ink/8">
+              {q.data.investigations.map((i) => (
+                <Link key={i.id} href={withInv("/reports", i.id)} className="px-5 py-3 flex items-center gap-3 text-[0.82rem] hover:bg-ink/3">
+                  <span className="tabular text-ink-600">{new Date(i.createdAt).toLocaleString("en-US")}</span>
+                  <span className="flex-1 text-ink">{i.counts ? `${i.counts.positions} positions · ${i.counts.events} events` : (i.error ?? i.status).slice(0, 100)}</span>
+                  <Pill tone={i.status === "done" ? "sage" : i.status === "failed" ? "brick" : "gold"}>{i.status}</Pill>
+                </Link>
+              ))}
+            </Card>
+          )}
+          <div className="text-[0.7rem] text-ink-600 mt-3">Wallet <ExplorerLink kind="address" value={wallet}>{fmt.addr(wallet)}</ExplorerLink> on Sepolia Etherscan.</div>
+        </>
+      )}
     </Page>
   );
 }

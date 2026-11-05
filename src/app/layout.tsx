@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Playfair_Display } from "next/font/google";
 import "./globals.css";
+import { Providers } from "./providers";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -20,7 +21,7 @@ export const metadata: Metadata = {
     template: "%s · TRACE",
   },
   description:
-    "Reconstruct Uniswap V3 liquidity behaviour, reverse-engineer the strategy behind any wallet, validate it with backtests, and compile compatible rules into executable 1inch Aqua programs.",
+    "Reconstruct real Uniswap V3 liquidity behaviour on Ethereum Sepolia, infer the strategy behind a wallet from on-chain evidence, backtest it on real pool swaps, and ship compatible rules as a 1inch Aqua strategy signed by your own wallet.",
 };
 
 export default function RootLayout({
@@ -28,7 +29,9 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className={`${inter.variable} ${playfair.variable}`}>
-      <body className="bg-ivory text-ink antialiased">{children}</body>
+      <body className="bg-ivory text-ink antialiased">
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }

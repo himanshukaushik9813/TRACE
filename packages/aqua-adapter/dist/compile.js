@@ -1,89 +1,137 @@
 /**
- * Deterministic compile: StrategyIR (+ compatibility assessment) → AquaProgram.
+ * Deterministic compile: StrategyIR + its real basis position → ExecutionPlan.
  *
- * Rules the compiler enforces:
- *  - No raw bytecode is ever emitted. The program is structured intent
- *    (observe / adjust / collect / redeploy / swap / stop) that Aqua executes
- *    through its own verified paths.
- *  - Unlimited token approvals are never requested.
- *  - The program hash is a pure function of (strategyId, steps, approvals,
- *    assumptions): recompile the same input → same hash. The World proof
- *    pins this hash, so a silently-changed program can't be authorized under
- *    an old signature.
+ * The SwapVM program is built ONLY with the official typed builders
+ * (@1inch/swap-vm-sdk AquaXYCAmmStrategy), never from model output:
+ *   - range  → newConcentrate({ sqrtPriceMin, sqrtPriceMax }) from the
+ *              position's real ticks (sqrt(P·1e18), P = token1/token0 raw =
+ *              1.0001^tick); a full-range position → plain XYC AMM,
+ *   - fee    → withFeeTokenIn(bps) from the Uniswap fee tier,
+ *   - salt   → derived from (strategy id, maker) so recompiling the same
+ *              inputs yields the same order bytes and strategy hash.
+ * Transactions (exact-amount approvals, ship, dock) are encoded with
+ * @1inch/aqua-sdk against the configured Aqua registry + router.
+ *
+ * planHash = content hash of the canonical plan; the user's EIP-712
+ * authorization pins it, so a changed plan cannot reuse an old signature.
  */
-import { contentHash, validateProgram, } from "@trace/strategy-ir";
-const DEFAULTS = {
-    intervalMinutes: 60,
-    slippageBps: 12,
-    gasGweiAssumption: 32,
-    minOutPct: 99.2,
-};
-export function compileAquaProgram(ir, compat, cfg = {}) {
-    const c = { ...DEFAULTS, ...cfg };
+import { createRequire } from "node:module";
+import { encodeFunctionData, erc20Abi, getAddress } from "viem";
+import { contentHash, validatePlan, } from "@trace/strategy-ir";
+// @1inch/swap-vm-sdk@0.5.0's ESM build has an extensionless deep import that
+// Node cannot resolve; its CommonJS build is correct. Both SDKs are loaded via
+// CJS so they share one @1inch/sdk-core instance (Address/HexString classes).
+const require = createRequire(import.meta.url);
+const { AquaProtocolContract } = require("@1inch/aqua-sdk");
+const { Address, AquaXYCAmmStrategy, HexString, MakerTraits, Order } = require("@1inch/swap-vm-sdk");
+const FULL_RANGE_TICKS = 1_700_000;
+/** sqrt(P·1e18) for P = 1.0001^tick, as the on-chain fixed-point bigint. */
+export function sqrtPriceFromTick(tick) {
+    const v = Math.pow(1.0001, tick / 2) * 1e9;
+    if (!Number.isFinite(v) || v < 1)
+        throw new Error(`tick ${tick} is outside the representable SwapVM price range`);
+    return BigInt(Math.round(v));
+}
+export function feeBpsFromTier(feeTier) {
+    return Math.round(feeTier / 100); // hundredths of a bip → bps (3000 → 30)
+}
+export function compilePlan(input) {
+    const { ir, compat, basis } = input;
+    if (compat.verdict === "INCOMPATIBLE")
+        throw new Error("strategy is INCOMPATIBLE with Aqua — nothing to compile");
+    if (basis.decimals0 == null || basis.decimals1 == null)
+        throw new Error("token decimals unknown — cannot build exact amounts");
+    const a0 = BigInt(input.amount0);
+    const a1 = BigInt(input.amount1);
+    if (a0 < 0n || a1 < 0n || a0 + a1 === 0n)
+        throw new Error("ship amounts must be non-negative and not both zero");
+    const maker = getAddress(input.maker);
+    const registry = getAddress(input.registry);
+    const app = getAddress(input.app);
+    const token0 = getAddress(basis.token0);
+    const token1 = getAddress(basis.token1);
+    const feeBps = feeBpsFromTier(basis.feeTier);
+    const salt = BigInt(`0x${contentHash({ strategy: ir.id, maker }).digest.slice(0, 16)}`);
+    const fullRange = basis.tickUpper - basis.tickLower >= FULL_RANGE_TICKS;
+    const sqrtPriceMin = fullRange ? 0n : sqrtPriceFromTick(basis.tickLower);
+    const sqrtPriceMax = fullRange ? 0n : sqrtPriceFromTick(basis.tickUpper);
+    const strategy = fullRange ? AquaXYCAmmStrategy.new() : AquaXYCAmmStrategy.newConcentrate({ sqrtPriceMin, sqrtPriceMax });
+    if (feeBps > 0)
+        strategy.withFeeTokenIn(feeBps);
+    strategy.withSalt(salt);
+    const program = strategy.build();
+    const order = Order.new({ maker: new Address(maker), program, traits: MakerTraits.default() });
+    const orderHex = order.encode();
+    const strategyHash = AquaProtocolContract.calculateStrategyHash(orderHex).toString();
+    const aqua = new AquaProtocolContract(new Address(registry));
+    const tokens = [
+        { address: token0, symbol: basis.symbol0, decimals: basis.decimals0, amount: a0.toString() },
+        { address: token1, symbol: basis.symbol1, decimals: basis.decimals1, amount: a1.toString() },
+    ].filter((t) => BigInt(t.amount) > 0n);
     const steps = [];
-    // The program's clock.
-    steps.push({ op: "observe", intervalMinutes: c.intervalMinutes, source: "pool_price", ref: ir.id });
-    // Supported rules → structured actions. Unsupported rules are recorded as
-    // gaps, not silently compiled away.
-    for (const [i, r] of ir.rules.entries()) {
-        const supported = compat.rules[i]?.status === "supported";
-        const partial = compat.rules[i]?.status === "partial";
-        const key = r.mapsTo ?? "action";
-        if (key === "schedule" && supported) {
-            steps.push({ op: "collect_fees", when: { kind: "schedule", everyMinutes: c.intervalMinutes } });
-        }
-        if (key === "allocation" && (supported || partial)) {
-            steps.push({
-                op: "redeploy",
-                when: { kind: "schedule", everyMinutes: c.intervalMinutes },
-                targetPool: "primary",
-                allocationPct: 100,
-            });
-        }
-        if (key === "trigger" && (supported || partial)) {
-            // Price-exit triggers become scheduled checks (the partial gap): the
-            // check runs on the interval; between checks the trigger is not observed.
-            // Tick values come ONLY from the observed range; without one, the step
-            // is manual (a human sets the ticks) — never invented.
-            const obs = c.observedRange;
-            steps.push({
-                op: "adjust_range",
-                when: obs
-                    ? { kind: "price_exit", side: "above", refTick: obs.tickUpper, widthTicks: Math.abs(obs.tickUpper - obs.tickLower) }
-                    : { kind: "manual", note: "trigger ticks not observed — human must set range" },
-                newRange: obs
-                    ? { tickLower: obs.tickLower, tickUpper: obs.tickUpper }
-                    : { tickLower: 0, tickUpper: 0 },
-            });
-        }
-        if (key === "limit") {
-            // Risk limits are enforced as explicit stop conditions. The days value
-            // is the product's stated default (14d out-of-range exposure cap).
-            steps.push({ op: "stop", when: { kind: "max_out_of_range_days", days: 14 }, reason: "max out-of-range exposure" });
-        }
+    for (const t of tokens) {
+        steps.push({
+            op: "approve",
+            description: `Approve exactly ${t.amount} base units of ${t.symbol} to the Aqua registry (pulled only when a swap fills)`,
+            to: t.address,
+            data: encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: [registry, BigInt(t.amount)] }),
+            value: "0",
+            approval: { token: t.address, spender: registry, amount: t.amount },
+        });
     }
-    const program = {
+    const ship = aqua.ship({
+        app: new Address(app),
+        strategy: orderHex,
+        amountsAndTokens: tokens.map((t) => ({ token: new Address(t.address), amount: BigInt(t.amount) })),
+    });
+    steps.push({
+        op: "ship",
+        description: `Ship the strategy: set virtual balances (${tokens.map((t) => t.symbol).join(" + ")}) for strategy hash ${strategyHash.slice(0, 10)}…`,
+        to: ship.to.toString(),
+        data: ship.data.toString(),
+        value: ship.value.toString(),
+    });
+    const dock = aqua.dock({
+        app: new Address(app),
+        strategyHash: new HexString(strategyHash),
+        tokens: [token0, token1].map((t) => new Address(t)),
+    });
+    steps.push({
+        op: "dock",
+        description: "Dock the strategy: zero its virtual balances (no tokens move)",
+        to: dock.to.toString(),
+        data: dock.data.toString(),
+        value: dock.value.toString(),
+    });
+    const priceLow = Math.pow(1.0001, basis.tickLower) * 10 ** (basis.decimals0 - basis.decimals1);
+    const priceHigh = Math.pow(1.0001, basis.tickUpper) * 10 ** (basis.decimals0 - basis.decimals1);
+    const body = {
         strategyId: ir.id,
-        programHash: "", // stamped after content is final
-        format: "aqua_program_v1",
-        steps,
-        approvals: compat.approvals.map((a) => ({ token: a.token, amount: a.amount, unlimited: false })),
-        assumptions: {
-            slippageBps: c.slippageBps,
-            gasGweiAssumption: c.gasGweiAssumption,
-            minOutPct: c.minOutPct,
+        format: "aqua_swapvm_order_v1",
+        chainId: input.chainId,
+        maker,
+        registry,
+        app,
+        tokens,
+        order: orderHex.toString(),
+        strategyHash,
+        params: {
+            priceLow: fullRange ? 0 : priceLow,
+            priceHigh: fullRange ? Number.POSITIVE_INFINITY : priceHigh,
+            sqrtPriceMin: sqrtPriceMin.toString(),
+            sqrtPriceMax: sqrtPriceMax.toString(),
+            feeBps,
+            salt: salt.toString(),
         },
+        steps,
+        notCompiled: compat.rules.filter((r) => r.status !== "supported").map((r) => `${r.rule} (${r.status}): ${r.gap ?? ""}`),
         deterministic: true,
     };
-    program.programHash = contentHash({
-        strategyId: program.strategyId,
-        steps: program.steps,
-        approvals: program.approvals,
-        assumptions: program.assumptions,
-    }).digest;
-    const v = validateProgram(program);
-    if (!v.ok) {
-        throw new Error(`compiled program failed validation: ${v.issues.map((i) => i.message).join("; ")}`);
-    }
-    return program;
+    if (!Number.isFinite(body.params.priceHigh))
+        body.params.priceHigh = 0; // JSON-safe: 0 = unbounded (full range)
+    const plan = { ...body, planHash: contentHash(body).digest };
+    const v = validatePlan(plan);
+    if (!v.ok)
+        throw new Error(`compiled plan failed validation: ${v.issues.map((i) => i.message).join("; ")}`);
+    return plan;
 }

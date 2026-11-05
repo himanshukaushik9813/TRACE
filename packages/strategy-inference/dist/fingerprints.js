@@ -1,115 +1,126 @@
 /**
- * Deterministic behavioural fingerprints.
+ * Deterministic behavioural fingerprints ("Strategy DNA").
  *
- * This is the part of the pipeline that the product *trusts*: every number
- * here is computed from the reconstructed events, not asserted by a model.
- * The 0G inference layer may reinterpret them, but it cannot add a claim
- * that isn't anchored to one of these.
+ * Every number here is computed from reconstructed on-chain events and the
+ * real position metadata (positions(tokenId)); none is asserted by a model.
+ * Metrics that need data we do not have (e.g. time-in-range without a pool
+ * price series) are `null`, never estimated.
  */
 import { reconstructPositions, rangeResets } from "@trace/uniswap-v3";
-export function computeFingerprints(events) {
-    const sorted = [...events].sort((a, b) => a.block - b.block || a.logIndex - b.logIndex);
-    const ledger = reconstructPositions(sorted);
-    const resets = rangeResets(ledger);
-    const times = sorted.map((e) => e.timestamp).filter((t) => t > 0);
-    const periodDays = times.length >= 2 ? Math.max(1, (Math.max(...times) - Math.min(...times)) / 86_400) : 1;
-    // Max liquidity swing: per token, track the running balance and its peak;
-    // the biggest peak-to-trough distance within the window.
-    let maxLiquiditySwingPct = 0;
-    for (const t of ledger.values()) {
-        let peak = 0;
-        let low = 0;
-        let running = 0;
-        for (const e of sorted.filter((x) => x.tokenId === t.tokenId)) {
-            const d = e.kind === "MINT" || e.kind === "INCREASE"
-                ? Number(e.liquidityDelta)
-                : e.kind === "DECREASE" || e.kind === "BURN"
-                    ? -Number(e.liquidityDelta)
-                    : 0;
-            running = Math.max(0, running + d);
-            peak = Math.max(peak, running);
-            low = Math.min(low, running);
-            if (peak > 0)
-                maxLiquiditySwingPct = Math.max(maxLiquiditySwingPct, (peak - low) / peak);
-        }
-    }
-    // Re-entry lag: for each DECREASE/BURN, the next MINT/INCREASE on the same token.
-    const reentryHours = [];
-    for (const t of ledger.values()) {
-        const ev = sorted.filter((e) => e.tokenId === t.tokenId);
-        for (let i = 0; i < ev.length; i++) {
-            if (ev[i].kind === "DECREASE" || ev[i].kind === "BURN") {
-                for (let j = i + 1; j < ev.length; j++) {
-                    if (ev[j].kind === "MINT" || ev[j].kind === "INCREASE") {
-                        if (ev[j].timestamp > ev[i].timestamp) {
-                            reentryHours.push((ev[j].timestamp - ev[i].timestamp) / 3600);
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-    }
-    const medianReentryHours = reentryHours.length ? median(reentryHours) : null;
-    const collects = sorted.filter((e) => e.kind === "COLLECT");
-    let collectCadenceDays = null;
-    if (collects.length >= 2 && collects[0].timestamp > 0) {
-        const gaps = [];
-        for (let i = 1; i < collects.length; i++) {
-            gaps.push((collects[i].timestamp - collects[i - 1].timestamp) / 86_400);
-        }
-        collectCadenceDays = median(gaps);
-    }
-    const active = [...ledger.values()].filter((t) => t.status === "active");
-    const exposure = active.length
-        ? active.filter((t) => t.lastActivityBlock != null).length / active.length
-        : 0;
-    const persistencePct = active.length && times.length >= 2
-        ? Math.min(100, (longestContinuousMs(active, sorted, times) / Math.max(1, times[times.length - 1] - times[0])) * 100)
-        : 0;
-    return {
-        rangeResets: resets,
-        periodDays,
-        rangeResetsPerDay: periodDays > 0 ? resets / periodDays : 0,
-        maxLiquiditySwingPct,
-        medianReentryHours,
-        collectCadenceDays,
-        collectCount: collects.length,
-        collectTotalT0: collects.reduce((a, e) => a + Number(e.fee0), 0),
-        collectTotalT1: collects.reduce((a, e) => a + Number(e.fee1), 0),
-        exposure,
-        persistencePct,
-        poolCount: new Set([...ledger.values()].map((t) => t.pool ?? String(t.tokenId))).size,
-        eventCount: sorted.length,
-    };
-}
+const FULL_RANGE_TICKS = 1_700_000; // ≥ ~96% of the [-887272, 887272] span
 function median(xs) {
-    if (xs.length === 0)
-        return 0;
+    if (!xs.length)
+        return null;
     const s = [...xs].sort((a, b) => a - b);
     const m = Math.floor(s.length / 2);
     return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
-/** The block-timestamp of the first event at or after `block`, else 0. */
-function timeAt(sorted, block) {
-    for (const e of sorted)
-        if (e.block >= block)
-            return e.timestamp;
-    return sorted.length ? sorted[sorted.length - 1].timestamp : 0;
-}
-/**
- * Longest continuous open-ness: for each active position the span from its
- * first open to its most recent activity, summed but capped at the window.
- */
-function longestContinuousMs(active, sorted, times) {
-    if (active.length === 0 || times.length < 2)
-        return 0;
-    const span = Math.max(times[times.length - 1] - times[0], 1);
-    let total = 0;
-    for (const t of active) {
-        const openTs = t.openedBlock != null ? timeAt(sorted, t.openedBlock) : times[0];
-        const lastTs = t.lastActivityBlock != null ? timeAt(sorted, t.lastActivityBlock) : times[times.length - 1];
-        total += Math.max(0, lastTs - openTs);
+export function computeFingerprints(events, meta = {}, priceSeries = {}, window) {
+    const sorted = [...events].sort((a, b) => a.block - b.block || a.logIndex - b.logIndex);
+    const ledger = reconstructPositions(sorted);
+    const ledgers = [...ledger.values()];
+    const times = sorted.map((e) => e.timestamp).filter((t) => t > 0);
+    const fromTs = window?.fromTs || (times.length ? Math.min(...times) : 0);
+    const toTs = window?.toTs || (times.length ? Math.max(...times) : 0);
+    const periodDays = Math.max(1, (toTs - fromTs) / 86_400);
+    // Range widths (from positions(), the authoritative source).
+    const widths = ledgers
+        .map((t) => meta[String(t.tokenId)] ?? null)
+        .filter((m) => m != null)
+        .map((m) => m.tickUpper - m.tickLower);
+    const avgW = widths.length ? widths.reduce((a, b) => a + b, 0) / widths.length : null;
+    const concentrated = widths.filter((w) => w < FULL_RANGE_TICKS);
+    const avgConcW = concentrated.length ? concentrated.reduce((a, b) => a + b, 0) / concentrated.length : null;
+    const repositions = rangeResets(ledger);
+    const durations = ledgers
+        .filter((t) => t.status === "closed" && t.openedTs && t.lastActivityTs)
+        .map((t) => ((t.closedTs ?? t.lastActivityTs) - t.openedTs) / 3600)
+        .filter((h) => h >= 0);
+    const collects = sorted.filter((e) => e.kind === "COLLECT");
+    const collectGaps = [];
+    for (let i = 1; i < collects.length; i++)
+        if (collects[i].timestamp && collects[i - 1].timestamp)
+            collectGaps.push((collects[i].timestamp - collects[i - 1].timestamp) / 86_400);
+    // Withdraw → redeploy cycles, per pool.
+    const reentry = [];
+    const byPool = new Map();
+    for (const e of sorted) {
+        const k = e.pool ?? `token:${e.tokenId}`;
+        byPool.set(k, [...(byPool.get(k) ?? []), e]);
     }
-    return Math.min(total, span);
+    for (const evs of byPool.values()) {
+        for (let i = 0; i < evs.length; i++) {
+            if (evs[i].kind !== "DECREASE" && evs[i].kind !== "BURN")
+                continue;
+            const next = evs.slice(i + 1).find((e) => e.kind === "MINT" || e.kind === "INCREASE");
+            if (next && next.timestamp > evs[i].timestamp)
+                reentry.push((next.timestamp - evs[i].timestamp) / 3600);
+        }
+    }
+    // Liquidity swing per position.
+    let maxSwing = 0;
+    for (const t of ledgers) {
+        let peak = 0;
+        let trough = Infinity;
+        for (const p of t.liquidityPath) {
+            if (p.liquidity > peak) {
+                peak = p.liquidity;
+                trough = p.liquidity;
+            }
+            trough = Math.min(trough, p.liquidity);
+            if (peak > 0)
+                maxSwing = Math.max(maxSwing, (peak - trough) / peak);
+        }
+    }
+    const timeInRangePct = computeTimeInRange(ledgers, meta, priceSeries);
+    const gasEvents = new Map();
+    for (const e of sorted)
+        if (e.gasUsed && e.effectiveGasPrice)
+            gasEvents.set(e.tx, (Number(e.gasUsed) * Number(e.effectiveGasPrice)) / 1e18);
+    const gasSpentEth = gasEvents.size ? [...gasEvents.values()].reduce((a, b) => a + b, 0) : null;
+    return {
+        periodDays,
+        eventCount: sorted.length,
+        positionCount: ledgers.length,
+        activePositions: ledgers.filter((t) => t.status === "active").length,
+        closedPositions: ledgers.filter((t) => t.status === "closed").length,
+        poolCount: new Set(ledgers.map((t) => meta[String(t.tokenId)]?.pool ?? t.pool ?? `token:${t.tokenId}`)).size,
+        avgRangeWidthTicks: avgW,
+        avgRangeWidthPct: avgConcW != null ? Math.pow(1.0001, avgConcW) - 1 : null,
+        fullRangeShare: widths.length ? (widths.length - concentrated.length) / widths.length : 0,
+        repositionCount: repositions,
+        repositionsPerWeek: repositions / (periodDays / 7),
+        medianPositionDurationHours: median(durations),
+        increaseCount: sorted.filter((e) => e.kind === "INCREASE" || e.kind === "MINT").length,
+        decreaseCount: sorted.filter((e) => e.kind === "DECREASE").length,
+        collectCount: collects.length,
+        collectCadenceDays: median(collectGaps),
+        withdrawRedeployCount: reentry.length,
+        medianReentryHours: median(reentry),
+        maxLiquiditySwingPct: maxSwing,
+        timeInRangePct,
+        gasSpentEth,
+    };
+}
+function computeTimeInRange(ledgers, meta, series) {
+    let inside = 0;
+    let total = 0;
+    for (const t of ledgers) {
+        const m = meta[String(t.tokenId)];
+        if (!m?.pool)
+            continue;
+        const s = series[m.pool];
+        if (!s || s.points.length === 0)
+            continue;
+        const start = t.openedBlock ?? 0;
+        const end = t.closedBlock ?? Number.MAX_SAFE_INTEGER;
+        for (const p of s.points) {
+            if (p.block < start || p.block > end)
+                continue;
+            total++;
+            if (p.tick >= m.tickLower && p.tick < m.tickUpper)
+                inside++;
+        }
+    }
+    return total > 0 ? inside / total : null;
 }

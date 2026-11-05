@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { AppShell } from "@/components/app-shell";
 
-/** Client wrapper so interactive pages keep the app shell + demo banner. */
+/** Wraps every screen in the app shell (navigation, Sepolia indicator, wallet, network guard). */
 export function Page({ children }: { children: ReactNode }) {
   return <AppShell>{children}</AppShell>;
 }

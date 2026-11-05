@@ -38,10 +38,3 @@ export const art = {
     trace2: "/images/motifs/trace-intelligence-2.png",
   },
 } as const;
-
-/**
- * Central place for the "demo mode" flag so every screen can label clearly
- * that its figures come from the labelled known-good fixture, not a live
- * chain. Toggled per the spec: "clearly identify demo mode."
- */
-export const DEMO_MODE = true;

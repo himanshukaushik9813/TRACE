@@ -3,14 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "World Agent Pass: bound-claims authorization. A proof is bound to (worldId, strategy version, program hash, action, expiry, challenge) and validated server-side. The hackathon path signs with a demo key; the shape is production-identical.",
+  "description": "Execution authorization: EIP-712 wallet signature bound to (wallet, chain, strategy version, plan hash, action, challenge, expiry), verified server-side; optional World ID v4 (staging) proof bound to the same claims.",
   "dependencies": {
-    "@trace/strategy-ir": "0.1.0"
+    "@trace/strategy-ir": "0.1.0",
+    "viem": "^2.57.16",
+    "@worldcoin/idkit-core": "^4.6.0"
   },
   "main": "dist/index.js",
   "exports": {
-    ".": "./dist/index.js",
-    ".types": "./dist/index.d.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
   },
   "types": "dist/index.d.ts"
 }

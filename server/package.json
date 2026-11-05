@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "TRACE API + worker: Express routes, BullMQ pipeline jobs, Postgres persistence, and the deterministic pipeline with labelled-fixture fallback.",
+  "description": "TRACE API + worker: Express routes, BullMQ (TLS Redis) jobs, Postgres persistence, the real Sepolia investigation pipeline.",
   "dependencies": {
     "@trace/strategy-ir": "0.1.0",
     "@trace/uniswap-v3": "0.1.0",
@@ -16,10 +16,12 @@
     "express": "^4.19.2",
     "pg": "^8.12.0",
     "ioredis": "^5.4.1",
-    "bullmq": "^5.12.0"
+    "bullmq": "^5.12.0",
+    "@trace/chain-config": "0.1.0",
+    "viem": "^2.57.16"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/index.js"
+    "start": "node --env-file=../.env.local dist/index.js"
   }
 }

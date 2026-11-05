@@ -3,16 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Live Uniswap V3 data via viem + Ethereum RPC. Decodes NonfungiblePositionManager logs into IR V3Event shapes. Typed errors so callers can fall back to the labelled fixture.",
+  "description": "Live Uniswap V3 data on Ethereum Sepolia via viem: wallet NFT discovery, lifecycle logs, positions(), pool price history. Typed, key-scrubbed errors.",
   "dependencies": {
+    "@trace/chain-config": "0.1.0",
     "@trace/strategy-ir": "0.1.0",
-    "@trace/uniswap-v3": "0.1.0",
-    "viem": "^2.21.0"
+    "viem": "^2.57.16"
   },
   "main": "dist/index.js",
   "exports": {
-    ".": "./dist/index.js",
-    ".types": "./dist/index.d.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
   },
   "types": "dist/index.d.ts"
 }

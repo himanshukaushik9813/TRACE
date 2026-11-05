@@ -8,7 +8,7 @@
 export * from "./types.js";
 export * as canonical from "./canonical.js";
 export { contentHash, canonicalString, shortHash } from "./canonical.js";
-export { validateStrategyIR, validateCompatibility, validateBacktest, validateProgram, } from "./validate.js";
+export { validateStrategyIR, validateCompatibility, validateBacktest, validatePlan } from "./validate.js";
 import { shortHash } from "./canonical.js";
 /**
  * Stamp a StrategyIR with its deterministic identity: id = hash of the IR's
@@ -29,4 +29,11 @@ export function strategyVersionHash(ir) {
 /** Deterministic fingerprint of an event set — the evidence anchor. */
 export function eventsFingerprint(events) {
     return shortHash(events);
+}
+/** Group a strategy's rules by category (entry / adjustment / exit / risk / fee). */
+export function rulesByCategory(ir) {
+    const out = { entry: [], adjustment: [], exit: [], risk: [], fee: [] };
+    for (const r of ir.rules)
+        out[r.category].push(r);
+    return out;
 }

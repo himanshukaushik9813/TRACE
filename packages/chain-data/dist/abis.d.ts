@@ -1,189 +1,315 @@
 /**
- * Minimal ABI definitions for Uniswap V3 NonfungiblePositionManager, the events
- * TRACE reconstructs from. Kept as plain objects so the same file works with
- * viem (typed) and with any other decoder.
+ * ABIs for the exact on-chain contracts TRACE reads, transcribed from the
+ * official sources:
+ *   - Uniswap/v3-periphery INonfungiblePositionManager.sol (+ OZ ERC721)
+ *   - Uniswap/v3-core IUniswapV3Factory / IUniswapV3Pool{Immutables,State,Events}
+ *   - ERC-20 metadata
+ *
+ * In every NPM lifecycle event ONLY `tokenId` is indexed — the wallet can only
+ * be found through the ERC-721 `Transfer` event (from/to/tokenId all indexed).
  */
 export declare const NPM_ABI: readonly [{
-    readonly type: "event";
-    readonly name: "PositionInitialized";
-    readonly anonymous: false;
-    readonly inputs: readonly [{
-        readonly name: "tokenId";
-        readonly type: "uint256";
-        readonly indexed: true;
-    }, {
-        readonly name: "sender";
-        readonly type: "address";
-        readonly indexed: true;
-    }, {
-        readonly name: "mintedAmount";
-        readonly type: "uint128";
-        readonly indexed: false;
-    }, {
-        readonly name: "tokensOwed0";
-        readonly type: "uint256";
-        readonly indexed: false;
-    }, {
-        readonly name: "tokensOwed1";
-        readonly type: "uint256";
-        readonly indexed: false;
-    }];
-}, {
-    readonly type: "event";
-    readonly name: "Mint";
-    readonly anonymous: false;
-    readonly inputs: readonly [{
-        readonly name: "tokenId";
-        readonly type: "uint256";
-        readonly indexed: true;
-    }, {
-        readonly name: "sender";
-        readonly type: "address";
-        readonly indexed: true;
-    }, {
-        readonly name: "owner";
-        readonly type: "address";
-        readonly indexed: true;
-    }, {
-        readonly name: "tickLower";
-        readonly type: "int24";
-        readonly indexed: false;
-    }, {
-        readonly name: "tickUpper";
-        readonly type: "int24";
-        readonly indexed: false;
-    }, {
-        readonly name: "amount";
-        readonly type: "uint128";
-        readonly indexed: false;
-    }, {
-        readonly name: "amount0";
-        readonly type: "uint256";
-        readonly indexed: false;
-    }, {
-        readonly name: "amount1";
-        readonly type: "uint256";
-        readonly indexed: false;
-    }];
-}, {
-    readonly type: "event";
     readonly name: "IncreaseLiquidity";
-    readonly anonymous: false;
+    readonly type: "event";
     readonly inputs: readonly [{
+        readonly type: "uint256";
         readonly name: "tokenId";
-        readonly type: "uint256";
         readonly indexed: true;
     }, {
-        readonly name: "sender";
-        readonly type: "address";
-        readonly indexed: true;
-    }, {
-        readonly name: "liquidity";
         readonly type: "uint128";
-        readonly indexed: false;
+        readonly name: "liquidity";
     }, {
+        readonly type: "uint256";
         readonly name: "amount0";
-        readonly type: "uint256";
-        readonly indexed: false;
     }, {
-        readonly name: "amount1";
         readonly type: "uint256";
-        readonly indexed: false;
+        readonly name: "amount1";
     }];
 }, {
-    readonly type: "event";
     readonly name: "DecreaseLiquidity";
-    readonly anonymous: false;
+    readonly type: "event";
     readonly inputs: readonly [{
-        readonly name: "tokenId";
         readonly type: "uint256";
+        readonly name: "tokenId";
         readonly indexed: true;
     }, {
-        readonly name: "sender";
-        readonly type: "address";
-        readonly indexed: true;
-    }, {
-        readonly name: "liquidity";
         readonly type: "uint128";
-        readonly indexed: false;
+        readonly name: "liquidity";
     }, {
+        readonly type: "uint256";
         readonly name: "amount0";
-        readonly type: "uint256";
-        readonly indexed: false;
     }, {
-        readonly name: "amount1";
         readonly type: "uint256";
-        readonly indexed: false;
+        readonly name: "amount1";
     }];
 }, {
-    readonly type: "event";
     readonly name: "Collect";
-    readonly anonymous: false;
+    readonly type: "event";
     readonly inputs: readonly [{
-        readonly name: "tokenId";
         readonly type: "uint256";
+        readonly name: "tokenId";
         readonly indexed: true;
     }, {
-        readonly name: "sender";
         readonly type: "address";
-        readonly indexed: true;
-    }, {
         readonly name: "recipient";
-        readonly type: "address";
-        readonly indexed: false;
     }, {
+        readonly type: "uint256";
         readonly name: "amount0";
-        readonly type: "uint256";
-        readonly indexed: false;
     }, {
+        readonly type: "uint256";
         readonly name: "amount1";
-        readonly type: "uint256";
-        readonly indexed: false;
     }];
 }, {
-    readonly type: "event";
     readonly name: "Transfer";
-    readonly anonymous: false;
+    readonly type: "event";
     readonly inputs: readonly [{
+        readonly type: "address";
         readonly name: "from";
-        readonly type: "address";
         readonly indexed: true;
     }, {
+        readonly type: "address";
         readonly name: "to";
-        readonly type: "address";
         readonly indexed: true;
     }, {
-        readonly name: "tokenId";
         readonly type: "uint256";
+        readonly name: "tokenId";
         readonly indexed: true;
     }];
 }, {
-    readonly type: "event";
-    readonly name: "TransferSingle";
-    readonly anonymous: false;
+    readonly name: "positions";
+    readonly type: "function";
+    readonly stateMutability: "view";
     readonly inputs: readonly [{
+        readonly type: "uint256";
+        readonly name: "tokenId";
+    }];
+    readonly outputs: readonly [{
+        readonly type: "uint96";
+        readonly name: "nonce";
+    }, {
+        readonly type: "address";
         readonly name: "operator";
-        readonly type: "address";
-        readonly indexed: true;
     }, {
-        readonly name: "from";
         readonly type: "address";
-        readonly indexed: true;
+        readonly name: "token0";
     }, {
-        readonly name: "to";
         readonly type: "address";
-        readonly indexed: true;
+        readonly name: "token1";
     }, {
-        readonly name: "id";
+        readonly type: "uint24";
+        readonly name: "fee";
+    }, {
+        readonly type: "int24";
+        readonly name: "tickLower";
+    }, {
+        readonly type: "int24";
+        readonly name: "tickUpper";
+    }, {
+        readonly type: "uint128";
+        readonly name: "liquidity";
+    }, {
         readonly type: "uint256";
-        readonly indexed: false;
+        readonly name: "feeGrowthInside0LastX128";
     }, {
-        readonly name: "value";
         readonly type: "uint256";
-        readonly indexed: false;
+        readonly name: "feeGrowthInside1LastX128";
+    }, {
+        readonly type: "uint128";
+        readonly name: "tokensOwed0";
+    }, {
+        readonly type: "uint128";
+        readonly name: "tokensOwed1";
+    }];
+}, {
+    readonly name: "balanceOf";
+    readonly type: "function";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [{
+        readonly type: "address";
+        readonly name: "owner";
+    }];
+    readonly outputs: readonly [{
+        readonly type: "uint256";
+    }];
+}, {
+    readonly name: "tokenOfOwnerByIndex";
+    readonly type: "function";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [{
+        readonly type: "address";
+        readonly name: "owner";
+    }, {
+        readonly type: "uint256";
+        readonly name: "index";
+    }];
+    readonly outputs: readonly [{
+        readonly type: "uint256";
+    }];
+}, {
+    readonly name: "ownerOf";
+    readonly type: "function";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [{
+        readonly type: "uint256";
+        readonly name: "tokenId";
+    }];
+    readonly outputs: readonly [{
+        readonly type: "address";
     }];
 }];
-/** Known Uniswap V3 NonfungiblePositionManager addresses. */
-export declare const NPM_ADDRESSES: Record<number, string>;
-/** Fixed decimals for the common tokens TRACE handles; expand via a chain oracle in production. */
-export declare const TOKEN_DECIMALS: Record<string, number>;
+export declare const FACTORY_ABI: readonly [{
+    readonly name: "getPool";
+    readonly type: "function";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [{
+        readonly type: "address";
+        readonly name: "tokenA";
+    }, {
+        readonly type: "address";
+        readonly name: "tokenB";
+    }, {
+        readonly type: "uint24";
+        readonly name: "fee";
+    }];
+    readonly outputs: readonly [{
+        readonly type: "address";
+        readonly name: "pool";
+    }];
+}];
+export declare const POOL_ABI: readonly [{
+    readonly name: "token0";
+    readonly type: "function";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [];
+    readonly outputs: readonly [{
+        readonly type: "address";
+    }];
+}, {
+    readonly name: "token1";
+    readonly type: "function";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [];
+    readonly outputs: readonly [{
+        readonly type: "address";
+    }];
+}, {
+    readonly name: "fee";
+    readonly type: "function";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [];
+    readonly outputs: readonly [{
+        readonly type: "uint24";
+    }];
+}, {
+    readonly name: "tickSpacing";
+    readonly type: "function";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [];
+    readonly outputs: readonly [{
+        readonly type: "int24";
+    }];
+}, {
+    readonly name: "liquidity";
+    readonly type: "function";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [];
+    readonly outputs: readonly [{
+        readonly type: "uint128";
+    }];
+}, {
+    readonly name: "slot0";
+    readonly type: "function";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [];
+    readonly outputs: readonly [{
+        readonly type: "uint160";
+        readonly name: "sqrtPriceX96";
+    }, {
+        readonly type: "int24";
+        readonly name: "tick";
+    }, {
+        readonly type: "uint16";
+        readonly name: "observationIndex";
+    }, {
+        readonly type: "uint16";
+        readonly name: "observationCardinality";
+    }, {
+        readonly type: "uint16";
+        readonly name: "observationCardinalityNext";
+    }, {
+        readonly type: "uint8";
+        readonly name: "feeProtocol";
+    }, {
+        readonly type: "bool";
+        readonly name: "unlocked";
+    }];
+}, {
+    readonly name: "Swap";
+    readonly type: "event";
+    readonly inputs: readonly [{
+        readonly type: "address";
+        readonly name: "sender";
+        readonly indexed: true;
+    }, {
+        readonly type: "address";
+        readonly name: "recipient";
+        readonly indexed: true;
+    }, {
+        readonly type: "int256";
+        readonly name: "amount0";
+    }, {
+        readonly type: "int256";
+        readonly name: "amount1";
+    }, {
+        readonly type: "uint160";
+        readonly name: "sqrtPriceX96";
+    }, {
+        readonly type: "uint128";
+        readonly name: "liquidity";
+    }, {
+        readonly type: "int24";
+        readonly name: "tick";
+    }];
+}];
+export declare const ERC20_ABI: readonly [{
+    readonly name: "symbol";
+    readonly type: "function";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [];
+    readonly outputs: readonly [{
+        readonly type: "string";
+    }];
+}, {
+    readonly name: "decimals";
+    readonly type: "function";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [];
+    readonly outputs: readonly [{
+        readonly type: "uint8";
+    }];
+}, {
+    readonly name: "balanceOf";
+    readonly type: "function";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [{
+        readonly type: "address";
+    }];
+    readonly outputs: readonly [{
+        readonly type: "uint256";
+    }];
+}, {
+    readonly name: "allowance";
+    readonly type: "function";
+    readonly stateMutability: "view";
+    readonly inputs: readonly [{
+        readonly type: "address";
+        readonly name: "owner";
+    }, {
+        readonly type: "address";
+        readonly name: "spender";
+    }];
+    readonly outputs: readonly [{
+        readonly type: "uint256";
+    }];
+}];
+export declare const ZERO_ADDRESS: "0x0000000000000000000000000000000000000000";

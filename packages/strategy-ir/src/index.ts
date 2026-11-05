@@ -9,12 +9,7 @@
 export * from "./types.js";
 export * as canonical from "./canonical.js";
 export { contentHash, canonicalString, shortHash } from "./canonical.js";
-export {
-  validateStrategyIR,
-  validateCompatibility,
-  validateBacktest,
-  validateProgram,
-} from "./validate.js";
+export { validateStrategyIR, validateCompatibility, validateBacktest, validatePlan } from "./validate.js";
 export type { ValidationIssue, ValidationResult } from "./validate.js";
 
 import { contentHash, shortHash } from "./canonical.js";
@@ -41,4 +36,11 @@ export function strategyVersionHash(ir: StrategyIR): string {
 /** Deterministic fingerprint of an event set — the evidence anchor. */
 export function eventsFingerprint(events: unknown[]): string {
   return shortHash(events);
+}
+
+/** Group a strategy's rules by category (entry / adjustment / exit / risk / fee). */
+export function rulesByCategory(ir: StrategyIR) {
+  const out: Record<"entry" | "adjustment" | "exit" | "risk" | "fee", StrategyIR["rules"]> = { entry: [], adjustment: [], exit: [], risk: [], fee: [] };
+  for (const r of ir.rules) out[r.category].push(r);
+  return out;
 }

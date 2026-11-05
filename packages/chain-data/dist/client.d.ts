@@ -1,57 +1,107 @@
 /**
- * Live Uniswap V3 data via viem + an Ethereum RPC endpoint.
+ * Live Uniswap V3 data on Ethereum Sepolia via viem.
  *
- * Produces IR V3Event shapes (see @trace/strategy-ir) so the reconstruction
- * engine never learns where the data came from.
+ * DISCOVERY (the only correct way, given the real NPM ABI):
+ *   In IncreaseLiquidity / DecreaseLiquidity / Collect only `tokenId` is
+ *   indexed. The wallet can only be found through ERC-721 `Transfer`
+ *   (from/to/tokenId all indexed). So:
+ *     1. the wallet's current holdings via ERC721Enumerable
+ *        (balanceOf + tokenOfOwnerByIndex),
+ *     2. Transfer(from=wallet) and Transfer(to=wallet) in the window
+ *        (mints = from 0x0, burns = to 0x0, plus real transfers),
+ *     3. lifecycle logs for ALL discovered tokenIds in one topic-OR query per
+ *        chunk: topics [[Increase,Decrease,Collect], [id1,id2,…]],
+ *     4. positions(tokenId) for tokens/fee/ticks (at burnBlock-1 for burned NFTs),
+ *        factory.getPool for the pool, ERC-20 symbol/decimals,
+ *     5. block timestamps and tx receipts (real gas).
  *
- * WALLET-SCOPED QUERIES. The NPM's lifecycle events carry indexed
- * `sender`/`owner`/`from`/`to` topics, so we never scan the whole
- * contract's log history (impossible over a year on any RPC). Instead:
- *   1) discover this wallet's activity in small block chunks (getLogs with
- *      address + wallet topics — selective, cheap, capped),
- *   2) decode,
- *   3) track NFT ownership across Transfer/TransferSingle,
- *   4) resolve pool metadata (token0/token1/fee) from PositionInitialized
- *      + bounded per-pool `tokens()`/`fee()` reads,
- *   5) enrich with block timestamps.
+ * Infura caps eth_getLogs at 10,000 blocks per request on Sepolia, so every
+ * scan is chunked (adaptive: halves on range/too-many-results errors, retries
+ * with backoff on rate limits/timeouts).
  *
- * Error strategy: every failure throws a typed TraceChainError with a stable
- * `code`; the caller labels the result — never silently degrades to demo.
+ * Errors: every failure is a typed TraceChainError whose message has the RPC
+ * URL (which embeds the provider key) scrubbed out.
  */
-import type { PublicClient } from "viem";
-import type { V3Event } from "@trace/strategy-ir";
+import type { PositionMeta, PriceSeries, V3Event } from "@trace/strategy-ir";
 export type ChainDataConfig = {
     rpcUrl: string;
+    /**
+     * Optional secondary Sepolia RPCs. When the primary throttles or fails, the
+     * request transparently fails over (viem fallback transport). They read the
+     * same chain — never a different data source.
+     */
+    fallbackRpcUrls?: string[];
+    /** Must be Sepolia. Any other value throws UNSUPPORTED_CHAIN. */
     chainId?: number;
+    /** eth_getLogs block-range cap of the provider (Infura Sepolia: 10,000). */
+    maxLogRange?: number;
+    /** Parallel RPC requests. */
+    concurrency?: number;
+    /** Minimum spacing between RPC requests in ms (default 120 ≈ 8 req/s, free-tier safe). */
+    minIntervalMs?: number;
 };
+export type TraceChainErrorCode = "UNSUPPORTED_CHAIN" | "WRONG_CHAIN" | "RPC_UNREACHABLE" | "RPC_ERROR" | "RATE_LIMITED" | "NO_EVENTS" | "DECODE_FAILED" | "INVALID_ADDRESS" | "INVALID_RANGE";
 export type TraceChainError = Error & {
-    code: "RPC_UNREACHABLE" | "NPM_NOT_FOUND" | "NO_EVENTS" | "DECODE_FAILED" | "INVALID_RANGE" | "RPC_ERROR";
+    code: TraceChainErrorCode;
 };
-export declare function makeChainError(code: TraceChainError["code"], message: string): TraceChainError;
-/** Pool/position metadata resolved for a tokenId (real reads, never guessed). */
-export type PoolMeta = {
-    pool: string;
-    token0: string;
-    token1: string;
-    feeTier: number;
-};
+export declare function makeChainError(code: TraceChainErrorCode, message: string): TraceChainError;
+/** Remove provider keys from any text (viem errors embed the full RPC URL). */
+export declare function scrubSecrets(text: string): string;
 export type WalletQuery = {
-    /** Observation window in days back from the latest block. Default 7. */
+    /** Observation window in days back from the latest block (default 30, max 365). */
     days?: number;
     fromBlock?: number;
     toBlock?: number;
-    /** getLogs chunk size; providers cap the range per call. Default 9000 (~35h). */
-    chunkBlocks?: number;
+};
+export type WalletHistory = {
+    wallet: string;
+    chainId: number;
+    window: {
+        fromBlock: number;
+        toBlock: number;
+        fromTs: number;
+        toTs: number;
+    };
+    events: V3Event[];
+    positions: Record<string, PositionMeta>;
+    /** Honest notes about anything partial or unresolved. */
+    notes: string[];
+    rpcCalls: number;
 };
 export declare function createTraceClient(cfg: ChainDataConfig): {
-    client: PublicClient;
-    npm: string;
-    fetchV3Events: (wallet: string, opts?: WalletQuery) => Promise<{
-        events: V3Event[];
-        poolMeta: Record<string, PoolMeta>;
+    chainId: 11155111;
+    npm: "0x1238536071E1c677A632429e3655c799b22cDA52";
+    assertChain: () => Promise<void>;
+    latestBlock: () => Promise<number>;
+    fetchWalletHistory: (walletIn: string, q?: WalletQuery) => Promise<WalletHistory>;
+    fetchPoolPriceSeries: (poolAddr: string, fromBlock: number, toBlock: number, opts: {
+        decimals0: number | null;
+        decimals1: number | null;
+        symbol0: string;
+        symbol1: string;
+        feeTier?: number;
+        maxSwaps?: number;
+    }) => Promise<PriceSeries>;
+    findActiveLpWallets: (n?: number, lookbackBlocks?: number) => Promise<{
+        wallet: string;
+        mints: number;
+        lastBlock: number;
+    }[]>;
+    probeCode: (address: string) => Promise<{
+        hasCode: boolean;
+        bytes: number;
     }>;
-    fetchBlockTimestamps: (events: V3Event[], step?: number) => Promise<Record<number, number>>;
+    poolState: (poolAddr: string) => Promise<{
+        sqrtPriceX96: string;
+        tick: number;
+        liquidity: string;
+    }>;
+    tokenInfo: (addr: string) => Promise<{
+        symbol: string;
+        decimals: number;
+    } | null>;
+    blockTimestamps: (blocks: number[]) => Promise<Map<number, number>>;
+    rpcCallCount: () => number;
 };
-/** Block → unix-seconds, sampling every `step` blocks (bounded reads). */
-export declare function fetchBlockTimestamps(client: PublicClient, events: V3Event[], step?: number): Promise<Record<number, number>>;
-export type { V3Event };
+export type TraceClient = ReturnType<typeof createTraceClient>;
+export type { V3Event, PositionMeta, PriceSeries };

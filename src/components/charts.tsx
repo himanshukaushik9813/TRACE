@@ -11,6 +11,16 @@ import { useId } from "react";
  * image.
  */
 
+/** Significant-digit label (testnet prices can be tiny, e.g. 0.0000377). */
+export function sig(v: number): string {
+  if (!Number.isFinite(v)) return "—";
+  const a = Math.abs(v);
+  if (a === 0) return "0";
+  if (a >= 1000) return v.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  if (a >= 1) return v.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  return v.toPrecision(3);
+}
+
 function linePath(
   data: number[],
   xFor: (i: number, n: number) => number,
@@ -32,7 +42,7 @@ export function LineChart({
   onDark = true,
   showArea = true,
   legend = true,
-  yFmt = (v: number) => v.toFixed(0),
+  yFmt = sig,
 }: {
   series: { name: string; data: number[]; color: string; area?: boolean; dashed?: boolean }[];
   labels?: string[];
@@ -201,7 +211,7 @@ export function RangeBand({
             <g key={i}>
               <line x1={padL} x2={W - 12} y1={y(v)} y2={y(v)} stroke="rgba(243,235,221,0.08)" />
               <text x={padL - 8} y={y(v) + 3} textAnchor="end" fontSize="10" fill="rgba(183,176,162,0.55)" className="tabular">
-                {v.toFixed(0)}
+                {sig(v)}
               </text>
             </g>
           );
@@ -211,10 +221,10 @@ export function RangeBand({
         <line x1={padL} x2={W - 12} y1={y(hi)} y2={y(hi)} stroke="rgba(120,134,107,0.6)" strokeDasharray="4 4" />
         <line x1={padL} x2={W - 12} y1={y(lo)} y2={y(lo)} stroke="rgba(120,134,107,0.6)" strokeDasharray="4 4" />
         <text x={W - 12} y={y(hi) - 5} textAnchor="end" fontSize="9" fill="#9AA88C" className="tabular">
-          upper {hi.toFixed(0)}
+          upper {sig(hi)}
         </text>
         <text x={W - 12} y={y(lo) + 12} textAnchor="end" fontSize="9" fill="#9AA88C" className="tabular">
-          lower {lo.toFixed(0)}
+          lower {sig(lo)}
         </text>
 
         {Array.from({ length: n - 1 }, (_, k) => {

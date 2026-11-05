@@ -45,6 +45,45 @@ export const fmt = {
     return date + " · " + time;
   },
 
+  /** Unix seconds → readable date/time (UTC). 0/null → "—" (never fabricated). */
+  tsSec(sec: number | string | null | undefined, withTime = true): string {
+    const n = Number(sec);
+    if (!n) return "—";
+    const d = new Date(n * 1000);
+    return d.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", ...(withTime ? { hour: "2-digit", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" } : { timeZone: "UTC" }) });
+  },
+
+  /** Token base units → human amount with real decimals (null decimals → raw units). */
+  units(raw: string | number | bigint | null | undefined, decimals: number | null | undefined, digits = 4): string {
+    if (raw == null) return "—";
+    const n = Number(raw);
+    if (decimals == null) return `${n.toLocaleString("en-US")} (base units)`;
+    const v = n / 10 ** decimals;
+    if (v === 0) return "0";
+    if (Math.abs(v) < 10 ** -digits) return v.toExponential(2);
+    return v.toLocaleString("en-US", { maximumFractionDigits: digits });
+  },
+
+  /** Human float with sensible precision. */
+  amt(v: number | null | undefined, digits = 4): string {
+    if (v == null || !Number.isFinite(v)) return "—";
+    if (v === 0) return "0";
+    if (Math.abs(v) < 10 ** -digits) return v.toExponential(2);
+    return v.toLocaleString("en-US", { maximumFractionDigits: digits });
+  },
+
+  /** Uniswap fee tier (hundredths of a bip) → "0.30%". */
+  feeTier(t: number | null | undefined): string {
+    if (!t) return "—";
+    return `${(t / 10_000).toFixed(t % 100 === 0 ? 2 : 3)}%`;
+  },
+
+  /** Fraction → percent string. */
+  frac(v: number | null | undefined, digits = 1): string {
+    if (v == null || !Number.isFinite(v)) return "—";
+    return `${(v * 100).toFixed(digits)}%`;
+  },
+
   /** Truncate a tx hash: 0x9f…c2 */
   hash(h: string): string {
     if (!h) return "—";
