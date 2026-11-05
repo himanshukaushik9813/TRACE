@@ -29,12 +29,48 @@ const SEPOLIA_HEX = `0x${SEPOLIA_CHAIN_ID.toString(16)}`;
  * do we add Sepolia with explicit, known-good parameters. The UI updates from
  * the wallet's own `chainChanged` event, never from an assumption.
  */
-async function switchProviderToSepolia(provider: Eip1193): Promise<void> {
+const errCode = (e: unknown) =>
+  (e as { code?: number }).code ?? (e as { data?: { originalError?: { code?: number } } }).data?.originalError?.code;
+
+/**
+ * Newer MetaMask versions grant networks per site. Switching to a chain the
+ * site was not connected with opens a "Review permissions · Use your enabled
+ * networks" approval inside wallet_switchEthereumChain — and that screen
+ * crashes in some MetaMask versions ("reading 'origin'"). Requesting the
+ * Sepolia network permission through the standard wallet_requestPermissions
+ * flow (the same flow as connecting) avoids that screen: once Sepolia is
+ * permitted, the switch needs no further approval.
+ * Returns false when the wallet does not support chain permissions.
+ */
+async function requestSepoliaPermission(provider: Eip1193): Promise<boolean> {
   try {
-    await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: SEPOLIA_HEX }] });
+    await provider.request({
+      method: "wallet_requestPermissions",
+      params: [{ eth_accounts: {}, "endowment:permitted-chains": { caveats: [{ type: "restrictNetworkSwitching", value: [SEPOLIA_HEX] }] } }],
+    });
+    return true;
+  } catch (e) {
+    if (errCode(e) === 4001) throw e; // user rejected
+    return false; // not supported by this wallet — fall back to a plain switch
+  }
+}
+
+/** A wallet popup that crashes never resolves; don't leave the UI waiting forever. */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, rej) =>
+      setTimeout(() => rej(new Error("MetaMask did not respond. Close its popup and select Sepolia in MetaMask's network menu — TRACE will detect it.")), ms),
+    ),
+  ]);
+}
+
+async function switchProviderToSepolia(provider: Eip1193): Promise<void> {
+  await withTimeout(requestSepoliaPermission(provider), 90_000);
+  try {
+    await withTimeout(provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: SEPOLIA_HEX }] }), 60_000);
   } catch (err) {
-    const code = (err as { code?: number; data?: { originalError?: { code?: number } } }).code ?? (err as { data?: { originalError?: { code?: number } } }).data?.originalError?.code;
-    if (code !== 4902) throw err;
+    if (errCode(err) !== 4902) throw err;
     await provider.request({
       method: "wallet_addEthereumChain",
       params: [
@@ -105,10 +141,13 @@ export function WalletButton() {
             setErr(null);
             if (!connector) return setErr("No browser wallet found — install MetaMask");
             try {
-              // Connect ONLY (eth_requestAccounts). Chaining a chain switch into the
-              // same approval makes MetaMask crash ("reading 'origin'") when the second
-              // request arrives while the first popup is closing. If the wallet is not
-              // on Sepolia, the NetworkBanner asks the user to switch explicitly.
+              // 1) One standard permission request for the account AND the Sepolia
+              //    network (so a later switch needs no per-site network approval).
+              // 2) wagmi connect (eth_requestAccounts — already permitted, no popup).
+              // No chain switch is chained into the connect: if the wallet is not on
+              // Sepolia, the NetworkBanner asks the user to switch explicitly.
+              const provider = (await connector.getProvider()) as Eip1193 | undefined;
+              if (provider) await withTimeout(requestSepoliaPermission(provider), 120_000);
               await connect({ connector });
             } catch (e) {
               setErr((e as { shortMessage?: string }).shortMessage ?? (e as Error).message);
