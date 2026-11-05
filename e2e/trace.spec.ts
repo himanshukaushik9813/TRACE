@@ -56,20 +56,19 @@ test("home shows the Sepolia testnet indicator and no demo or mainnet labels", a
   expect(body).not.toMatch(/Ethereum Mainnet/i);
 });
 
-test("connecting requests Sepolia; a later wallet network change is detected and can be switched back", async ({ page }) => {
+test("wrong network after connecting is detected and the user switches to Sepolia explicitly", async ({ page }) => {
   const addr = "0x1111111111111111111111111111111111111111";
   await injectWallet(page, addr, "0x1");
   await page.goto("/");
   await page.getByRole("button", { name: /Connect wallet/ }).click();
-  // Connecting asks the wallet for Sepolia (wagmi connect with chainId).
+  // Connect requests accounts only; the wallet is still on mainnet → signing blocked + banner.
   await expect(page.getByText("0x1111…1111").first()).toBeVisible();
-  await expect(page.getByText("TRACE only runs on")).toHaveCount(0);
-  // The user switches to mainnet inside the wallet → TRACE must block signing and offer a switch.
-  await page.evaluate(() => (window as unknown as { __walletSwitch: (c: string) => void }).__walletSwitch("0x1"));
   await expect(page.getByRole("alert").filter({ hasText: "TRACE only runs on" })).toBeVisible();
   await page.getByRole("button", { name: "Switch to Sepolia" }).click();
   await expect(page.getByText("TRACE only runs on")).toHaveCount(0);
-  await expect(page.getByText("0x1111…1111").first()).toBeVisible();
+  // Changing network inside the wallet later is detected again.
+  await page.evaluate(() => (window as unknown as { __walletSwitch: (c: string) => void }).__walletSwitch("0x1"));
+  await expect(page.getByRole("alert").filter({ hasText: "TRACE only runs on" })).toBeVisible();
 });
 
 test("a wallet with no Uniswap positions gets a genuine empty state", async ({ page }) => {

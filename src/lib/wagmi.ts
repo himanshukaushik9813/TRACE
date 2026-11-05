@@ -15,7 +15,7 @@ import { SEPOLIA_CHAIN } from "@trace/chain-config";
 
 export const wagmiConfig = createConfig({
   chains: [sepolia],
-  connectors: [injected({ shimDisconnect: true })],
+  connectors: [injected()],
   transports: { [sepolia.id]: http(process.env.NEXT_PUBLIC_SEPOLIA_PUBLIC_RPC || SEPOLIA_CHAIN.publicRpc) },
   ssr: true,
 });

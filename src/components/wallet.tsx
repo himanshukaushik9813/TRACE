@@ -46,15 +46,21 @@ export function WalletButton() {
   if (!mounted) return <div className="h-9 w-[132px] rounded-md2 border border-ink/10 bg-ivory-50" />;
 
   if (!w.connected) {
-    const injected = connectors[0];
+    // Prefer MetaMask's own EIP-6963 provider over the generic window.ethereum
+    // shim (other extensions can hijack window.ethereum).
+    const connector = connectors.find((c) => c.id === "io.metamask") ?? connectors.find((c) => c.type === "injected") ?? connectors[0];
     return (
       <div className="flex flex-col items-end">
         <button
           onClick={async () => {
             setErr(null);
-            if (!injected) return setErr("No browser wallet found — install MetaMask");
+            if (!connector) return setErr("No browser wallet found — install MetaMask");
             try {
-              await connect({ connector: injected, chainId: SEPOLIA_CHAIN_ID });
+              // Connect ONLY (eth_requestAccounts). Chaining a chain switch into the
+              // same approval makes MetaMask crash ("reading 'origin'") when the second
+              // request arrives while the first popup is closing. If the wallet is not
+              // on Sepolia, the NetworkBanner asks the user to switch explicitly.
+              await connect({ connector });
             } catch (e) {
               setErr((e as { shortMessage?: string }).shortMessage ?? (e as Error).message);
             }
