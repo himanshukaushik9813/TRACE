@@ -275,7 +275,7 @@ export default function BacktestPage() {
                       </table>
                     </div>
                     <p className="text-[0.72rem] text-ink-600 mt-3 max-w-[85ch]">
-                      End = Start + Fees − Slippage ± Price and range effect. The last column is what is left after fees and slippage: price moves, impermanent loss and time out of range.
+                      End = Start + Fees − Slippage ± Price and range effect. The ± column is what fees and slippage do not explain: price moves, impermanent loss and time out of range.
                       Gas is paid in ETH, so it is shown separately and not deducted. Results belong to strategy version <span className="tabular text-ink">{bt.strategyId}</span>
                       {primary ? ` (hash ${primary.versionHash})` : ""}; a changed strategy gets a new version and a new backtest.
                     </p>
