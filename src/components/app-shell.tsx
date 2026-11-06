@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { Search, Boxes, BrainCircuit, FlaskConical, Terminal, FileText, Activity, Bookmark, Circle, Globe, Menu, X } from "lucide-react";
-import { CHAIN_LABEL, SEPOLIA_CHAIN_ID } from "@trace/chain-config";
+import { SEPOLIA_CHAIN_ID } from "@trace/chain-config";
 import { art } from "@/lib/assets";
 import { useIntegrations, withInv } from "@/lib/api";
 import { WalletButton, NetworkBanner } from "@/components/wallet";
@@ -88,10 +88,10 @@ function ChainFooter() {
         <div className="flex items-center gap-2">
           <Circle size={7} className={ok ? "text-sage-600 animate-pulseSoft" : "text-brick"} />
           <span className="text-[0.7rem] font-medium text-ink-600">
-            {isError ? "API unreachable" : ok ? `${CHAIN_LABEL} · block ${data?.chain.latestBlock?.toLocaleString("en-US")}` : data ? "Sepolia RPC error" : "Checking Sepolia…"}
+            {isError ? "API unreachable" : ok ? `Sepolia at block ${data?.chain.latestBlock?.toLocaleString("en-US")}` : data ? "Sepolia RPC error" : "Checking Sepolia…"}
           </span>
         </div>
-        <div className="text-[0.64rem] text-ink-600/70 mt-1">ETHGlobal Mumbai 2026 · testnet build</div>
+        <div className="text-[0.7rem] text-ink-600/80 mt-1">Built for ETHGlobal Mumbai 2026</div>
       </div>
     </div>
   );
@@ -168,10 +168,10 @@ function Topbar({ onMenu }: { onMenu: () => void }) {
         <div className="flex-1" />
         <IntegrationDots />
         <span
-          className="hidden sm:inline-flex items-center gap-1.5 rounded-md2 border border-gold/40 bg-gold/10 px-2.5 py-1.5 text-[0.7rem] font-semibold uppercase tracking-wide2 text-gold"
+          className="hidden sm:inline-flex items-center gap-1.5 rounded-md2 border border-gold/40 bg-gold/10 px-2.5 py-1.5 text-[0.74rem] font-semibold text-gold whitespace-nowrap"
           title={`Ethereum Sepolia testnet, chain id ${SEPOLIA_CHAIN_ID}. TRACE never connects to mainnet.`}
         >
-          <span className="h-1.5 w-1.5 rounded-full bg-gold" /> Testnet · Sepolia
+          <span className="h-1.5 w-1.5 rounded-full bg-gold" /> Sepolia testnet
         </span>
         <WalletButton />
       </div>

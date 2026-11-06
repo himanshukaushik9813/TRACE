@@ -1,4 +1,20 @@
-import { useId } from "react";
+"use client";
+
+import { useEffect, useId, useRef, useState } from "react";
+
+/** Measure the rendered width so the SVG draws at 1:1 — no letterboxing, crisp text at any size. */
+function useWidth(fallback = 640) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [w, setW] = useState(fallback);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => setW(Math.max(260, Math.round(e.contentRect.width))));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, w] as const;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Shared helpers                                                     */
@@ -53,15 +69,16 @@ export function LineChart({
   yFmt?: (v: number) => string;
 }) {
   const id = useId().replace(/:/g, "");
-  const W = 640;
+  const [box, W] = useWidth();
   const H = height;
-  const padL = 46;
   const padT = 14;
   const padB = labels.length ? 26 : 10;
   const all = series.flatMap((s) => s.data);
   const min = Math.min(...all);
   const max = Math.max(...all);
   const range = max - min || 1;
+  // Left margin sized to the widest y-axis label (testnet prices like 0.0000593 are long).
+  const padL = Math.max(40, Math.max(...[0, 0.25, 0.5, 0.75, 1].map((g) => yFmt(min + g * range).length)) * 6.4 + 14);
   const plotW = W - padL - 10;
   const plotH = H - padT - padB;
   const xFor = (i: number, n: number) => padL + (i / (n - 1)) * plotW;
@@ -73,8 +90,8 @@ export function LineChart({
   const n0 = series[0]?.data.length ?? 0;
 
   return (
-    <div className="w-full">
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height }} role="img">
+    <div className="w-full" ref={box}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" aria-label={series.map((x) => x.name).join(", ")}>
         <defs>
           {series.map((s, i) => (
             <linearGradient key={i} id={`g-${id}-${i}`} x1="0" y1="0" x2="0" y2="1">
@@ -93,9 +110,9 @@ export function LineChart({
           </g>
         ))}
 
-        {labels.length &&
-          [0, Math.floor(labels.length / 2), labels.length - 1].map((idx) => (
-            <text key={idx} x={xFor(idx, n0)} y={H - 8} textAnchor="middle" fontSize="10" fill={axisColor}>
+        {labels.length > 1 &&
+          [0, Math.floor(labels.length / 2), labels.length - 1].map((idx, k) => (
+            <text key={idx} x={xFor(idx, n0)} y={H - 8} textAnchor={k === 0 ? "start" : k === 2 ? "end" : "middle"} fontSize="10" fill={axisColor}>
               {labels[idx]}
             </text>
           ))}
@@ -178,14 +195,14 @@ export function RangeBand({
   events?: { i: number }[];
   height?: number;
 }) {
-  const W = 640;
+  const [box, W] = useWidth();
   const H = height;
-  const padL = 46,
-    padT = 16,
+  const padT = 16,
     padB = 26;
   const min = Math.min(lo, ...price) * 0.985;
   const max = Math.max(hi, ...price) * 1.015;
   const range = max - min || 1;
+  const padL = Math.max(40, Math.max(sig(min).length, sig(max).length, sig(min + range / 2).length) * 6.4 + 14);
   const plotW = W - padL - 12;
   const plotH = H - padT - padB;
   const x = (i: number, n: number) => padL + (i / (n - 1)) * plotW;
@@ -196,8 +213,8 @@ export function RangeBand({
   const inRange = price.map((v) => v >= lo && v <= hi);
 
   return (
-    <div className="w-full">
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height }} role="img">
+    <div className="w-full" ref={box}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" aria-label="Price against the position's range">
         <defs>
           <linearGradient id="band" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="#78866B" stopOpacity="0.22" />
@@ -231,7 +248,7 @@ export function RangeBand({
           if (!(inRange[k] && inRange[k + 1])) return null;
           const x0 = x(k, n),
             x1 = x(k + 1, n);
-          const seg = `${x0},${H - padB} L ${x0},${y(price[k])} L ${x1},${y(price[k + 1])} L ${x1},${H - padB} Z`;
+          const seg = `M ${x0},${H - padB} L ${x0},${y(price[k])} L ${x1},${y(price[k + 1])} L ${x1},${H - padB} Z`;
           return <path key={k} d={seg} fill="rgba(52,76,58,0.35)" />;
         })}
 

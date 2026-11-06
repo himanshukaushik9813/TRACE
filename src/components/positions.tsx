@@ -14,20 +14,41 @@ export function tickPrice(tick: number, d0?: number | null, d1?: number | null):
 
 const FULL = 1_700_000;
 
+const MAX_TICK = 887_000; // within a tick-spacing of Uniswap's MAX_TICK (887272)
+
 export function rangeLabel(p: V3Position): string {
   if (p.tickUpper - p.tickLower >= FULL) return "Full range";
   const lo = tickPrice(p.tickLower, p.decimals0, p.decimals1);
   const hi = tickPrice(p.tickUpper, p.decimals0, p.decimals1);
   if (lo == null || hi == null) return `ticks ${p.tickLower} → ${p.tickUpper}`;
-  return `${fmt.amt(lo, 6)} – ${fmt.amt(hi, 6)} ${p.token1}/${p.token0}`;
+  const unit = `${p.token1}/${p.token0}`;
+  if (p.tickUpper >= MAX_TICK) return `Above ${fmt.price(lo)} ${unit}, no upper bound`;
+  if (p.tickLower <= -MAX_TICK) return `Below ${fmt.price(hi)} ${unit}, no lower bound`;
+  return `${fmt.price(lo)} – ${fmt.price(hi)} ${unit}`;
 }
 
-function TokenPair({ a, b }: { a: string; b: string }) {
-  const short = (s: string) => (s.startsWith("0x") ? s.slice(2, 5) : s.slice(0, 4));
+/** Two overlapping token discs; the label always fits its disc. */
+export function TokenPair({ a, b, size = 34 }: { a: string; b: string; size?: number }) {
+  const short = (t: string) => (t.startsWith("0x") ? t.slice(2, 5) : t.replace(/[^A-Za-z0-9]/g, "").slice(0, 4));
+  const disc = (t: string, bg: string, extra: string) => {
+    const label = short(t);
+    const fs = Math.min(size * 0.34, (size * 1.12) / Math.max(label.length, 1));
+    return (
+      <div
+        title={t}
+        className={`absolute grid place-items-center rounded-full font-semibold text-charcoal-900 shadow-soft leading-none ${extra}`}
+        style={{ width: size, height: size, background: bg, fontSize: fs }}
+      >
+        {label}
+      </div>
+    );
+  };
   return (
-    <div className="relative shrink-0" style={{ width: 42, height: 30 }}>
-      <div className="absolute h-[30px] w-[30px] rounded-full grid place-items-center font-semibold text-charcoal-900 text-[0.62rem] bg-gold-300 shadow-soft">{short(a)}</div>
-      <div className="absolute left-3 h-[30px] w-[30px] rounded-full grid place-items-center font-semibold text-charcoal-900 text-[0.62rem] bg-sage-300 border-2 border-ivory-50 shadow-soft">{short(b)}</div>
+    <div className="relative shrink-0" style={{ width: size * 1.8, height: size }}>
+      {disc(a, "#D9C08F", "left-0")}
+      <div className="absolute" style={{ left: size * 0.8 }}>
+        {disc(b, "#9AA88C", "border-2 border-ivory-50")}
+      </div>
     </div>
   );
 }
@@ -51,9 +72,9 @@ export function PositionCard({ p, acct, inv }: { p: V3Position; acct?: Accountin
       </div>
       <div className="mt-3">
         <div className="label">Range</div>
-        <div className="text-[0.86rem] text-ink font-semibold tabular mt-0.5 flex items-center gap-1.5">
-          <Crosshair size={12} className="text-gold" />
-          {rangeLabel(p)}
+        <div className="text-[0.86rem] text-ink font-semibold tabular mt-0.5 flex items-start gap-1.5 break-anywhere">
+          <Crosshair size={12} className="text-gold mt-1 shrink-0" />
+          <span className="min-w-0">{rangeLabel(p)}</span>
         </div>
       </div>
       {acct && (

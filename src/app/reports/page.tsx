@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { FileText } from "lucide-react";
+import {  } from "lucide-react";
 import { ZERO_G_GALILEO } from "@trace/chain-config";
 import { Page } from "@/components/page";
 import { InvestigationGate } from "@/components/inv-gate";
-import { Button, Card, EmptyState, ErrorState, ExplorerLink, Label, LoadingState, Pill, SectionTitle, SourceBadge, Stat, StatusChip } from "@/components/ui";
+import { Button, Card, EmptyState, ErrorState, ExplorerLink, Label, LoadingState, Pill, SectionTitle, Stat, StatusChip } from "@/components/ui";
 import { fmt } from "@/lib/format";
 import { api, useIntegrations, type FullInvestigation } from "@/lib/api";
 
@@ -75,10 +75,6 @@ function Report({ full }: { full: FullInvestigation }) {
 
   return (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
-        <div className="text-[0.78rem] text-ink-600 flex items-center gap-2"><FileText size={15} className="text-gold" /> Investigation report · {inv.id}</div>
-        <SourceBadge block={inv.toBlock} />
-      </div>
       <Card className="mt-3">
         <Label>Wallet</Label>
         <div className="serif text-xl text-ink mt-1 break-all"><ExplorerLink kind="address" value={inv.wallet}>{inv.wallet}</ExplorerLink></div>

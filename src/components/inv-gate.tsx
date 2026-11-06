@@ -6,6 +6,7 @@ import { useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button, EmptyState, ErrorState, LoadingState } from "@/components/ui";
 import { fmt } from "@/lib/format";
+import { CaseFile } from "@/components/case-file";
 import { api, useCurrentInvestigationId, useFullInvestigation, useSuggestedWallets, type FullInvestigation } from "@/lib/api";
 
 /**
@@ -58,7 +59,12 @@ export function InvestigationGate({ children }: { children: (full: FullInvestiga
         label={`Investigation in progress: ${data.investigation.progress.stage ?? st}…${data.investigation.progress.liveRpcCalls != null ? ` (${data.investigation.progress.liveRpcCalls} RPC calls so far)` : ""}`}
       />
     );
-  return <>{children(data, invId)}</>;
+  return (
+    <>
+      <CaseFile full={data} invId={invId} compact />
+      {children(data, invId)}
+    </>
+  );
 }
 
 /**

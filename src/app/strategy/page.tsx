@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { BrainCircuit, ShieldCheck, ShieldAlert } from "lucide-react";
+import { ShieldCheck, ShieldAlert } from "lucide-react";
 import { Page } from "@/components/page";
 import { InvestigationGate } from "@/components/inv-gate";
-import { Card, ErrorState, ExplorerLink, Label, Meter, Pill, SectionTitle, SourceBadge, Stat, Tabs } from "@/components/ui";
+import { Card, ErrorState, ExplorerLink, Label, Meter, Pill, SectionTitle, Stat, Tabs } from "@/components/ui";
 import { fmt } from "@/lib/format";
 import type { Fingerprints, FullInvestigation, StrategyRow } from "@/lib/api";
 
@@ -27,7 +27,7 @@ const CATS: { key: string; label: string }[] = [
 function dnaRows(f: Fingerprints): { label: string; value: string; derived: string }[] {
   const hours = (h: number | null) => (h == null ? "—" : h >= 48 ? `${(h / 24).toFixed(1)} days` : `${h.toFixed(1)} h`);
   return [
-    { label: "Average range width", value: f.avgRangeWidthPct != null ? fmt.frac(f.avgRangeWidthPct) : f.fullRangeShare === 1 ? "Full range" : "—", derived: f.avgRangeWidthTicks != null ? `${Math.round(f.avgRangeWidthTicks)} ticks mean; ${fmt.frac(f.fullRangeShare, 0)} of positions full-range` : "no range known" },
+    { label: "Average range width", value: f.avgRangeWidthPct != null ? (f.avgRangeWidthPct >= 1 ? `${(1 + f.avgRangeWidthPct).toLocaleString("en-US", { maximumFractionDigits: 1 })}× price span` : `${fmt.frac(f.avgRangeWidthPct)} wide`) : f.fullRangeShare === 1 ? "Full range" : "—", derived: f.avgRangeWidthTicks != null ? `${Math.round(f.avgRangeWidthTicks)} ticks mean; ${fmt.frac(f.fullRangeShare, 0)} of positions full-range` : "no range known" },
     { label: "Range adjustment frequency", value: `${f.repositionsPerWeek.toFixed(2)} / week`, derived: `${f.repositionCount} re-sets (new NFT in the same pool after reducing the previous)` },
     { label: "Position duration (median)", value: hours(f.medianPositionDurationHours), derived: `${f.closedPositions} closed of ${f.positionCount} positions` },
     { label: "Time in range", value: f.timeInRangePct != null ? fmt.frac(f.timeInRangePct) : "not measured", derived: f.timeInRangePct != null ? "share of real pool swaps inside each position's range" : "no swap price data for the pool(s)" },
@@ -134,42 +134,44 @@ export default function StrategyPage() {
           const f = full.dna?.data.fingerprints;
           return (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
-                <div className="text-[0.78rem] text-ink-600 flex items-center gap-2">
-                  <BrainCircuit size={15} className="text-gold" /> Strategy DNA · <span className="text-ink font-medium tabular">{fmt.addr(full.investigation.wallet)}</span>
-                </div>
-                <SourceBadge block={full.investigation.toBlock} />
-              </div>
 
-              <Card className="mt-3">
-                <div className="flex flex-wrap items-start gap-3 justify-between">
-                  <div className="flex items-start gap-3">
-                    {run?.status === "succeeded" ? <ShieldCheck className="text-forest mt-0.5" size={18} /> : <ShieldAlert className="text-amber mt-0.5" size={18} />}
-                    <div>
-                      <div className="text-ink font-medium">0G Private Computer inference (0G Router)</div>
-                      <div className="text-[0.78rem] text-ink-600 mt-0.5">
-                        {run
-                          ? run.status === "succeeded"
-                            ? `Request ${run.requestId} · model ${run.model} · TEE verified: ${run.teeVerified == null ? "not reported" : String(run.teeVerified)} · ${run.rulesRejected} proposed rule(s) rejected by the evidence gate`
-                            : `Not available for this investigation — ${run.errorCode ?? run.status}: ${run.error ?? ""}${run.requestId ? ` (router request ${run.requestId})` : ""}. The evidence-only analysis is shown instead, labelled as such.`
-                          : "No inference run recorded."}
-                      </div>
-                    </div>
+              <div className={`flex items-start gap-3 rounded-panel border px-4 py-3.5 ${run?.status === "succeeded" ? "border-forest/30 bg-forest/5" : "border-amber/30 bg-amber/5"}`}>
+                {run?.status === "succeeded" ? <ShieldCheck className="text-forest mt-0.5 shrink-0" size={18} /> : <ShieldAlert className="text-amber mt-0.5 shrink-0" size={18} />}
+                <div className="min-w-0 flex-1">
+                  <div className="text-ink font-medium text-[0.92rem]">
+                    {run?.status === "succeeded"
+                      ? "0G Private Computer proposed this hypothesis; every rule passed the evidence gate"
+                      : "0G Private Computer was unavailable, so this is the evidence-only analysis"}
                   </div>
-                  <Pill tone={run?.status === "succeeded" ? "forest" : "amber"}>{run?.status ?? "none"}</Pill>
+                  <div className="text-[0.8rem] text-ink-600 mt-0.5 break-anywhere">
+                    {run?.status === "succeeded"
+                      ? `Model ${run.model}. TEE verified: ${run.teeVerified == null ? "not reported" : run.teeVerified ? "yes" : "no"}. ${run.rulesRejected} proposed rule${run.rulesRejected === 1 ? "" : "s"} rejected for citing transactions outside the evidence.`
+                      : run
+                        ? "No rule below comes from a model; each is computed from the wallet's transactions and links to them."
+                        : "No inference run is recorded for this investigation."}
+                  </div>
+                  {run && run.status !== "succeeded" && (
+                    <details className="mt-1.5 text-[0.76rem] text-ink-600">
+                      <summary className="cursor-pointer text-ink hover:text-gold w-fit">Why 0G was unavailable</summary>
+                      <p className="mt-1 break-anywhere">
+                        {run.errorCode ?? run.status}: {run.error ?? "no detail"}
+                        {run.requestId ? ` Router request ${run.requestId}.` : ""}
+                      </p>
+                    </details>
+                  )}
                 </div>
-              </Card>
+              </div>
 
               {f && (
                 <>
-                  <SectionTitle eyebrow="Deterministic, computed from on-chain events" title="Strategy DNA" />
-                  <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <SectionTitle eyebrow="Eight behaviour measurements computed from the wallet's own transactions" title="Strategy DNA" />
+                  <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-px rounded-panel overflow-hidden border border-ink/10 bg-ink/10">
                     {dnaRows(f).map((d) => (
-                      <Card key={d.label}>
+                      <div key={d.label} className="bg-ivory-50 p-4 min-w-0">
                         <Label>{d.label}</Label>
-                        <div className="text-ink font-semibold text-lg mt-1 tabular">{d.value}</div>
-                        <div className="text-[0.7rem] text-ink-600 mt-1">{d.derived}</div>
-                      </Card>
+                        <div className="text-ink font-semibold text-lg mt-1 tabular break-anywhere">{d.value}</div>
+                        <div className="text-[0.74rem] text-ink-600 mt-1 leading-snug break-anywhere">{d.derived}</div>
+                      </div>
                     ))}
                   </div>
                 </>

@@ -49,7 +49,7 @@ async function injectWallet(page: Page, address: string, chainIdHex: string) {
 
 test("home shows the Sepolia testnet indicator and no demo or mainnet labels", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByText("Testnet · Sepolia").first()).toBeVisible();
+  await expect(page.getByText("Sepolia testnet").first()).toBeVisible();
   await expect(page.getByRole("button", { name: /Connect wallet/ })).toBeVisible();
   const body = await page.locator("body").innerText();
   expect(body).not.toMatch(/demo data/i);
@@ -92,7 +92,7 @@ test("a completed investigation renders real data on every screen", async ({ pag
 
   await page.goto(`/strategy?inv=${id}`);
   await expect(page.getByRole("heading", { name: "Strategy DNA" })).toBeVisible();
-  await expect(page.getByText("0G Private Computer inference (0G Router)")).toBeVisible();
+  await expect(page.getByText(/0G Private Computer (was unavailable|proposed this hypothesis)/)).toBeVisible();
 
   await page.goto(`/backtest?inv=${id}`);
   await expect(page.getByText(/Backtest could not be completed|Insufficient real data|Historical replay on real swaps/)).toBeVisible();

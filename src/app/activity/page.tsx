@@ -55,15 +55,15 @@ export default function ActivityPage() {
               ))}
             </Card>
           )}
-          <SectionTitle eyebrow="Persisted" title="Investigations" />
+          <SectionTitle title="Investigations" />
           {q.data.investigations.length === 0 ? (
             <EmptyState title="No investigations for this wallet" />
           ) : (
             <Card pad={false} className="divide-y divide-ink/8">
               {q.data.investigations.map((i) => (
                 <Link key={i.id} href={withInv("/reports", i.id)} className="px-5 py-3 flex items-center gap-3 text-[0.82rem] hover:bg-ink/3">
-                  <span className="tabular text-ink-600">{new Date(i.createdAt).toLocaleString("en-US")}</span>
-                  <span className="flex-1 text-ink">{i.counts ? `${i.counts.positions} positions · ${i.counts.events} events` : i.status === "no_positions" ? "No Uniswap V3 positions in the window" : (i.error ?? i.status).slice(0, 100)}</span>
+                  <span className="tabular text-ink-600 whitespace-nowrap">{new Date(i.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                  <span className="flex-1 text-ink">{i.counts ? `${fmt.count(i.counts.positions, "position")}, ${fmt.count(i.counts.events, "event")}` : i.status === "no_positions" ? "No Uniswap V3 positions in the window" : (i.error ?? i.status).slice(0, 100)}</span>
                   <Pill tone={i.status === "done" ? "sage" : i.status === "failed" ? "brick" : i.status === "no_positions" ? "neutral" : "gold"}>{i.status === "no_positions" ? "no positions" : i.status}</Pill>
                 </Link>
               ))}

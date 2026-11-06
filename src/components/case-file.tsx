@@ -1,0 +1,160 @@
+"use client";
+
+/**
+ * The case file: the whole TRACE story for one wallet in a single band —
+ * evidence → inferred strategy → backtest → Aqua — each step a verdict read
+ * from the real investigation payload and a link to the screen that proves it.
+ * Shown large on Investigate and compact above every investigation screen.
+ */
+
+import Link from "next/link";
+import { ArrowUpRight } from "lucide-react";
+import { ExplorerLink } from "@/components/ui";
+import { fmt } from "@/lib/format";
+import { withInv, type FullInvestigation } from "@/lib/api";
+
+const FAMILY: Record<string, string> = {
+  passive_concentrated: "Passive concentrated liquidity",
+  passive_full_range: "Passive full-range liquidity",
+  periodic_range_adjustment: "Periodic range adjustment",
+  active_range_management: "Active range management",
+  capital_redeployment: "Repeated deploy and withdraw",
+  inconclusive: "Inconclusive — too little evidence",
+};
+
+type Tone = "good" | "warn" | "muted";
+type Step = { key: string; title: string; verdict: string; detail: string; href: string; tone: Tone };
+
+function steps(full: FullInvestigation, invId: string): Step[] {
+  const inv = full.investigation;
+  const c = inv.summary?.counts;
+  const primary = full.strategies.find((s) => s.id === full.primaryStrategyId);
+  const ai = primary?.role === "ai_hypothesis";
+  const bt = full.backtest?.result;
+  const observed = bt?.runs.find((r) => r.kind === "observed") ?? bt?.runs[0];
+  const hold = bt?.runs.find((r) => r.label.startsWith("Buy & hold"));
+  const compat = full.compatibility?.report;
+
+  return [
+    {
+      key: "evidence",
+      title: "Evidence",
+      verdict: c ? `${c.positions} position${c.positions === 1 ? "" : "s"}, ${c.events} events` : "—",
+      detail: `${c?.pools ?? 0} pool${c?.pools === 1 ? "" : "s"} over ${inv.windowDays} days, read from Sepolia`,
+      href: withInv("/positions", invId),
+      tone: "good",
+    },
+    {
+      key: "strategy",
+      title: "Strategy",
+      verdict: primary ? FAMILY[primary.family] ?? primary.family : "Not inferred",
+      detail: primary
+        ? `${fmt.frac(Number(primary.confidence), 0)} fit to evidence · ${ai ? "0G hypothesis, evidence-gated" : "evidence-only (0G unavailable)"}`
+        : "No strategy version stored",
+      href: withInv("/strategy", invId),
+      tone: primary && primary.family !== "inconclusive" ? "good" : "warn",
+    },
+    {
+      key: "backtest",
+      title: "Backtest",
+      verdict:
+        bt?.status === "completed" && observed
+          ? `${fmt.pct(observed.net * 100)} observed`
+          : bt?.status === "insufficient_data"
+            ? "Not enough real swaps"
+            : "Not run",
+      detail:
+        bt?.status === "completed" && hold
+          ? `vs ${fmt.pct(hold.net * 100)} buy & hold · ${bt.series.prices.length} real swaps, look-ahead guarded`
+          : bt?.reason ?? inv.integrations.backtest?.detail ?? "Needs a pool with real trading",
+      href: withInv("/backtest", invId),
+      tone: bt?.status === "completed" ? "good" : "warn",
+    },
+    {
+      key: "aqua",
+      title: "1inch Aqua",
+      verdict: compat ? (compat.verdict === "FULL" ? "Fully compatible" : compat.verdict === "PARTIAL" ? "Partially compatible" : "Incompatible") : "Ready to check",
+      detail: compat
+        ? `${compat.rules.filter((r) => r.status === "supported").length} of ${compat.rules.length} rules map to a SwapVM order`
+        : "Run on-chain checks, compile, sign and ship",
+      href: withInv("/execute", invId),
+      tone: compat ? (compat.verdict === "INCOMPATIBLE" ? "warn" : "good") : "muted",
+    },
+  ];
+}
+
+const DOT: Record<Tone, string> = { good: "bg-sage", warn: "bg-amber", muted: "bg-ink/25" };
+const DOT_DARK: Record<Tone, string> = { good: "bg-sage-300", warn: "bg-amber", muted: "bg-cream/40" };
+
+export function CaseFile({ full, invId, compact = false }: { full: FullInvestigation; invId: string; compact?: boolean }) {
+  const inv = full.investigation;
+  const list = steps(full, invId);
+
+  if (compact) {
+    return (
+      <div className="mb-6 rounded-panel border border-ink/10 bg-ivory-50 overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-2.5 border-b border-ink/8 text-[0.78rem] bg-ivory">
+          <span className="text-ink-600 min-w-0 break-anywhere">
+            Case file for <ExplorerLink kind="address" value={inv.wallet} className="text-ink font-medium" />
+          </span>
+          <span className="text-ink-600 tabular">
+            Sepolia blocks {inv.fromBlock?.toLocaleString("en-US")}–{inv.toBlock?.toLocaleString("en-US")}
+          </span>
+        </div>
+        <ol className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-ink/8">
+          {list.map((s) => (
+            <li key={s.key} className="min-w-0 bg-ivory-50">
+              <Link href={s.href} className="block px-4 py-3 hover:bg-ink/[0.03] focus-visible:bg-ink/[0.03] h-full">
+                <span className="flex items-center gap-1.5 text-[0.72rem] text-ink-600">
+                  <span className={`h-1.5 w-1.5 rounded-full ${DOT[s.tone]}`} />
+                  {s.title}
+                </span>
+                <span className="block text-[0.86rem] text-ink font-medium mt-0.5 break-anywhere">{s.verdict}</span>
+              </Link>
+            </li>
+          ))}
+        </ol>
+      </div>
+    );
+  }
+
+  return (
+    <section className="mt-6 rounded-panel bg-charcoal-900 text-cream overflow-hidden border border-ink/10">
+      <div className="px-5 md:px-7 pt-6 pb-5 flex flex-wrap items-end justify-between gap-4 border-b border-cream/10">
+        <div className="min-w-0">
+          <div className="text-[0.78rem] text-cream-muted">Case file</div>
+          <h2 className="serif text-2xl md:text-[1.9rem] leading-tight mt-1 break-anywhere">
+            <ExplorerLink kind="address" value={inv.wallet} className="text-cream decoration-gold/50">
+              {fmt.addr(inv.wallet)}
+            </ExplorerLink>
+          </h2>
+        </div>
+        <div className="text-[0.76rem] text-cream-muted md:text-right tabular">
+          {fmt.tsSec(inv.fromTs, false)} → {fmt.tsSec(inv.toTs, false)}
+          <br />
+          Sepolia blocks {inv.fromBlock?.toLocaleString("en-US")}–{inv.toBlock?.toLocaleString("en-US")}
+        </div>
+      </div>
+      <ol className="grid md:grid-cols-4 gap-px bg-cream/10">
+        {list.map((s, i) => (
+          <li key={s.key} className="case-step min-w-0 bg-charcoal-900">
+            <Link href={s.href} className="group flex h-full flex-col px-5 md:px-6 py-5 hover:bg-cream/[0.04] focus-visible:bg-cream/[0.04]">
+              <span className="flex items-center justify-between text-[0.76rem] text-cream-muted">
+                <span className="flex items-center gap-2">
+                  <span className="tabular text-gold-300">{i + 1}</span>
+                  {s.title}
+                </span>
+                <ArrowUpRight size={14} className="opacity-40 group-hover:opacity-100 transition-opacity" />
+              </span>
+              <span className="serif text-[1.25rem] leading-snug mt-3 text-cream break-anywhere">{s.verdict}</span>
+              <span className="mt-2 text-[0.76rem] leading-relaxed text-cream-muted break-anywhere">
+                <span className={`inline-block h-1.5 w-1.5 rounded-full mr-1.5 align-middle ${DOT_DARK[s.tone]}`} />
+                {s.detail}
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}

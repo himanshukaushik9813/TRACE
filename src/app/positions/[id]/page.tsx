@@ -58,7 +58,7 @@ export default function PositionPage() {
 
           <div className="grid md:grid-cols-4 gap-4 mt-5">
             <Card><Stat label="Range" value={<span className="text-[0.95rem]">{rangeLabel(p)}</span>} sub={`ticks ${p.tickLower} → ${p.tickUpper}`} /></Card>
-            <Card><Stat label="Liquidity (end of window)" value={fmt.amt(p.liquidity, 0)} sub="uint128 units, replayed from events" /></Card>
+            <Card><Stat label="Liquidity (end of window)" value={fmt.big(p.liquidity)} sub="uint128 units, replayed from events" /></Card>
             <Card><Stat label="Opened" value={p.openedBlock ? `#${p.openedBlock.toLocaleString("en-US")}` : "—"} sub={p.historyComplete ? "minted inside the window" : "before the window (partial history)"} /></Card>
             <Card><Stat label="Closed" value={p.closedBlock ? `#${p.closedBlock.toLocaleString("en-US")}` : p.status === "closed" ? "liquidity removed" : "—"} /></Card>
           </div>
@@ -97,7 +97,7 @@ export default function PositionPage() {
                 const prices = s.points.map((x) => x.price);
                 const blocks = s.points.map((x) => x.block);
                 const evs = detail.data.events.map((e) => ({ i: Math.max(0, blocks.findIndex((b) => b >= Number(e.block))) }));
-                return lo != null && hi != null && p.tickUpper - p.tickLower < 1_700_000 ? (
+                return lo != null && hi != null && p.tickUpper - p.tickLower < 1_700_000 && p.tickUpper < 887_000 && p.tickLower > -887_000 ? (
                   <>
                     <RangeBand price={prices} lo={lo} hi={hi} events={evs} />
                     <div className="text-[0.7rem] text-cream-muted mt-2">
@@ -106,7 +106,7 @@ export default function PositionPage() {
                     </div>
                   </>
                 ) : (
-                  <div className="text-cream-muted text-[0.85rem]">Full-range position — always in range. {s.points.length} real swaps observed.</div>
+                  <div className="text-cream-muted text-[0.85rem]">This range is unbounded on at least one side, so the price is always inside it. {s.points.length} real swaps observed in the window.</div>
                 );
               })()
             ) : (
@@ -130,7 +130,7 @@ export default function PositionPage() {
                     <td className="px-4 py-2.5"><Pill tone={KIND_TONE[e.kind]}>{e.kind}</Pill></td>
                     <td className="px-4 py-2.5 tabular"><ExplorerLink kind="block" value={Number(e.block)}>{Number(e.block).toLocaleString("en-US")}</ExplorerLink></td>
                     <td className="px-4 py-2.5 tabular">{fmt.tsSec(e.timestamp)}</td>
-                    <td className="px-4 py-2.5 tabular">{e.liquidityDelta === "0" ? "—" : fmt.amt(Number(e.liquidityDelta), 0)}</td>
+                    <td className="px-4 py-2.5 tabular">{e.liquidityDelta === "0" ? "—" : fmt.big(e.liquidityDelta)}</td>
                     <td className="px-4 py-2.5 tabular">{fmt.units(e.amount0, p.decimals0)}</td>
                     <td className="px-4 py-2.5 tabular">{fmt.units(e.amount1, p.decimals1)}</td>
                     <td className="px-4 py-2.5 tabular">{e.kind === "COLLECT" ? `${fmt.units(e.fee0, p.decimals0)} / ${fmt.units(e.fee1, p.decimals1)}` : "—"}</td>

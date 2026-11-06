@@ -1,10 +1,10 @@
 "use client";
 
-import { FlaskConical, ShieldCheck } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 import { Page } from "@/components/page";
 import { InvestigationGate } from "@/components/inv-gate";
 import { LineChart, Drawdown } from "@/components/charts";
-import { Card, EmptyState, ExplorerLink, Label, Pill, SectionTitle, SourceBadge } from "@/components/ui";
+import { Card, EmptyState, ExplorerLink, Label, Pill, SectionTitle } from "@/components/ui";
 import { fmt } from "@/lib/format";
 
 const COLORS = ["#C6A66B", "#9AA88C", "#B7B0A2", "#D9C08F", "#78866B"];
@@ -18,12 +18,6 @@ export default function BacktestPage() {
           const btInfo = full.investigation.integrations.backtest;
           return (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
-                <div className="text-[0.78rem] text-ink-600 flex items-center gap-2">
-                  <FlaskConical size={15} className="text-gold" /> Backtest · <span className="text-ink font-medium tabular">{fmt.addr(full.investigation.wallet)}</span>
-                </div>
-                <SourceBadge block={full.investigation.toBlock} />
-              </div>
 
               {!bt && (
                 <div className="mt-4">
@@ -119,7 +113,7 @@ export default function BacktestPage() {
 
                   <SectionTitle eyebrow="Explicit assumptions" title="Methodology" />
                   <Card>
-                    <ul className="text-[0.82rem] text-ink-600 space-y-1.5 list-disc pl-5">
+                    <ul className="text-[0.82rem] text-ink-600 space-y-1.5 list-disc pl-5 break-anywhere">
                       <li><span className="text-ink">Prices:</span> {bt.assumptions.priceSource}</li>
                       <li><span className="text-ink">Fees:</span> {bt.assumptions.feeModel}</li>
                       <li><span className="text-ink">Gas:</span> {bt.assumptions.gasModel}</li>

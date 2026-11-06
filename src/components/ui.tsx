@@ -27,7 +27,7 @@ export function Card({
   );
 }
 
-/** Small uppercase field label. */
+/** Quiet sentence-case field label. */
 export function Label({ children, onDark }: { children: ReactNode; onDark?: boolean }) {
   return (
     <div className={`label ${onDark ? "text-cream-muted" : ""}`}>{children}</div>
@@ -47,7 +47,7 @@ export function SectionTitle({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex items-end justify-between gap-4 mb-4">
+    <div className="section-title flex flex-wrap items-end justify-between gap-x-4 gap-y-2 mb-4">
       <div>
         {eyebrow && <Label onDark={onDark}>{eyebrow}</Label>}
         <h2
@@ -95,14 +95,14 @@ export function Pill({
 export function SourceBadge({ onDark, block, label }: { onDark?: boolean; block?: number | null; label?: string }) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[0.62rem] font-semibold uppercase tracking-wide2 border ${
+      className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[0.7rem] font-medium border whitespace-nowrap ${
         onDark ? "border-sage/40 bg-sage/10 text-sage-300" : "border-sage/40 bg-sage/10 text-sage-600"
       }`}
       title="Read live from Ethereum Sepolia through the TRACE API"
     >
       <span className={`h-1.5 w-1.5 rounded-full ${onDark ? "bg-sage-300" : "bg-sage"}`} />
-      {label ?? "Live · Sepolia"}
-      {block ? ` · #${block.toLocaleString("en-US")}` : ""}
+      {label ?? "Live on Sepolia"}
+      {block ? `, block ${block.toLocaleString("en-US")}` : ""}
     </span>
   );
 }
@@ -179,7 +179,7 @@ export function ErrorState({ title = "Something went wrong", message }: { title?
   );
 }
 
-/** Key/value stat cell. */
+/** Key/value stat cell. Values wrap instead of spilling out of their box. */
 export function Stat({
   label,
   value,
@@ -194,24 +194,10 @@ export function Stat({
   align?: "left" | "right";
 }) {
   return (
-    <div className={`flex flex-col ${align === "right" ? "items-end text-right" : ""}`}>
+    <div className={`flex flex-col min-w-0 ${align === "right" ? "items-end text-right" : ""}`}>
       <Label onDark={onDark}>{label}</Label>
-      <div
-        className={`stat-value text-lg md:text-xl font-semibold mt-1 ${
-          onDark ? "text-cream" : "text-ink"
-        }`}
-      >
-        {value}
-      </div>
-      {sub && (
-        <div
-          className={`text-[0.72rem] mt-0.5 ${
-            onDark ? "text-cream-muted" : "text-ink-600"
-          }`}
-        >
-          {sub}
-        </div>
-      )}
+      <div className={`stat-value text-lg md:text-xl font-semibold mt-1 break-anywhere ${onDark ? "text-cream" : "text-ink"}`}>{value}</div>
+      {sub && <div className={`text-[0.74rem] mt-0.5 break-anywhere ${onDark ? "text-cream-muted" : "text-ink-600"}`}>{sub}</div>}
     </div>
   );
 }

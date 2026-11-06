@@ -72,6 +72,28 @@ export const fmt = {
     return v.toLocaleString("en-US", { maximumFractionDigits: digits });
   },
 
+  /** Very large raw quantities (e.g. uint128 liquidity) as 1.66 × 10¹⁸; normal sizes grouped. */
+  big(v: number | string | null | undefined): string {
+    const n = Number(v);
+    if (v == null || !Number.isFinite(n)) return "—";
+    if (Math.abs(n) < 1e9) return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+    const [m, e] = n.toExponential(2).split("e");
+    const sup = "⁰¹²³⁴⁵⁶⁷⁸⁹";
+    return `${m} × 10${String(Number(e)).split("").map((c) => (c === "-" ? "⁻" : sup[Number(c)])).join("")}`;
+  },
+
+  /** A price that may be astronomically large or tiny (testnet tokens): 1.2 × 10⁻⁹, 3.4 × 10³⁸, else 6 significant digits. */
+  price(v: number | null | undefined): string {
+    if (v == null || !Number.isFinite(v)) return "—";
+    const a = Math.abs(v);
+    if (a !== 0 && (a >= 1e9 || a < 1e-6)) {
+      const [m, e] = v.toExponential(2).split("e");
+      const sup = "⁰¹²³⁴⁵⁶⁷⁸⁹";
+      return `${m} × 10${String(Number(e)).split("").map((c) => (c === "-" ? "⁻" : sup[Number(c)])).join("")}`;
+    }
+    return v.toLocaleString("en-US", { maximumSignificantDigits: 6 });
+  },
+
   /** Uniswap fee tier (hundredths of a bip) → "0.30%". */
   feeTier(t: number | null | undefined): string {
     if (!t) return "—";
@@ -82,6 +104,12 @@ export const fmt = {
   frac(v: number | null | undefined, digits = 1): string {
     if (v == null || !Number.isFinite(v)) return "—";
     return `${(v * 100).toFixed(digits)}%`;
+  },
+
+  /** "1 position" / "7 positions" */
+  count(n: number | null | undefined, one: string, many = `${one}s`): string {
+    const v = Number(n ?? 0);
+    return `${v.toLocaleString("en-US")} ${v === 1 ? one : many}`;
   },
 
   /** Truncate a tx hash: 0x9f…c2 */

@@ -3,12 +3,12 @@
 import { useEffect, useState } from "react";
 import { useSendTransaction, useSignTypedData } from "wagmi";
 import { parseUnits } from "viem";
-import { Check, Loader2, Lock, Ship, Terminal, X } from "lucide-react";
+import { Check, Loader2, Lock, Ship, X } from "lucide-react";
 import { AQUA, AQUA_NOTES } from "@trace/chain-config";
 import { Page } from "@/components/page";
 import { InvestigationGate } from "@/components/inv-gate";
 import { useSepoliaWallet } from "@/components/wallet";
-import { Button, Card, EmptyState, ErrorState, ExplorerLink, Label, Pill, SectionTitle, SourceBadge } from "@/components/ui";
+import { Button, Card, EmptyState, ErrorState, ExplorerLink, Label, Pill, SectionTitle } from "@/components/ui";
 import { fmt } from "@/lib/format";
 import { api, type Compatibility, type ExecutionPlan, type FullInvestigation, type TxRow } from "@/lib/api";
 
@@ -237,18 +237,40 @@ function ExecuteFlow({ full }: { full: FullInvestigation }) {
   const shipped = steps["ship"]?.status === "success";
   const kyc = compat?.checks.find((c) => c.key === "taker.kyc");
 
+  const rail = [
+    { title: "Check", detail: "Live reads of the Aqua registry, router, tokens and your wallet", done: Boolean(compat) },
+    { title: "Compile", detail: "A deterministic SwapVM order from the position's real range", done: Boolean(plan) },
+    { title: "Authorize", detail: "One EIP-712 signature, verified by the server", done: Boolean(shipAuth?.validated) },
+    { title: "Ship", detail: "Approve exact amounts and ship from MetaMask", done: shipped },
+  ];
+  const current = rail.findIndex((r) => !r.done);
+
   return (
     <>
-      <div className="mt-3 rounded-md2 border border-ink/10 bg-ivory-50 p-4 flex gap-3 text-[0.8rem] text-ink-600">
+      <ol className="grid grid-cols-2 lg:grid-cols-4 gap-px rounded-panel overflow-hidden border border-ink/10 bg-ink/10" aria-label="Execution progress">
+        {rail.map((r, i) => (
+          <li key={r.title} className={`min-w-0 p-4 ${i === current ? "bg-charcoal-900 text-cream" : "bg-ivory-50"}`} aria-current={i === current ? "step" : undefined}>
+            <div className={`flex items-center gap-2 text-[0.8rem] ${i === current ? "text-gold-300" : r.done ? "text-forest" : "text-ink-600"}`}>
+              <span className={`grid h-5 w-5 place-items-center rounded-full text-[0.68rem] font-semibold tabular ${r.done ? "bg-forest text-ivory-50" : i === current ? "bg-gold text-charcoal-900" : "border border-ink/20"}`}>
+                {r.done ? <Check size={11} /> : i + 1}
+              </span>
+              {r.title}
+            </div>
+            <p className={`mt-1.5 text-[0.76rem] leading-snug ${i === current ? "text-cream-muted" : "text-ink-600"}`}>{r.detail}</p>
+          </li>
+        ))}
+      </ol>
+
+      <div className="mt-4 rounded-md2 border border-ink/10 bg-ivory-50 p-4 flex gap-3 text-[0.82rem] text-ink-600 leading-relaxed">
         <Ship size={16} className="text-gold shrink-0 mt-0.5" />
-        <p>
-          A Uniswap V3 NFT and an Aqua strategy are <strong className="text-ink">different instruments</strong>. TRACE compiles the supported rules into a 1inch SwapVM concentrated-liquidity order and ships it to Aqua as a compatible implementation — it does not migrate the NFT. {AQUA_NOTES.deployment}
+        <p className="max-w-[90ch]">
+          A Uniswap V3 position and an Aqua strategy are <strong className="text-ink">different instruments</strong>. TRACE does not move your position: it compiles the rules Aqua can express into a 1inch SwapVM concentrated-liquidity order and ships that from your wallet. {AQUA_NOTES.deployment}
         </p>
       </div>
 
       {err && <div className="mt-4"><ErrorState message={err} /></div>}
 
-      <SectionTitle eyebrow="Step 1" title="Compatibility" />
+      <SectionTitle eyebrow="Step 1 of 4" title="Check compatibility" />
       <div className="flex flex-wrap items-center gap-3 mb-3">
         <Button onClick={runCompat} disabled={busy === "compat"}>{busy === "compat" ? "Reading Sepolia…" : compat ? "Re-run on-chain checks" : "Run on-chain compatibility checks"}</Button>
         <span className="text-[0.74rem] text-ink-600">{w.address ? `Maker checks for ${fmt.addr(w.address)}` : "Connect a wallet to include maker balance/allowance checks"}</span>
@@ -257,7 +279,7 @@ function ExecuteFlow({ full }: { full: FullInvestigation }) {
 
       {compat && compat.verdict !== "INCOMPATIBLE" && basis && (
         <>
-          <SectionTitle eyebrow="Step 2" title="Compile the execution plan" />
+          <SectionTitle eyebrow="Step 2 of 4" title="Compile the execution plan" />
           <Card>
             <div className="text-[0.82rem] text-ink-600">
               Basis: real position #{basis.tokenId} ({basis.token0}/{basis.token1}, {fmt.feeTier(basis.feeTier)}, ticks {basis.tickLower} → {basis.tickUpper}). Choose how much of each token the Aqua strategy may use. Tokens stay in your wallet; Aqua pulls them only when a swap fills, so the approvals are exactly these amounts.
@@ -309,7 +331,7 @@ function ExecuteFlow({ full }: { full: FullInvestigation }) {
 
           {!walletMatchesPlan && <div className="mt-3"><ErrorState title="Wallet mismatch" message={`This plan was compiled for ${plan.plan.maker}; connect that wallet to sign.`} /></div>}
 
-          <SectionTitle eyebrow="Step 3 — server-verified, bound to this exact plan" title="Authorize shipping" />
+          <SectionTitle eyebrow="Step 3 of 4: bound to this exact plan and verified by the server" title="Authorize shipping" />
           <Card>
             {!shipAuth ? (
               <div className="flex flex-wrap items-center gap-3">
@@ -325,7 +347,7 @@ function ExecuteFlow({ full }: { full: FullInvestigation }) {
 
           {shipAuth?.validated && (
             <>
-              <SectionTitle eyebrow="Step 4 — each transaction is signed in your wallet and verified from its receipt" title="Execute on Sepolia" />
+              <SectionTitle eyebrow="Step 4 of 4: each transaction is signed in your wallet and checked against its receipt" title="Ship on Sepolia" />
               <div className="space-y-2">
                 {approvals.map((s, i) => <StepRow key={`approve-${i}`} k={`approve-${i}`} op="approve" step={s} authId={shipAuth.authorizationId} />)}
                 {ship && <StepRow k="ship" op="ship" step={ship} authId={shipAuth.authorizationId} locked={approvalsDone ? undefined : "after approvals"} />}
@@ -335,7 +357,7 @@ function ExecuteFlow({ full }: { full: FullInvestigation }) {
 
           {shipped && dock && (
             <>
-              <SectionTitle eyebrow="Step 5 — optional" title="Dock (withdraw the strategy)" />
+              <SectionTitle eyebrow="Optional" title="Dock the strategy" />
               <Card>
                 {!dockAuth ? (
                   <Button disabled={!canSign || busy === "aqua:dock"} onClick={() => authorize("aqua:dock")}>
@@ -386,12 +408,6 @@ function AuthResult({ a }: { a: AuthResponse }) {
 export default function ExecutePage() {
   return (
     <Page>
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
-        <div className="text-[0.78rem] text-ink-600 flex items-center gap-2">
-          <Terminal size={15} className="text-gold" /> Aqua execution console · 1inch Aqua / SwapVM on Sepolia
-        </div>
-        <SourceBadge />
-      </div>
       <InvestigationGate>{(full) => <ExecuteFlow full={full} />}</InvestigationGate>
     </Page>
   );

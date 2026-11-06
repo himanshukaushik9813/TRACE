@@ -54,12 +54,11 @@ h1, h2, h3, .serif {
   font-feature-settings: "tnum";
 }
 
-/* Small uppercase labels */
+/* Field labels: quiet, sentence case — the data is the hero, not the label */
 .label {
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  font-size: 0.66rem;
-  font-weight: 600;
+  font-size: 0.74rem;
+  font-weight: 500;
+  letter-spacing: 0;
   color: var(--ink-600);
 }
 .on-dark .label { color: var(--cream-muted); }
@@ -100,3 +99,22 @@ h1, h2, h3, .serif {
 ::selection {
   background: rgba(182, 138, 66, 0.22);
 }
+
+/* Long hashes, addresses and big numbers must wrap inside their box, never spill */
+.break-anywhere { overflow-wrap: anywhere; word-break: break-word; }
+
+/* Respect reduced motion everywhere */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}
+
+/* One orchestrated moment: the case file reveals left-to-right when a case opens */
+@keyframes case-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.case-step { opacity: 0; animation: case-in 420ms ease-out forwards; }
+.case-step:nth-child(2) { animation-delay: 90ms; }
+.case-step:nth-child(3) { animation-delay: 180ms; }
+.case-step:nth-child(4) { animation-delay: 270ms; }
+
+/* A section heading after other content gets breathing room; as a card's first child it sits flush */
+.section-title { margin-top: 2.25rem; }
+.section-title:first-child { margin-top: 0; }

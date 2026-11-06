@@ -35,6 +35,7 @@ const txs = (events: V3Event[], kinds: V3Event["kind"][], max = 6) =>
   [...new Set(events.filter((e) => kinds.includes(e.kind)).map((e) => e.tx))].slice(0, max);
 
 const cadence = (days: number) => (days >= 1 ? `${days.toFixed(1)} days` : `${(days * 24).toFixed(1)} hours`);
+const width = (x: number) => (x >= 1 ? `spanning ${(1 + x).toLocaleString("en-US", { maximumFractionDigits: 1 })}× in price` : `${pct(x)} wide`);
 const pct = (x: number) => `${(x * 100).toFixed(x < 0.1 ? 1 : 0)}%`;
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 
@@ -62,7 +63,7 @@ export function scoreFamilies(fp: Fingerprints): { family: StrategyFamily; score
     family: "passive_concentrated",
     score: clamp01((1 - fp.fullRangeShare) * (noResets ? 0.75 : 0.25) * (fp.decreaseCount <= 1 ? 1 : 0.7)),
     why: fp.avgRangeWidthPct != null
-      ? `Concentrated ranges averaging ${pct(fp.avgRangeWidthPct)} wide; ${fp.repositionCount} re-sets, ${fp.decreaseCount} withdrawals`
+      ? `Concentrated ranges ${width(fp.avgRangeWidthPct)} on average; ${fp.repositionCount} re-sets, ${fp.decreaseCount} withdrawals`
       : "No concentrated range observed",
   });
   out.push({
@@ -92,7 +93,7 @@ function mineRules(fp: Fingerprints, events: V3Event[], meta: Record<string, Pos
     const full = fp.fullRangeShare >= 0.5;
     rules.push({
       category: "entry",
-      rule: full ? "Provides liquidity across the full price range" : `Opens concentrated positions about ${pct(fp.avgRangeWidthPct ?? 0)} wide`,
+      rule: full ? "Provides liquidity across the full price range" : `Opens concentrated positions ${width(fp.avgRangeWidthPct ?? 0)}`,
       evidence: `${fp.positionCount} position(s) observed; mean width ${Math.round(fp.avgRangeWidthTicks)} ticks${full ? " (full range)" : ""}`,
       evidenceRefs: mints,
       confidence: clamp01(0.55 + Math.min(0.3, fp.positionCount * 0.05)),
