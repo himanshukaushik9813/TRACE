@@ -34,3 +34,30 @@ export function ramp(t: number, a: number, b: number) {
 
 /** Screen-space point the connection lines aim at (the emblem), shared without re-renders. */
 export type Anchor = { x: number; y: number; set: boolean };
+
+/** DOM flags at time t (used by the ?introAt=<s> QA freeze). */
+export function flagsAt(t: number) {
+  let shown = 0;
+  for (let i = 0; i < 5; i++) if (t >= T.partnerFirst + i * T.partnerStep) shown = i + 1;
+  return {
+    land: t >= 0,
+    emblem: t >= T.platform[0],
+    brand: t >= T.brand,
+    prepare: t >= T.brand,
+    shown,
+    settled: t >= T.partnersSettle,
+    identity: t >= T.identity,
+  };
+}
+
+/** ?introAt=<seconds>: freeze the intro at that moment (design QA). */
+export function frozenAt(): number | null {
+  try {
+    const v = new URLSearchParams(window.location.search).get("introAt");
+    if (v == null) return null;
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 ? Math.min(n, T.exit - 0.01) : null;
+  } catch {
+    return null;
+  }
+}

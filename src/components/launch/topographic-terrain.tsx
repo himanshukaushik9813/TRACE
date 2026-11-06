@@ -67,10 +67,10 @@ varying vec3 vN;
 void main() {
   vec3 L = normalize(vec3(-0.45, 0.85, 0.35));
   float diff = clamp(dot(normalize(vN), L), 0.0, 1.0);
-  vec3 col = uBase * (0.83 + 0.17 * diff);
+  vec3 col = uBase * (0.9 + 0.1 * diff);
   float f = vH * 8.0 + 4.0 + uTime * 0.12;           // contours drift gently
   float line = 1.0 - smoothstep(0.0, fwidth(f) * 1.25, abs(fract(f - 0.5) - 0.5));
-  col = mix(col, uLine, line * 0.65);
+  col = mix(col, uLine, line * 0.6);
   float g = f / 5.0;                                   // every 5th: champagne gold
   float gl = 1.0 - smoothstep(0.0, fwidth(g) * 1.6, abs(fract(g - 0.5) - 0.5));
   float pulse = 0.45 + 0.55 * pow(0.5 + 0.5 * sin(vWorld.x * 0.55 + vWorld.z * 0.35 - uTime * 0.9), 3.0);
@@ -92,7 +92,7 @@ export function TopographicTerrain({ t, quality }: { t: React.MutableRefObject<n
         uniforms: {
           uTime: { value: 0 },
           uOpacity: { value: 0 },
-          uBase: { value: new Color(IVORY_2).lerp(new Color(IVORY), 0.35) },
+          uBase: { value: new Color(IVORY_2).lerp(new Color(IVORY), 0.7) },
           uLine: { value: new Color(LINE) },
           uGold: { value: new Color(GOLD_MUTED) },
           uFog: { value: new Color(IVORY) },
@@ -103,7 +103,7 @@ export function TopographicTerrain({ t, quality }: { t: React.MutableRefObject<n
 
   // The gold path: from the far left of the land to the foot of the platform, on the surface.
   const path = useMemo(() => {
-    const xz: [number, number][] = [[-9.5, -6.5], [-7, -4.6], [-5.2, -1.6], [-4.1, 0.6], [-2.6, 1.6], [-1.75, 0.9]];
+    const xz: [number, number][] = [[-9.5, -6.5], [-7, -4.6], [-5.2, -1.6], [-4.1, 0.6], [-2.5, 1.5], [-1.5, 0.75]];
     const pts = xz.map(([x, z]) => new Vector3(x, TERRAIN_Y + hgt(x, -z) + 0.03, z));
     const curve = new CatmullRomCurve3(pts, false, "centripetal");
     const tubular = quality === "high" ? 220 : 110;

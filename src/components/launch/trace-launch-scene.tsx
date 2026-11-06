@@ -24,15 +24,17 @@ export type TraceLaunchSceneProps = {
   onReady: () => void;
   /** Receives the emblem's screen position every frame (for the DOM connection lines). */
   anchor: React.MutableRefObject<Anchor>;
+  /** QA: hold the timeline at this time (seconds). */
+  fixedTime?: number | null;
 };
 
-function useTimeline(onReady: () => void) {
+function useTimeline(onReady: () => void, fixed?: number | null) {
   const start = useRef<number | null>(null);
   const t = useRef(0);
   const fired = useRef(false);
   useFrame(({ clock }) => {
     if (start.current == null) start.current = clock.elapsedTime;
-    t.current = clock.elapsedTime - start.current;
+    t.current = fixed != null ? fixed : clock.elapsedTime - start.current;
     if (!fired.current) {
       fired.current = true;
       onReady();
@@ -41,22 +43,33 @@ function useTimeline(onReady: () => void) {
   return t;
 }
 
-/** Camera glides across the land, settles on the emblem, then pulls back on exit. */
+/**
+ * Camera: glides in across the land from the left (SCENE 1), settles high and back so
+ * the emblem sits in the upper third, clear of the identity text, then pulls away (SCENE 5).
+ * Framing is solved per aspect ratio so phones keep the platform fully in view.
+ */
 function Rig({ t }: { t: React.MutableRefObject<number> }) {
   const { camera, size } = useThree();
   const look = useMemo(() => new Vector3(), []);
   useFrame(() => {
     const tt = t.current;
-    const portrait = size.height > size.width;
-    const glide = ramp(tt, 0, 2.6);
+    const aspect = size.width / Math.max(1, size.height);
+    const portrait = aspect < 0.9;
+    const glide = ramp(tt, 0, 2.8);
     const back = ramp(tt, T.exit, T.gone);
-    const baseZ = portrait ? 10.2 : 7.4;
-    camera.position.set(-3.4 * (1 - glide) + Math.sin(tt * 0.12) * 0.4, 2.7 - 0.9 * glide + back * 0.4, baseZ + 1.8 * (1 - glide) + back * 1.6);
-    // Aim slightly below the emblem so it sits in the upper half, above the identity text.
-    look.set(-1.2 * (1 - glide), portrait ? -0.35 : -0.05, 0);
+    const fov = portrait ? 50 : 36;
+    // Settled framing.
+    const dist = portrait ? 9.6 : 10.6;
+    const tgtY = portrait ? -1.75 : -1.05;
+    const elev = 0.2; // radians above the target
+    const ex = 0;
+    const ey = tgtY + Math.sin(elev) * dist;
+    const ez = Math.cos(elev) * dist;
+    // Start: further left, higher, further back.
+    camera.position.set(ex - 4.2 * (1 - glide) + Math.sin(tt * 0.1) * 0.35, ey + 1.6 * (1 - glide) + back * 0.6, ez + 2.4 * (1 - glide) + back * 2.0);
+    look.set(-1.6 * (1 - glide), tgtY, 0);
     camera.lookAt(look);
     const cam = camera as PerspectiveCamera;
-    const fov = portrait ? 52 : 38;
     if (cam.fov !== fov) {
       cam.fov = fov;
       cam.updateProjectionMatrix();
@@ -94,8 +107,8 @@ function Shadows({ t, quality }: { t: React.MutableRefObject<number>; quality: S
     if (g.current) g.current.visible = t.current > T.emblemRise[0] && t.current < T.exit + 0.6;
   });
   return (
-    <group ref={g} position={[0, -0.27, 0]}>
-      <ContactShadows opacity={0.32} scale={3} blur={2.6} far={2.2} resolution={quality === "high" ? 512 : 256} color="#5A4A2E" frames={Infinity} />
+    <group ref={g} position={[0, -0.3, 0]}>
+      <ContactShadows opacity={0.3} scale={2.4} blur={2.4} far={2.2} resolution={quality === "high" ? 512 : 256} color="#5A4A2E" frames={Infinity} />
     </group>
   );
 }
@@ -114,8 +127,8 @@ function AnchorTracker({ emblem, anchor }: { emblem: React.RefObject<EmblemHandl
   return null;
 }
 
-function SceneContents({ quality, onReady, anchor }: TraceLaunchSceneProps) {
-  const t = useTimeline(onReady);
+function SceneContents({ quality, onReady, anchor, fixedTime }: TraceLaunchSceneProps) {
+  const t = useTimeline(onReady, fixedTime);
   const emblem = useRef<EmblemHandle>(null);
   return (
     <>
@@ -135,7 +148,7 @@ export default function TraceLaunchScene(props: TraceLaunchSceneProps) {
       aria-hidden
       dpr={props.quality === "high" ? [1, 1.75] : [1, 1.3]}
       gl={{ antialias: props.quality === "high", alpha: true, powerPreference: "high-performance", failIfMajorPerformanceCaveat: true }}
-      camera={{ position: [-3.4, 2.7, 9.2], fov: 38, near: 0.1, far: 60 }}
+      camera={{ position: [-4.2, 2.6, 12.8], fov: 36, near: 0.1, far: 70 }}
       style={{ position: "absolute", inset: 0 }}
     >
       <SceneContents {...props} />

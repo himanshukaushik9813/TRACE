@@ -19,7 +19,7 @@ import { BrandMark } from "@/components/brand-mark";
 import { INTRO_REPLAY_EVENT, lowPowerDevice, markIntroSeen, markIntroSession, prefersReducedMotion, readIntroMode, webglUsable, type IntroMode } from "@/lib/intro";
 import type { PartnerLogos } from "@/lib/partners";
 import type { SceneQuality } from "./trace-launch-scene";
-import { T, type Anchor } from "./timeline";
+import { T, flagsAt, frozenAt, type Anchor } from "./timeline";
 import { TraceBrandReveal, CATEGORY, TAGLINE } from "./trace-brand-reveal";
 import { PartnerLogoReveal, type PartnerCardsHandle } from "./partner-logo-reveal";
 import { PartnerConnectionLines } from "./partner-connection-lines";
@@ -62,6 +62,7 @@ export function LaunchIntro({ logos }: { logos: PartnerLogos }) {
   const [calm, setCalm] = useState(false);
   const [run, setRun] = useState(0);
   const [decided, setDecided] = useState(false);
+  const [frozen, setFrozen] = useState<number | null>(null); // ?introAt QA freeze
   const started = useRef(false);
   const timers = useRef<number[]>([]);
   const anchor = useRef<Anchor>({ x: 0, y: 0, set: false });
@@ -88,9 +89,13 @@ export function LaunchIntro({ logos }: { logos: PartnerLogos }) {
 
   /** Starts the shared timeline (WebGL: on the scene's first frame). */
   const begin = useCallback(
-    (v: Variant) => {
+    (v: Variant, at: number | null = null) => {
       if (started.current) return;
       started.current = true;
+      if (at != null && (v === "webgl" || v === "css")) {
+        setFlags(flagsAt(at)); // QA: hold this moment, no exit
+        return;
+      }
       if (v === "short") {
         after(0.65, () => finish(false));
         return;
@@ -133,6 +138,8 @@ export function LaunchIntro({ logos }: { logos: PartnerLogos }) {
       let v: Variant = "short";
       if (m === "full") v = reduce ? "reduced" : webglUsable() ? "webgl" : "css";
       setQuality(lowPowerDevice() ? "low" : "high");
+      const at = m === "full" ? frozenAt() : null;
+      setFrozen(at);
       setFlags(v === "reduced" ? ALL : NONE);
       setVariant(v);
       setMode(m);
@@ -143,13 +150,13 @@ export function LaunchIntro({ logos }: { logos: PartnerLogos }) {
         after(SCENE_START_TIMEOUT_MS / 1000, () => {
           if (!started.current) {
             setVariant("css");
-            begin("css");
+            begin("css", at);
           }
         });
       } else {
-        requestAnimationFrame(() => begin(v));
+        requestAnimationFrame(() => begin(v, at));
       }
-      after(HARD_LIMIT_MS / 1000, () => finish(true));
+      if (at == null) after(HARD_LIMIT_MS / 1000, () => finish(true));
     },
     [begin, finish],
   );
@@ -181,14 +188,25 @@ export function LaunchIntro({ logos }: { logos: PartnerLogos }) {
         <SceneBoundary
           onError={() => {
             setVariant("css");
-            begin("css");
+            begin("css", frozen);
           }}
         >
-          <TraceLaunchScene quality={quality} anchor={anchor} onReady={() => begin("webgl")} />
+          <TraceLaunchScene quality={quality} anchor={anchor} fixedTime={frozen} onReady={() => begin("webgl", frozen)} />
         </SceneBoundary>
       )}
       {variant === "css" && <CssLandscape stage={{ land: flags.land, emblem: flags.emblem, out: phase === "leaving" }} anchor={anchor} />}
 
+      {animated && (
+        <div
+          className="absolute inset-x-0 bottom-0 h-[58%] pointer-events-none"
+          aria-hidden
+          style={{
+            background: "linear-gradient(to top, rgba(247,243,235,0.96) 0%, rgba(247,243,235,0.88) 45%, rgba(247,243,235,0) 100%)",
+            opacity: flags.brand ? 1 : 0,
+            transition: "opacity 900ms ease",
+          }}
+        />
+      )}
       {animated && <PartnerConnectionLines anchor={anchor} cards={cards} shown={flags.shown} visible={!flags.settled && phase === "playing"} />}
 
       {variant === "short" ? (

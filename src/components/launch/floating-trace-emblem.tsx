@@ -34,9 +34,9 @@ function Platform({ t, quality }: { t: React.MutableRefObject<number>; quality: 
   const layers = useMemo(
     () =>
       [
-        { r: 1.75, h: 0.16, y: -0.62, color: IVORY_2 },
-        { r: 1.38, h: 0.14, y: -0.47, color: IVORY },
-        { r: 1.02, h: 0.12, y: -0.34, color: IVORY_CARD },
+        { r: 1.45, h: 0.15, y: -0.62, color: IVORY_2 },
+        { r: 1.14, h: 0.13, y: -0.48, color: IVORY },
+        { r: 0.84, h: 0.11, y: -0.36, color: IVORY_CARD },
       ].map((l) => ({
         ...l,
         geo: new CylinderGeometry(l.r, l.r * 1.015, l.h, radial, 1),
@@ -94,8 +94,8 @@ export type EmblemHandle = { worldPosition: (out: Vector3) => Vector3 };
 
 export const FloatingTraceEmblem = forwardRef<EmblemHandle, { t: React.MutableRefObject<number>; quality: SceneQuality }>(function FloatingTraceEmblem({ t, quality }, ref) {
   const geo = useMemo(() => {
-    const g = new ExtrudeGeometry(starShape(0.62), {
-      depth: 0.14,
+    const g = new ExtrudeGeometry(starShape(0.78), {
+      depth: 0.16,
       bevelEnabled: true,
       bevelThickness: 0.05,
       bevelSize: 0.035,
@@ -106,7 +106,7 @@ export const FloatingTraceEmblem = forwardRef<EmblemHandle, { t: React.MutableRe
     return g;
   }, [quality]);
   const mat = useMemo(() => new MeshStandardMaterial({ color: "#D2AE68", metalness: 1, roughness: 0.28, envMapIntensity: 1.1, transparent: true, opacity: 0 }), []);
-  const ringGeo = useMemo(() => new TorusGeometry(0.98, 0.012, 8, quality === "high" ? 128 : 64), [quality]);
+  const ringGeo = useMemo(() => new TorusGeometry(1.12, 0.012, 8, quality === "high" ? 128 : 64), [quality]);
   const ringMat = useMemo(() => new MeshStandardMaterial({ color: GOLD_MUTED, metalness: 1, roughness: 0.35, transparent: true, opacity: 0 }), []);
   useEffect(
     () => () => {
@@ -129,10 +129,14 @@ export const FloatingTraceEmblem = forwardRef<EmblemHandle, { t: React.MutableRe
     const back = ramp(tt, T.exit, T.exit + 1.0); // moves into the background
     const out = 1 - ramp(tt, T.exit + 0.3, T.exit + 1.0);
     if (g.current) {
-      g.current.position.set(0, -0.55 + rise * 1.4 + Math.sin(tt * 1.15) * 0.06 * rise + back * 0.35, -back * 2.2);
+      g.current.position.set(0, -0.6 + rise * 1.55 + Math.sin(tt * 1.15) * 0.06 * rise + back * 0.35, -back * 2.2);
       g.current.scale.setScalar(1 - back * 0.25);
     }
-    if (star.current) star.current.rotation.y = tt * 0.45 + (1 - rise) * 1.2;
+    // Gentle sway around facing the viewer (a full spin would show the star edge-on).
+    if (star.current) {
+      star.current.rotation.y = Math.sin(tt * 0.55) * 0.5 + (1 - rise) * 1.4;
+      star.current.rotation.x = Math.sin(tt * 0.4 + 1) * 0.08;
+    }
     if (ring.current) {
       ring.current.rotation.x = Math.PI / 2.3 + Math.sin(tt * 0.5) * 0.08;
       ring.current.rotation.z = tt * 0.2;
