@@ -2,7 +2,7 @@
 
 > Running log of what TRACE is, what has been built, and where things stand.
 > Updated after every work session so anyone (or any AI tool) can pick up where we left off.
-> **Last updated: 2026-11-06** · Latest pushed commit: `845ae01` · **Live:** web https://trace-lake-iota.vercel.app · API https://trace-api-6ap0.onrender.com
+> **Last updated: 2026-11-06** · Latest pushed commit: `845ae01` · **Live:** web https://trace-eth.vercel.app · API https://trace-api-6ap0.onrender.com
 
 ---
 
@@ -84,8 +84,8 @@ Source brief: `TRACE_Claude_Minimal_Light_Theme_Reference_Pack.zip` (spec .md + 
 - Charts: hand-built SVG from real data only; light by default (`LineChart` `onDark` defaults to false; per-series `width`).
 
 ### Deployment (live since 2026-11-06)
-- **Web:** Vercel project `trace` (team "him's projects", Hobby) → **https://trace-lake-iota.vercel.app**. Imported from GitHub `himanshukaushik9813/TRACE`, `main`, root `./`, Next.js preset, default build. Env: `NEXT_PUBLIC_TRACE_API_URL=https://trace-api-6ap0.onrender.com`, `NEXT_PUBLIC_CHAIN_ID=11155111` (`NEXT_PUBLIC_SEPOLIA_PUBLIC_RPC` unset → code default). Auto-deploys on every push to `main`. `NEXT_PUBLIC_*` are inlined at build time, so changing them needs a Vercel redeploy.
-- **API + worker:** Render Blueprint `trace` (from `render.yaml`) → web service `trace-api` (`srv-dbmvtoijnfac73bjqul0`, free plan, Singapore) → **https://trace-api-6ap0.onrender.com** (`/health` → `{"ok":true,...,"database":"ok","queue":"bullmq"}`). Build `npm ci && npm run build:server`; start `node server/dist/index.js` (env comes from Render, not `--env-file`); `NODE_VERSION=22`. Auto-deploys on push to `main`. Secrets were pasted into Render by the user (sync:false keys); public values by Claude. `CORS_ORIGINS=https://trace-lake-iota.vercel.app` (add more origins comma-separated; local dev origins are always allowed by api.ts).
+- **Web:** Vercel project `trace` (team "him's projects", Hobby) → **https://trace-eth.vercel.app** (custom `*.vercel.app` alias added 2026-11-06; the auto-assigned https://trace-lake-iota.vercel.app still works). Imported from GitHub `himanshukaushik9813/TRACE`, `main`, root `./`, Next.js preset, default build. Env: `NEXT_PUBLIC_TRACE_API_URL=https://trace-api-6ap0.onrender.com`, `NEXT_PUBLIC_CHAIN_ID=11155111` (`NEXT_PUBLIC_SEPOLIA_PUBLIC_RPC` unset → code default). Auto-deploys on every push to `main`. `NEXT_PUBLIC_*` are inlined at build time, so changing them needs a Vercel redeploy.
+- **API + worker:** Render Blueprint `trace` (from `render.yaml`) → web service `trace-api` (`srv-dbmvtoijnfac73bjqul0`, free plan, Singapore) → **https://trace-api-6ap0.onrender.com** (`/health` → `{"ok":true,...,"database":"ok","queue":"bullmq"}`). Build `npm ci && npm run build:server`; start `node server/dist/index.js` (env comes from Render, not `--env-file`); `NODE_VERSION=22`. Auto-deploys on push to `main`. Secrets were pasted into Render by the user (sync:false keys); public values by Claude. `CORS_ORIGINS=https://trace-eth.vercel.app,https://trace-lake-iota.vercel.app` (add more origins comma-separated; local dev origins are always allowed by api.ts).
 - **Free-tier caveat:** Render spins the API down after ~15 min idle; the first request then takes ~50 s ("SERVICE WAKING UP" page / 503). Investigations interrupted by a spin-down are re-queued on boot (BullMQ on Upstash).
 - Supabase (DB) and Upstash (Redis) are the same instances the local setup uses, so local and hosted share data.
 - Render's GitHub App now has access to `blog-app` + `TRACE` (changed 2026-11-06).
@@ -325,3 +325,4 @@ All of these were replaced in the 2026-11-06 migration.
   - The first deploy built fine but exited with `fatal: Invalid URL`: the pasted REDIS_URL had a trailing `PORT=4000` line. After the user fixed it, `/health` reported ok with database ok and the bullmq queue.
   - Vercel: Claude imported the repo with the 2 `NEXT_PUBLIC_*` vars → https://trace-lake-iota.vercel.app (home page renders). Claude then set Render `CORS_ORIGINS` to the Vercel URL and redeployed.
   - Credentials hygiene: the user pasted the real DB password, Upstash token, 0G key and storage key into the chat. Advised rotating them after the hackathon (Supabase password, Upstash token, 0G key; the storage key is a testnet burner). After rotating, update `.env.local` and the Render env.
+- **2026-11-06 22:20 IST (nicer URL)** — The user wanted a URL like trace.vercel.com. `*.vercel.com` belongs to Vercel; `trace.vercel.app`, `trace-app`, `tracefi`, `usetrace`, `gettrace` and `trace-lp` were taken. The user picked **trace-eth.vercel.app**, added under Vercel → Settings → Domains (type the name, press Enter, then Add Domain). Render `CORS_ORIGINS` now lists both Vercel domains; redeployed.
