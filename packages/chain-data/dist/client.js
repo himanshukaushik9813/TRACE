@@ -851,9 +851,35 @@ export function createTraceClient(cfg) {
         ]);
         return { sqrtPriceX96: slot0[0].toString(), tick: Number(slot0[1]), liquidity: liquidity.toString() };
     }
+    /**
+     * Find a transaction `from` sent to contract `to` with exactly `input` since
+     * `fromBlock`, through the shared credit limiter. Uses the contract's logs to
+     * find candidate txs (one eth_getLogs + one lookup per candidate) instead of
+     * reading whole blocks. `topics` narrows the log query (e.g. ERC-20 Approval
+     * with the owner as topic 1). At most `maxCandidates` txs are inspected.
+     */
+    async function findSentTx(q) {
+        const latest = await latestBlock();
+        const from = Math.max(0, Math.min(q.fromBlock, latest));
+        const logs = await call(() => client.request({ method: "eth_getLogs", params: [{ address: q.to, fromBlock: numberToHex(from), toBlock: numberToHex(latest), ...(q.topics ? { topics: q.topics } : {}) }] }), 255);
+        const hashes = [...new Set(logs.map((l) => l.transactionHash))].reverse().slice(0, q.maxCandidates ?? 25);
+        for (const hash of hashes) {
+            const tx = await call(() => client.getTransaction({ hash }));
+            if (tx.from.toLowerCase() === q.from.toLowerCase() && tx.to?.toLowerCase() === q.to.toLowerCase() && tx.input.toLowerCase() === q.input.toLowerCase()) {
+                return { hash, block: Number(tx.blockNumber), scanned: [from, latest] };
+            }
+        }
+        return { hash: null, scanned: [from, latest] };
+    }
+    /** The address's next nonce including its pending transactions. */
+    async function pendingNonce(address) {
+        return call(() => client.getTransactionCount({ address: address, blockTag: "pending" }));
+    }
     return {
         // (the raw viem client is intentionally not exported — keeps the type portable and the RPC URL private)
         chainId: SEPOLIA_CHAIN_ID,
+        findSentTx,
+        pendingNonce,
         npm: NPM,
         assertChain,
         latestBlock,

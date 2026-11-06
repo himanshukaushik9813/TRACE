@@ -64,6 +64,11 @@ export class Db {
      * caller re-queues them to finish; with BullMQ they may still be in Redis, in
      * which case the caller must NOT re-add or they run twice.
      */
+    /** True once the run was cancelled (restart / superseded / user). */
+    async isCancelled(id) {
+        const [r] = await this.query(`select status from investigations where id = $1`, [id]);
+        return r?.status === "cancelled";
+    }
     async requeueInterrupted() {
         const rows = await this.query(`select id, wallet, window_days from investigations where status not in ('done','no_positions','failed','cancelled') order by created_at`);
         if (rows.length)

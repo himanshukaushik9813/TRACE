@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Bookmark } from "lucide-react";
 import { Page } from "@/components/page";
 import { Card, EmptyState, ErrorState, LoadingState, Pill, SectionTitle, SourceBadge } from "@/components/ui";
+import { FAMILY } from "@/components/case-file";
 import { fmt } from "@/lib/format";
 import { api, useCurrentInvestigationId, useInvestigationStatus, withInv } from "@/lib/api";
 
@@ -24,6 +25,7 @@ export default function SavedPage() {
       <SectionTitle eyebrow="Content-addressed; a change always creates a new version" title="Version history" />
       {!invId && <EmptyState title="No investigation selected">Run an investigation first; its strategy versions are listed here.</EmptyState>}
       {(inv.isLoading || q.isLoading) && <LoadingState />}
+      {inv.isError && <ErrorState message={(inv.error as Error).message} />}
       {q.isError && <ErrorState message={(q.error as Error).message} />}
       {q.data && q.data.strategies.length === 0 && <EmptyState title="No strategy versions for this wallet yet" />}
       {q.data && q.data.strategies.length > 0 && (
@@ -32,7 +34,7 @@ export default function SavedPage() {
             <Link key={s.id} href={withInv("/strategy", s.investigation)} className="px-5 py-3 flex flex-col md:flex-row md:items-center gap-2 text-[0.82rem] hover:bg-ink/3">
               <span className="tabular text-ink md:w-[180px]">{s.irId}</span>
               <span className="flex-1 text-ink-600">
-                {s.family} · {fmt.frac(Number(s.confidence), 0)} · hash {s.versionHash}
+                {FAMILY[s.family] ?? s.family} · {fmt.frac(Number(s.confidence), 0)} · hash {s.versionHash}
                 {s.parentIrId ? ` · derived from ${s.parentIrId}` : ""}
               </span>
               <Pill tone={s.role === "ai_hypothesis" ? "gold" : "neutral"}>{s.role === "ai_hypothesis" ? "0G hypothesis" : "evidence-only"}</Pill>

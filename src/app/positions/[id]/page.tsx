@@ -35,6 +35,7 @@ export default function PositionPage() {
       </Link>
       {!inv && <EmptyState title="No investigation selected">Open a position from an investigation.</EmptyState>}
       {(full.isLoading || detail.isLoading) && <LoadingState />}
+      {full.isError && <ErrorState message={(full.error as Error).message} />}
       {detail.isError && <ErrorState message={(detail.error as Error).message} />}
       {p && detail.data && (
         <>

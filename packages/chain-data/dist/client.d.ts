@@ -22,6 +22,7 @@
  * Errors: every failure is a typed TraceChainError whose message has the RPC
  * URL (which embeds the provider key) scrubbed out.
  */
+import { type Hex } from "viem";
 import type { PositionMeta, PriceSeries, V3Event } from "@trace/strategy-ir";
 export type ChainDataConfig = {
     rpcUrl: string;
@@ -89,6 +90,23 @@ export type WalletHistory = {
 };
 export declare function createTraceClient(cfg: ChainDataConfig): {
     chainId: 11155111;
+    findSentTx: (q: {
+        from: string;
+        to: string;
+        input: string;
+        fromBlock: number;
+        topics?: (Hex | null)[];
+        maxCandidates?: number;
+    }) => Promise<{
+        hash: `0x${string}`;
+        block: number;
+        scanned: [number, number];
+    } | {
+        hash: null;
+        scanned: [number, number];
+        block?: undefined;
+    }>;
+    pendingNonce: (address: string) => Promise<number>;
     npm: "0x1238536071E1c677A632429e3655c799b22cDA52";
     assertChain: () => Promise<void>;
     latestBlock: () => Promise<number>;

@@ -557,7 +557,7 @@ export function PerformancePanel({ full }: { full: FullInvestigation }) {
           <div><dt className="text-ink-600 inline">Source: </dt><dd className="inline text-ink">{bt.series.prices.length} real swaps in pool {fmt.addr(bt.pool)}</dd></div>
           <div><dt className="text-ink-600 inline">Blocks: </dt><dd className="inline text-ink tabular">{bt.period.fromBlock.toLocaleString("en-US")} to {bt.period.toBlock.toLocaleString("en-US")}</dd></div>
           <div><dt className="text-ink-600 inline">Start capital: </dt><dd className="inline text-ink">{fmt.amt(bt.assumptions.startCapital)} {bt.assumptions.valuationToken}</dd></div>
-          <div><dt className="text-ink-600 inline">Slippage: </dt><dd className="inline text-ink">{bt.assumptions.slippagePct}%</dd></div>
+          <div><dt className="text-ink-600 inline">Slippage: </dt><dd className="inline text-ink">{fmt.frac(bt.assumptions.slippagePct, 2)}</dd></div>
           <div className="sm:col-span-2"><dt className="text-ink-600 inline">Fees: </dt><dd className="inline text-ink">{bt.assumptions.feeModel}</dd></div>
           <div className="sm:col-span-2"><dt className="text-ink-600 inline">Gas: </dt><dd className="inline text-ink">{bt.assumptions.gasModel}</dd></div>
           <div className="sm:col-span-2"><dt className="text-ink-600 inline">Look-ahead guard: </dt><dd className="inline text-ink">{bt.split.lookaheadGuard}; each decision uses only earlier swaps</dd></div>

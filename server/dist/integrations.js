@@ -81,7 +81,15 @@ export async function integrationSnapshot(cfg, db, queueBackend, force = false) 
     }
     out.push(r("zerog_storage", "0G Storage (Galileo testnet)", storageStatus, storageDetail));
     // Authorization.
-    out.push(r("eip712", "Wallet authorization (EIP-712, server-verified)", "IMPLEMENTED BUT NOT VERIFIED", "Verified per request: signature, signer, chain, expiry, single-use challenge, strategy version + plan hash."));
+    // VERIFIED TESTNET only once a real wallet signature has passed server verification
+    // (same evidence rule as Aqua: a stored, validated authorization).
+    const signed = await db
+        .query(`select count(*)::int n from authorizations where validated`)
+        .then((x) => x[0]?.n ?? 0)
+        .catch(() => 0);
+    out.push(signed > 0
+        ? r("eip712", "Wallet authorization (EIP-712, server-verified)", "VERIFIED TESTNET", `${signed} wallet signature(s) verified by the server: signer, chain, expiry, single-use challenge, strategy version + plan hash.`)
+        : r("eip712", "Wallet authorization (EIP-712, server-verified)", "IMPLEMENTED BUT NOT VERIFIED", "Verified per request: signature, signer, chain, expiry, single-use challenge, strategy version + plan hash. No wallet has signed yet."));
     out.push(r("world_id", "World ID v4 (staging) human proof", worldConfigured(cfg.world) ? "IMPLEMENTED BUT NOT VERIFIED" : "BLOCKED BY EXTERNAL DEPENDENCY", worldConfigured(cfg.world) ? `configured (${cfg.world.environment}); staging — not production identity verification` : "WORLD_RP_ID / WORLD_RP_SIGNING_KEY not configured"));
     // Persistence.
     let dbDetail = "unreachable";

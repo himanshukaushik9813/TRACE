@@ -7,9 +7,9 @@
  */
 export * from "./types.js";
 export * as canonical from "./canonical.js";
-export { contentHash, canonicalString, shortHash } from "./canonical.js";
+export { contentHash, canonicalString, shortHash, idHash } from "./canonical.js";
 export { validateStrategyIR, validateCompatibility, validateBacktest, validatePlan } from "./validate.js";
-import { shortHash } from "./canonical.js";
+import { contentHash, idHash } from "./canonical.js";
 /**
  * Stamp a StrategyIR with its deterministic identity: id = hash of the IR's
  * own content (minus the volatile id field). Recomputing on the same content
@@ -18,17 +18,20 @@ import { shortHash } from "./canonical.js";
  */
 export function finalizeStrategyIR(draft) {
     const body = { ...draft, id: undefined };
-    const id = `ir_${shortHash(body).replace(/[^a-z0-9]/g, "").slice(0, 12)}`;
+    // 64 bits of the content digest. (Before 2026-11-06 ids carried ~24 bits —
+    // "ir_fnv1a" + 6 hex — and could collide across investigations; those stored
+    // ids stay valid, they are opaque strings.)
+    const id = `ir_${contentHash(body).digest.slice(0, 16)}`;
     const ir = { ...draft, id };
     return ir;
 }
 /** Deterministic digest of a StrategyIR, for pinning in proofs/archives. */
 export function strategyVersionHash(ir) {
-    return shortHash(ir);
+    return idHash(ir);
 }
 /** Deterministic fingerprint of an event set — the evidence anchor. */
 export function eventsFingerprint(events) {
-    return shortHash(events);
+    return idHash(events);
 }
 /** Group a strategy's rules by category (entry / adjustment / exit / risk / fee). */
 export function rulesByCategory(ir) {

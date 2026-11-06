@@ -57,12 +57,13 @@ async function main() {
   // mid-way, but everything is idempotent (raw_events keyed by tx/log, strategies by
   // ir_id, etc.), so the job finishes cleanly when re-run.
   //   - in-memory queue: the in-flight work is genuinely gone — re-queue it now.
-  //   - BullMQ queue: Redis kept the job, so getJob() finds it and the add is a no-op.
+  //   - BullMQ queue: a job still waiting in Redis is kept; one left "active" by the dead
+  //     process (or already failed) is replaced by a fresh job (see requeueDecision).
   const interrupted = await db.requeueInterrupted();
   if (interrupted.length) {
     for (const inv of interrupted)
       await queue
-        .add({ investigationId: inv.id, wallet: inv.wallet, days: inv.days ?? 30 })
+        .add({ investigationId: inv.id, wallet: inv.wallet, days: inv.days ?? 30 }, { recover: true })
         .catch((err) => console.error(`[trace] failed to re-queue interrupted ${inv.id}:`, err.message));
     console.log(`[trace] re-queued ${interrupted.length} interrupted investigation(s)`);
   }

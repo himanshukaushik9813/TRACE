@@ -25,8 +25,7 @@
  */
 
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
-import { createPublicClient, http } from "viem";
-import { sepolia } from "viem/chains";
+import { pad, toEventSelector } from "viem";
 import { AQUA, SEPOLIA_CHAIN_ID, isAddress } from "@trace/chain-config";
 import { createTraceClient, scrubSecrets } from "@trace/chain-data";
 import { assessCompatibility, aquaClient, compilePlan } from "@trace/aqua-adapter";
@@ -47,6 +46,11 @@ export const ACTIONS: Record<string, ("approve" | "ship" | "dock" | "swap")[]> =
 };
 
 const AUTH_TTL_SECONDS = 600;
+const APPROVAL_TOPIC = toEventSelector("Approval(address,address,uint256)");
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isUuid = (s: string) => UUID_RE.test(s);
+/** Postgres unique-violation on the "one live ship per plan" index (migration 0003). */
+const isLiveShipConflict = (err: unknown) => (err as { code?: string; constraint?: string }).code === "23505" && /transactions_one_live_ship/.test(String((err as { constraint?: string }).constraint ?? (err as Error).message));
 
 const json = (v: unknown) => JSON.parse(JSON.stringify(v, (_k, x) => (typeof x === "bigint" ? x.toString() : x)));
 const P = (req: Request, k: string): string => String(req.params[k] ?? "");
@@ -271,11 +275,13 @@ export function createApi(deps: ApiDeps): Express {
   }));
 
   app.get("/investigations/:id/events", h(async (req, res) => {
+    if (!isUuid(P(req, "id"))) return bad(res, "investigation not found", 404);
     const tokenId = typeof req.query.tokenId === "string" && /^\d+$/.test(req.query.tokenId) ? req.query.tokenId : undefined;
     res.json({ events: await db.getEvents(P(req, "id"), tokenId) });
   }));
 
   app.get("/investigations/:id/positions/:tokenId", h(async (req, res) => {
+    if (!isUuid(P(req, "id"))) return bad(res, "investigation not found", 404);
     if (!/^\d+$/.test(P(req, "tokenId"))) return bad(res, "tokenId must be numeric");
     const [pos] = await db.query(`select * from positions where investigation = $1 and token_id = $2`, [P(req, "id"), P(req, "tokenId")]);
     if (!pos) return bad(res, "position not found in this investigation", 404);
@@ -290,11 +296,19 @@ export function createApi(deps: ApiDeps): Express {
     if (!inv || inv.status !== "done") return bad(res, "investigation not found or not finished", 404);
     const [strategy] = await db.query(`select id, ir_json as ir from strategies where investigation = $1 order by (role = 'ai_hypothesis') desc, created_at desc limit 1`, [inv.id]);
     const [dna] = await db.query(`select data from strategy_dna where investigation = $1`, [inv.id]);
+    const [run] = await db.query(
+      `select status, request_id as "requestId", model, provider_address as "providerAddress", tee_verified as "teeVerified", trust_mode as "trustMode",
+              error_code as "errorCode", error, usage, latency_ms as "latencyMs", rules_rejected as "rulesRejected", created_at as "createdAt"
+         from inference_runs where investigation = $1 order by created_at desc limit 1`,
+      [inv.id],
+    );
+    // Same four artifacts as the pipeline's archive step (pipeline.ts, step 7).
     const outcome = await archive({
       cfg: cfg.storage,
       artifacts: [
         { kind: "investigation-summary", content: { investigation: inv.id, summary: inv.summary } },
         { kind: "strategy-dna", content: { investigation: inv.id, fingerprints: dna?.data?.fingerprints ?? null } },
+        ...(run ? [{ kind: "inference-run", content: { investigation: inv.id, run } }] : []),
         ...(strategy ? [{ kind: `strategy-ir:${strategy.ir.id}`, content: strategy.ir }] : []),
       ],
     });
@@ -499,7 +513,13 @@ export function createApi(deps: ApiDeps): Express {
       const allowed = p.plan.steps.filter((s: { op: string }) => s.op === op).length;
       if (live.length >= allowed)
         return res.status(409).json({ error: `this plan already has ${op === "ship" ? "a ship transaction" : `${live.length} ${op} transaction(s)`} pending or confirmed (${live.map((t) => t.tx_hash.slice(0, 10)).join(", ")}…); not recording a duplicate`, existing: live.map((t) => t.tx_hash) });
-      await db.upsertTransaction({ planId: p.id, authorizationId, op, txHash });
+      try {
+        await db.upsertTransaction({ planId: p.id, authorizationId, op, txHash });
+      } catch (err) {
+        // Two concurrent ship posts for the same plan: the DB index refuses the second.
+        if (isLiveShipConflict(err)) return res.status(409).json({ error: "this plan already has a ship transaction pending or confirmed; not recording a duplicate" });
+        throw err;
+      }
     }
     const result = await verifyAndStore({ id: p.id, plan: p.plan }, authorizationId, op, txHash, auth.wallet);
     res.status(202).json(json({ txHash, ...result }));
@@ -522,32 +542,36 @@ export function createApi(deps: ApiDeps): Express {
     const step = steps[Number(stepIndex ?? 0)];
     if (!step) return bad(res, `plan has no ${op} step ${stepIndex ?? 0}`, 422);
     const known = await db.query(`select * from transactions where plan_id = $1 and op = $2 order by created_at desc`, [p.id, op]);
-    const pc = createPublicClient({ chain: sepolia, transport: http(cfg.sepoliaRpcUrl, { timeout: 20_000 }) });
-    const latest = Number(await pc.getBlockNumber());
-    const start = Math.max(fromBlock, latest - 150); // ~30 min of Sepolia blocks
-    for (let b = latest; b >= start; b--) {
-      const block = await pc.getBlock({ blockNumber: BigInt(b), includeTransactions: true });
-      const hit = block.transactions.find(
-        (t) => typeof t === "object" && t.from.toLowerCase() === p.maker.toLowerCase() && t.to?.toLowerCase() === step.to.toLowerCase() && t.input.toLowerCase() === step.data.toLowerCase(),
-      );
-      if (hit && typeof hit === "object") {
-        const already = known.find((k: { tx_hash: string }) => k.tx_hash.toLowerCase() === hit.hash.toLowerCase());
-        if (!already) {
-          const [auth] = await db.query<{ id: string }>(
-            `select id from authorizations where plan_id = $1 and validated and action = $2 order by created_at desc limit 1`,
-            [p.id, op === "dock" ? "aqua:dock" : "aqua:ship"],
-          );
-          if (!auth) return res.json({ status: "found_unauthorized", txHash: hit.hash });
-          await db.upsertTransaction({ planId: p.id, authorizationId: auth.id, op, txHash: hit.hash });
-          await verifyAndStore({ id: p.id, plan: p.plan }, auth.id, op, hit.hash, p.maker).catch(() => null);
-        }
-        const [row] = await db.query(`select * from transactions where tx_hash = $1`, [hit.hash]);
-        return res.json({ status: "recorded", tx: row ?? null });
+    // Through the shared, credit-limited chain client (never a raw client: the worker
+    // and this route share one Infura budget). Candidates come from the target
+    // contract's logs: ERC-20 Approval with the maker as owner, or Aqua Shipped/Docked.
+    const chain = createTraceClient({ rpcUrl: cfg.sepoliaRpcUrl, fallbackRpcUrls: cfg.sepoliaFallbackRpcUrls });
+    const head = await chain.latestBlock();
+    const found = await chain.findSentTx({
+      from: p.maker,
+      to: step.to,
+      input: step.data,
+      fromBlock: Math.max(fromBlock, head - 150), // ~30 min of Sepolia blocks
+      topics: op === "approve" ? [APPROVAL_TOPIC, pad(p.maker.toLowerCase() as `0x${string}`, { size: 32 })] : undefined,
+    });
+    if (found.hash) {
+      const hash = found.hash;
+      const already = known.find((k: { tx_hash: string }) => k.tx_hash.toLowerCase() === hash.toLowerCase());
+      if (!already) {
+        const [auth] = await db.query<{ id: string }>(
+          `select id from authorizations where plan_id = $1 and validated and action = $2 order by created_at desc limit 1`,
+          [p.id, op === "dock" ? "aqua:dock" : "aqua:ship"],
+        );
+        if (!auth) return res.json({ status: "found_unauthorized", txHash: hash });
+        await db.upsertTransaction({ planId: p.id, authorizationId: auth.id, op, txHash: hash });
+        await verifyAndStore({ id: p.id, plan: p.plan }, auth.id, op, hash, p.maker).catch(() => null);
       }
+      const [row] = await db.query(`select * from transactions where tx_hash = $1`, [hash]);
+      return res.json({ status: "recorded", tx: row ?? null });
     }
     // Not mined in the scanned range: did the wallet send anything at all?
-    const pendingNonce = await pc.getTransactionCount({ address: p.maker as `0x${string}`, blockTag: "pending" });
-    res.json({ status: pendingNonce > nonce ? "sent_not_found" : "not_sent", pendingNonce, scanned: [start, latest] });
+    const pendingNonce = await chain.pendingNonce(p.maker);
+    res.json({ status: pendingNonce > nonce ? "sent_not_found" : "not_sent", pendingNonce, scanned: found.scanned });
   }));
 
   app.get("/transactions/:hash", h(async (req, res) => {

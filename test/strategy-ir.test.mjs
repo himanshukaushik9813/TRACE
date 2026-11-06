@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { contentHash, canonicalString, finalizeStrategyIR, validateStrategyIR, validateBacktest, validatePlan } from "@trace/strategy-ir";
+import { contentHash, canonicalString, finalizeStrategyIR, strategyVersionHash, eventsFingerprint, validateStrategyIR, validateBacktest, validatePlan } from "@trace/strategy-ir";
 
 const tx = (n) => `0x${n.toString(16).padStart(64, "0")}`;
 const ir = (over = {}) => ({
@@ -32,6 +32,24 @@ test("strategy id is a content hash: same content â†’ same id, changed content â
   const c = finalizeStrategyIR(ir({ confidence: 0.61 }));
   assert.equal(a.id, b.id);
   assert.notEqual(a.id, c.id);
+});
+
+test("strategy ids and version hashes carry 64 bits, so distinct strategies never share an id", () => {
+  const a = finalizeStrategyIR(ir());
+  assert.match(a.id, /^ir_[0-9a-f]{16}$/);
+  assert.match(strategyVersionHash(a), /^fnv1a:[0-9a-f]{16}$/);
+  assert.match(eventsFingerprint([{ block: 1 }]), /^fnv1a:[0-9a-f]{16}$/);
+  // 5,000 distinct IRs: the old ~24-bit ids collide here with probability ~0.5;
+  // a collision silently mapped one investigation's strategy onto another's.
+  const ids = new Set();
+  const versions = new Set();
+  for (let i = 0; i < 5_000; i++) {
+    const s = finalizeStrategyIR(ir({ confidence: i / 10_000 }));
+    ids.add(s.id);
+    versions.add(strategyVersionHash(s));
+  }
+  assert.equal(ids.size, 5_000);
+  assert.equal(versions.size, 5_000);
 });
 
 test("validator accepts a well-formed v2 IR", () => {

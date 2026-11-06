@@ -64,6 +64,11 @@ async function runStages(job: InvestigationJob, db: Db, cfg: TraceConfig, chain:
   const advance = async (...args: Parameters<Db["setStatus"]>) => {
     if (!(await db.setStatus(...args))) throw new InvestigationCancelled(id);
   };
+  // Between stage transitions: checked before every write, so a run cancelled
+  // mid-stage (minutes of RPC reads) stores nothing further.
+  const checkpoint = async () => {
+    if (await db.isCancelled(id)) throw new InvestigationCancelled(id);
+  };
 
   // 1) Fetch real on-chain history.
   await advance(id, "fetching", { stage: "Reading Sepolia: position NFTs, lifecycle logs, positions(), receipts" });
@@ -89,6 +94,7 @@ async function runStages(job: InvestigationJob, db: Db, cfg: TraceConfig, chain:
     network: "Ethereum Sepolia",
     window: history.window,
   });
+  await checkpoint();
   await db.saveReconstruction(id, { summary, window: history.window, notes: history.notes });
   await db.insertEvents(id, history.events);
   await db.insertPositions(id, summary, history.positions);
@@ -118,6 +124,7 @@ async function runStages(job: InvestigationJob, db: Db, cfg: TraceConfig, chain:
 
   // 4) Strategy DNA + evidence-only baseline.
   await advance(id, "inferring", { stage: "Strategy DNA, evidence baseline, 0G inference" });
+  await checkpoint();
   const fingerprints = computeFingerprints(history.events, history.positions, series, history.window);
   await db.saveDna(id, {
     fingerprints,
@@ -136,7 +143,9 @@ async function runStages(job: InvestigationJob, db: Db, cfg: TraceConfig, chain:
     history.window,
     summary.positions.map((p) => ({ tokenId: p.tokenId, pool: p.pool, pair: `${p.token0}/${p.token1}`, feeTier: p.feeTier, tickLower: p.tickLower, tickUpper: p.tickUpper, status: p.status })),
   );
+  await checkpoint();
   const zg = await runZeroGInference({ pack, wallet: history.wallet, baseline, cfg: cfg.zeroG });
+  await checkpoint();
   const runId = await db.insertInferenceRun(id, zg.run);
   let primary: StrategyIR = baseline;
   let primaryId = baselineId;
@@ -167,8 +176,10 @@ async function runStages(job: InvestigationJob, db: Db, cfg: TraceConfig, chain:
         meta: history.positions,
         opts: deposit > 0 && Number.isFinite(deposit) ? { startCapital: deposit } : { startCapital: 1 },
       });
+      await checkpoint();
       await db.insertBacktest(primaryId, bt);
     } catch (err) {
+      if (err instanceof InvestigationCancelled) throw err;
       await db.setIntegrations(id, { backtest: { status: "failed", detail: (err as Error).message } });
     }
   } else {
@@ -188,6 +199,7 @@ async function runStages(job: InvestigationJob, db: Db, cfg: TraceConfig, chain:
       { kind: `strategy-ir:${primary.id}`, content: primary },
     ],
   });
+  await checkpoint();
   await db.insertStorage(id, primaryId, outcome.refs);
   await db.setIntegrations(id, { storage: { status: outcome.status, errors: outcome.errors.slice(0, 4), uploaded: outcome.refs.length } });
 

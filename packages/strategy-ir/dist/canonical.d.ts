@@ -29,5 +29,11 @@ export type ContentHash = {
 export declare function contentHash(value: unknown): ContentHash;
 /** Optional WebCrypto SHA-256 (browser + Node 18+) when a standard digest is wanted. */
 export declare function digestAsync(value: unknown): Promise<string>;
-/** Short display form: "fnv1a:7c1e…d4" (first 4 + last 2 chars of digest). */
+/**
+ * Identity form: "fnv1a:" + the first 16 hex chars (64 bits) of the 128-bit digest.
+ * Use this wherever the value identifies something (ids, version hashes,
+ * fingerprints). shortHash is ~24 bits and only fit for display.
+ */
+export declare function idHash(value: unknown): string;
+/** Short display form: "fnv1a:7c1e…d4" (first 4 + last 2 chars of digest). Display only — ~24 bits, collides. */
 export declare function shortHash(value: unknown): string;

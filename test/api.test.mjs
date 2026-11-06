@@ -9,6 +9,7 @@ const account = privateKeyToAccount(generatePrivateKey());
 const stranger = privateKeyToAccount(generatePrivateKey());
 
 function fakeDb() {
+  const db = {};
   const challenges = new Map();
   const auths = new Map();
   const plan = {
@@ -20,7 +21,7 @@ function fakeDb() {
     irId: "ir_test",
     plan: { steps: [{ op: "approve" }, { op: "ship" }, { op: "dock" }] },
   };
-  return {
+  return Object.assign(db, {
     queries: [],
     ping: async () => ({ ok: true, migrations: ["0001_init.sql"] }),
     query: async () => [],
@@ -40,8 +41,11 @@ function fakeDb() {
     },
     getAuthorization: async (id) => auths.get(id) ?? null,
     touchWallet: async () => {},
-    upsertTransaction: async () => {},
-  };
+    upsertTransaction: async () => {
+      // Simulates the second of two concurrent ship posts hitting migration 0003's index.
+      if (db.failUpsertWith) throw db.failUpsertWith;
+    },
+  });
 }
 
 const cfg = {
@@ -56,9 +60,11 @@ const cfg = {
 
 let server;
 let base;
+let db;
 const queue = { backend: "in-memory", add: async () => {} };
 before(async () => {
-  const app = createApi({ db: fakeDb(), queue, cfg });
+  db = fakeDb();
+  const app = createApi({ db, queue, cfg });
   await new Promise((r) => (server = app.listen(0, r)));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -118,4 +124,28 @@ test("a signature by another wallet is rejected", async () => {
 test("no execution step is accepted without a validated authorization", async () => {
   const r = await post("/transactions", { authorizationId: "does-not-exist", op: "ship", txHash: `0x${"22".repeat(32)}` });
   assert.equal(r.status, 403);
+});
+
+const signAuthorization = async () => {
+  const ch = await (await post("/plans/plan-1/challenge", { wallet: account.address, action: "aqua:ship" })).json();
+  const td = ch.typedData;
+  const signature = await account.signTypedData({ domain: td.domain, types: td.types, primaryType: "Authorization", message: { ...td.message, chainId: BigInt(td.message.chainId), expiresAt: BigInt(td.message.expiresAt) } });
+  return (await (await post("/authorizations", { planId: "plan-1", claims: ch.claims, signature })).json()).authorizationId;
+};
+
+test("a concurrent duplicate ship hitting the one-live-ship index is a 409, not a 500", async () => {
+  const authorizationId = await signAuthorization();
+  db.failUpsertWith = Object.assign(new Error('duplicate key value violates unique constraint "transactions_one_live_ship"'), { code: "23505", constraint: "transactions_one_live_ship" });
+  try {
+    const r = await post("/transactions", { authorizationId, op: "ship", txHash: `0x${"33".repeat(32)}` });
+    assert.equal(r.status, 409);
+    assert.match((await r.json()).error, /not recording a duplicate/);
+  } finally {
+    db.failUpsertWith = null;
+  }
+});
+
+test("malformed investigation ids are a 404, not a server error", async () => {
+  assert.equal((await fetch(`${base}/investigations/not-a-uuid/events`)).status, 404);
+  assert.equal((await fetch(`${base}/investigations/not-a-uuid/positions/1`)).status, 404);
 });

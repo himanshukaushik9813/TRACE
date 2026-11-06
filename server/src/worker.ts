@@ -17,7 +17,8 @@ import type { TraceConfig } from "./config.js";
 export const QUEUE_NAME = "trace-investigations";
 
 export type InvestigationQueue = {
-  add: (job: InvestigationJob) => Promise<void>;
+  /** Queue a job. `recover` (boot-time re-queue): a job left "active" by a dead process is treated as orphaned. */
+  add: (job: InvestigationJob, opts?: { recover?: boolean }) => Promise<void>;
   /** Drop a job that hasn't started. A running job stops at its next stage checkpoint instead. */
   cancel: (investigationId: string) => Promise<"removed" | "running" | "absent">;
   backend: "bullmq" | "in-memory";
@@ -38,6 +39,21 @@ export async function redisReachable(url: string | null): Promise<boolean> {
   } finally {
     r.disconnect();
   }
+}
+
+/**
+ * What to do when an investigation is (re-)queued and BullMQ already holds a job
+ * with its id. Jobs waiting to run are kept (idempotent add). A finished
+ * (completed/failed) job will never run again, so a fresh job is needed. With
+ * `recover` (boot), an "active" job belongs to the process that died: its lock
+ * runs out and the stall check marks it failed without re-running it
+ * (maxStalledCount 0), so a fresh job is needed too.
+ */
+export function requeueDecision(state: string | null, recover: boolean): "add" | "keep" | "add-new-id" {
+  if (!state || state === "unknown") return "add";
+  if (["waiting", "delayed", "prioritized", "waiting-children"].includes(state)) return "keep";
+  if (state === "active") return recover ? "add-new-id" : "keep";
+  return "add-new-id";
 }
 
 async function guarded(job: InvestigationJob, db: Db, cfg: TraceConfig) {
@@ -72,16 +88,21 @@ export function createBullQueue(cfg: TraceConfig, db: Db): InvestigationQueue {
     drainDelay: 30,
   });
   worker.on("error", (err) => console.error("[worker] bullmq error:", err.message));
+  /** investigation id → its current BullMQ job id (differs after a recovery re-queue). */
+  const jobIds = new Map<string, string>();
   return {
     backend: "bullmq",
-    add: async (job) => {
-      // Idempotent: a job already in the queue (durable across restarts) is kept, not re-added.
-      const existing = await queue.getJob(job.investigationId);
-      if (existing) return;
-      await queue.add("investigate", job, { jobId: job.investigationId });
+    add: async (job, opts) => {
+      const id = job.investigationId;
+      const existing = await queue.getJob(jobIds.get(id) ?? id);
+      const decision = requeueDecision(existing ? await existing.getState() : null, Boolean(opts?.recover));
+      if (decision === "keep") return;
+      const jobId = decision === "add" ? id : `${id}-r${Date.now()}`;
+      jobIds.set(id, jobId);
+      await queue.add("investigate", job, { jobId });
     },
     cancel: async (id) => {
-      const j = await queue.getJob(id);
+      const j = await queue.getJob(jobIds.get(id) ?? id);
       if (!j) return "absent";
       if ((await j.isWaiting()) || (await j.isDelayed())) {
         await j.remove();

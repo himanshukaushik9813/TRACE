@@ -78,7 +78,15 @@ export async function digestAsync(value) {
     }
     return fnv1a128(canonical);
 }
-/** Short display form: "fnv1a:7c1e…d4" (first 4 + last 2 chars of digest). */
+/**
+ * Identity form: "fnv1a:" + the first 16 hex chars (64 bits) of the 128-bit digest.
+ * Use this wherever the value identifies something (ids, version hashes,
+ * fingerprints). shortHash is ~24 bits and only fit for display.
+ */
+export function idHash(value) {
+    return `fnv1a:${contentHash(value).digest.slice(0, 16)}`;
+}
+/** Short display form: "fnv1a:7c1e…d4" (first 4 + last 2 chars of digest). Display only — ~24 bits, collides. */
 export function shortHash(value) {
     const d = contentHash(value).digest;
     return `fnv1a:${d.slice(0, 4)}…${d.slice(-2)}`;

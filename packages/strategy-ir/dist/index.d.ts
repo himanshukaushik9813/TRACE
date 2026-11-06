@@ -7,7 +7,7 @@
  */
 export * from "./types.js";
 export * as canonical from "./canonical.js";
-export { contentHash, canonicalString, shortHash } from "./canonical.js";
+export { contentHash, canonicalString, shortHash, idHash } from "./canonical.js";
 export { validateStrategyIR, validateCompatibility, validateBacktest, validatePlan } from "./validate.js";
 export type { ValidationIssue, ValidationResult } from "./validate.js";
 import type { StrategyIR } from "./types.js";

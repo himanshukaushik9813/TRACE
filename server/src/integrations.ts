@@ -115,7 +115,17 @@ export async function integrationSnapshot(cfg: TraceConfig, db: Db, queueBackend
   out.push(r("zerog_storage", "0G Storage (Galileo testnet)", storageStatus, storageDetail));
 
   // Authorization.
-  out.push(r("eip712", "Wallet authorization (EIP-712, server-verified)", "IMPLEMENTED BUT NOT VERIFIED", "Verified per request: signature, signer, chain, expiry, single-use challenge, strategy version + plan hash."));
+  // VERIFIED TESTNET only once a real wallet signature has passed server verification
+  // (same evidence rule as Aqua: a stored, validated authorization).
+  const signed = await db
+    .query<{ n: number }>(`select count(*)::int n from authorizations where validated`)
+    .then((x) => x[0]?.n ?? 0)
+    .catch(() => 0);
+  out.push(
+    signed > 0
+      ? r("eip712", "Wallet authorization (EIP-712, server-verified)", "VERIFIED TESTNET", `${signed} wallet signature(s) verified by the server: signer, chain, expiry, single-use challenge, strategy version + plan hash.`)
+      : r("eip712", "Wallet authorization (EIP-712, server-verified)", "IMPLEMENTED BUT NOT VERIFIED", "Verified per request: signature, signer, chain, expiry, single-use challenge, strategy version + plan hash. No wallet has signed yet."),
+  );
   out.push(
     r(
       "world_id",
