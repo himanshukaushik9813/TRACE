@@ -59,7 +59,7 @@ export type Integrations = {
   integrations: { key: string; label: string; status: IntegrationStatus; detail: string; checkedAt: string }[];
 };
 
-export type InvestigationStatus = "queued" | "fetching" | "reconstructing" | "inferring" | "backtesting" | "archiving" | "done" | "no_positions" | "failed";
+export type InvestigationStatus = "queued" | "fetching" | "reconstructing" | "inferring" | "backtesting" | "archiving" | "done" | "no_positions" | "failed" | "cancelled";
 
 export type Investigation = {
   id: string;
@@ -316,7 +316,7 @@ export type FullInvestigation = {
   storage: StorageArtifact[];
 };
 
-export type AuthorizationRow = { id: string; planId: string; wallet: string; action: string; validated: boolean; worldStatus: string; createdAt: string };
+export type AuthorizationRow = { id: string; planId: string; wallet: string; action: string; validated: boolean; worldStatus: string; expiresAt: string; live: boolean; createdAt: string };
 
 export type TxRow = {
   id: string;
@@ -352,7 +352,7 @@ export function useSuggestedWallets() {
   });
 }
 
-export const TERMINAL: InvestigationStatus[] = ["done", "no_positions", "failed"];
+export const TERMINAL: InvestigationStatus[] = ["done", "no_positions", "failed", "cancelled"];
 
 export function useInvestigationStatus(id: string | null) {
   return useQuery({
@@ -399,10 +399,54 @@ export function useRecentInvestigations(wallet?: string | null) {
 
 const LAST_KEY = "trace:lastInvestigation";
 
-/** The investigation the user is looking at: ?inv= in the URL, else the last one they ran (per-browser convenience). */
-export function useCurrentInvestigationId(): [string | null, (id: string) => void] {
+/** Drop ?inv= and the remembered investigation; nav links re-read it. */
+function forgetCurrentInvestigation() {
+  try {
+    window.localStorage.removeItem(LAST_KEY);
+  } catch {
+    /* ignore */
+  }
+  const url = new URL(window.location.href);
+  url.searchParams.delete("inv");
+  window.history.replaceState(null, "", url.toString());
+  window.dispatchEvent(new Event("trace:last-investigation"));
+}
+
+let reloadConsumed = false;
+/**
+ * True once per document when the user reloaded the page (F5 / Cmd+R).
+ * Later client-side navigations in the same document return false, so going
+ * back to Investigate from the sidebar still shows the current investigation.
+ * A send left waiting on the wallet when the page reloaded wins over the reset:
+ * that investigation must reopen so the send is reconciled, never repeated.
+ */
+function consumeBrowserReload(): boolean {
+  if (reloadConsumed) return false;
+  reloadConsumed = true;
+  const nav = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+  if (nav?.type !== "reload") return false;
+  try {
+    for (let i = 0; i < window.localStorage.length; i++) if (window.localStorage.key(i)?.startsWith("trace:send-intent:")) return false;
+  } catch {
+    /* storage unavailable: nothing pending to reconcile */
+  }
+  return true;
+}
+
+/**
+ * The investigation the user is looking at: ?inv= in the URL, else the last one
+ * they ran (per-browser convenience). Progress itself is never kept here: every
+ * screen re-reads the investigation, its plans, authorizations and
+ * transactions from the server by this id, so a refresh shows the real state.
+ */
+export function useCurrentInvestigationId(opts: { resetOnReload?: boolean } = {}): [string | null, (id: string) => void, () => void] {
   const [id, setId] = useState<string | null>(null);
+  const { resetOnReload = false } = opts;
   useEffect(() => {
+    if (resetOnReload && consumeBrowserReload()) {
+      forgetCurrentInvestigation();
+      return;
+    }
     const fromUrl = new URLSearchParams(window.location.search).get("inv");
     let fallback: string | null = null;
     try {
@@ -411,7 +455,7 @@ export function useCurrentInvestigationId(): [string | null, (id: string) => voi
       fallback = null;
     }
     setId(fromUrl ?? fallback);
-  }, []);
+  }, [resetOnReload]);
   const set = useCallback((next: string) => {
     setId(next);
     try {
@@ -427,7 +471,12 @@ export function useCurrentInvestigationId(): [string | null, (id: string) => voi
     // not a stale one captured at app load.
     window.dispatchEvent(new Event("trace:last-investigation"));
   }, []);
-  return [id, set];
+  /** Forget the current investigation (Start new investigation): all four stages reset. */
+  const clear = useCallback(() => {
+    setId(null);
+    forgetCurrentInvestigation();
+  }, []);
+  return [id, set, clear];
 }
 
 export const withInv = (href: string, id: string | null) => (id ? `${href}${href.includes("?") ? "&" : "?"}inv=${id}` : href);

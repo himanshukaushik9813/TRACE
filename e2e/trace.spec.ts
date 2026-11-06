@@ -148,27 +148,29 @@ test("workflow ticks only completed steps, and all four tick together after a co
       },
     }),
   );
-  await page.reload();
+  await page.goto(`/?inv=${id}`); // a link to the investigation (a browser reload starts fresh)
   await expect(flow).toHaveAttribute("aria-label", /4 of 4 steps complete/, { timeout: 30_000 });
   await expect(page.getByText("All four steps complete")).toBeVisible();
   await expect(page.getByRole("link", { name: /View ship transaction/ })).toBeVisible();
 });
 
 /**
- * One-click execution from Best Execution walks check → compile → sign → approve.
- * The API is mocked for this test (no plan or authorization is written to the
- * real database) and the test wallet signs the EIP-712 challenge, then rejects
- * the approve transaction: the flow must mark Verify's step done, stop at
- * approve with a clear message, and offer to continue from that step.
+ * Verify and Execute from Best Execution, end to end in the browser. The API is
+ * mocked statefully (no plan, authorization or transaction is written to the
+ * real database): the mock records exactly what the real server would and
+ * serves it back through /full, because the workflow ticks are driven only by
+ * server state. The test wallet signs the EIP-712 challenge (Verify ticks), then
+ * rejects the first approve (the flow stops with a clear message and resumes
+ * from that step), then approves and ships: all four steps tick green.
  */
-test("Best Execution runs the Aqua flow inline and resumes after a rejected approve", async ({ page, request }) => {
+test("Verify and Execute tick green inline, and execution resumes after a rejected approve", async ({ page, request }) => {
   const recent = await (await request.get(`${API}/investigations/recent?limit=30`)).json();
   let id: string | null = null;
   let real: Record<string, unknown> | null = null;
   for (const r of recent.investigations.filter((x: { status: string }) => x.status === "done")) {
     const f = await (await request.get(`${API}/investigations/${r.id}/full`)).json();
     const primary = f.strategies.find((s: { id: string }) => s.id === f.primaryStrategyId);
-    if (primary && primary.family !== "inconclusive" && f.plans.length === 0 && f.investigation.summary?.positions?.length) {
+    if (primary && primary.family !== "inconclusive" && f.plans.length === 0 && f.compatibility?.report?.verdict !== "INCOMPATIBLE" && f.positions.length) {
       id = r.id;
       real = f;
       break;
@@ -179,34 +181,93 @@ test("Best Execution runs the Aqua flow inline and resumes after a rejected appr
   const maker = "0x2222222222222222222222222222222222222222";
   await injectWallet(page, maker, "0xaa36a7");
   await page.addInitScript(() => {
-    const eth = (window as unknown as { ethereum: { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> } }).ethereum;
-    const base = eth.request;
-    eth.request = async (a) => {
+    const w = window as unknown as { ethereum: { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> }; __sends: number };
+    const base = w.ethereum.request;
+    w.__sends = 0;
+    w.ethereum.request = async (a) => {
       if (a.method === "eth_signTypedData_v4") return `0x${"11".repeat(65)}`;
-      if (a.method === "eth_sendTransaction" || a.method === "eth_estimateGas")
-        throw Object.assign(new Error("User rejected the request."), { code: 4001 });
+      if (a.method === "eth_estimateGas") return "0x5208";
+      if (a.method === "eth_sendTransaction") {
+        w.__sends += 1;
+        if (w.__sends === 1) throw Object.assign(new Error("User rejected the request."), { code: 4001 });
+        return `0x${w.__sends.toString(16).padStart(64, "0")}`;
+      }
       return base(a);
     };
   });
+
+  // Server state, as the real API would hold it.
+  const token = "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14";
+  const registry = "0xe8026bf31e58b738647319362581ab11be92139b";
+  const now = () => new Date().toISOString();
+  const plans: unknown[] = [];
+  const auths: unknown[] = [];
+  const txs: { id: string; op: string; tx_hash: string; status: string; to_addr: string; plan_id: string; created_at: string }[] = [];
   const compat = { strategyId: "s", verdict: "PARTIAL", rules: [], capabilities: [], checks: [], unsupportedNotes: [], assessedAt: 0 };
-  const step = (op: string) => ({ op, description: op, to: "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14", data: "0x", value: "0" });
+  const plan = {
+    maker,
+    params: { priceLow: 1, priceHigh: 2 },
+    tokens: [{ address: token, symbol: "WETH", decimals: 18, amount: "10000000000000000" }],
+    steps: [
+      { op: "approve", description: "approve", to: token, data: "0x", value: "0" },
+      { op: "ship", description: "ship", to: registry, data: "0x", value: "0" },
+    ],
+    notCompiled: [],
+  };
+  await page.route(`**/investigations/${id}/full`, (r) => r.fulfill({ json: { ...real, plans: [...plans].reverse(), authorizations: [...auths].reverse(), transactions: [...txs].reverse() } }));
   await page.route("**/strategies/*/compatibility", (r) => r.fulfill({ json: { reportId: "r", compatibility: compat } }));
-  await page.route("**/strategies/*/plan", (r) =>
-    r.fulfill({ json: { planId: "p1", compatibility: compat, simulation: { "approve:x": { ok: true }, "ship:y": { ok: true } }, plan: { maker, params: { priceLow: 1, priceHigh: 2 }, steps: [step("approve"), step("ship")], notCompiled: [] } } }),
-  );
+  await page.route("**/strategies/*/plan", (r) => {
+    plans.push({ id: "p1", maker, planHash: "0xplan", createdAt: now(), plan });
+    return r.fulfill({ json: { planId: "p1", compatibility: compat, simulation: { [`approve:${token}`]: { ok: true }, [`ship:${registry}`]: { ok: true } }, plan } });
+  });
   await page.route("**/plans/*/challenge", (r) =>
     r.fulfill({ json: { typedData: { domain: { name: "TRACE", version: "1", chainId: 11155111 }, types: { Authorization: [{ name: "wallet", type: "address" }, { name: "chainId", type: "uint256" }, { name: "expiresAt", type: "uint256" }] }, primaryType: "Authorization", message: { wallet: maker, chainId: "11155111", expiresAt: "9999999999" } }, claims: {} } }),
   );
-  await page.route("**/authorizations", (r) => r.fulfill({ json: { authorizationId: "a1", validated: true, signer: maker, verification: { notes: [] } } }));
-  await page.route(`**/investigations/${id}/full`, (r) => r.fulfill({ json: real }));
+  await page.route("**/authorizations", (r) => {
+    auths.push({ id: "a1", planId: "p1", wallet: maker, action: "aqua:ship", validated: true, worldStatus: "not_configured", expiresAt: new Date(Date.now() + 600_000).toISOString(), live: true, createdAt: now() });
+    return r.fulfill({ json: { authorizationId: "a1", validated: true, signer: maker, verification: { notes: [] } } });
+  });
+  await page.route("**/transactions", (r) => {
+    const b = r.request().postDataJSON() as { op: string; txHash: string };
+    txs.push({ id: `t${txs.length}`, op: b.op, tx_hash: b.txHash, status: "submitted", to_addr: b.op === "approve" ? token : registry, plan_id: "p1", created_at: now() });
+    return r.fulfill({ status: 202, json: { recorded: true } });
+  });
+  await page.route("**/transactions/0x*", (r) => {
+    const t = txs.find((x) => r.request().url().endsWith(x.tx_hash));
+    if (t) t.status = "success"; // the receipt arrives
+    return t ? r.fulfill({ json: t }) : r.fulfill({ status: 404, json: { error: "not found" } });
+  });
 
   await page.goto(`/?inv=${id}`);
+  const flow = page.getByRole("list", { name: /Investigation workflow/ });
+  await expect(flow).toHaveAttribute("aria-label", /2 of 4 steps complete/, { timeout: 30_000 });
   await page.getByRole("button", { name: /Connect wallet/ }).click();
-  const token = page.getByLabel(/to commit/).first();
-  await token.fill("0.01");
-  await page.getByRole("button", { name: "Execute with 1inch Aqua" }).click();
+  await page.getByLabel(/to commit/).first().fill("0.01");
+
+  // Verify: one signature, verified by the (mocked) server → the Verify step ticks.
+  await page.getByRole("button", { name: "Sign authorization" }).click();
+  await expect(flow).toHaveAttribute("aria-label", /3 of 4 steps complete/, { timeout: 30_000 });
+  await expect(flow.getByText("Verify, complete")).toBeAttached();
+
+  // Execute: the first approve is rejected in the wallet → clear message, resumable.
+  await page.getByRole("button", { name: "Approve and ship" }).click();
   await expect(page.getByRole("alert").filter({ hasText: "You rejected the request in your wallet" })).toBeVisible({ timeout: 30_000 });
-  const progress = page.getByRole("list", { name: "Execution progress" });
-  await expect(progress).toContainText("Sign authorization");
-  await expect(page.getByRole("button", { name: "Continue execution" })).toBeEnabled();
+  await expect(flow).toHaveAttribute("aria-label", /3 of 4 steps complete/);
+
+  // Retry: approve + ship confirm → all four ticks.
+  await page.getByRole("button", { name: "Retry execution" }).click();
+  await expect(flow).toHaveAttribute("aria-label", /4 of 4 steps complete/, { timeout: 60_000 });
+  await expect(page.getByText("All four steps complete")).toBeVisible();
+  await expect(page.getByText("This strategy is live on 1inch Aqua")).toBeVisible();
+  expect(txs.map((t) => t.op)).toEqual(["approve", "ship"]); // nothing sent twice
+
+  // A browser refresh starts the Investigate page from the beginning: no
+  // investigation loaded, every step back to waiting, nothing sent again.
+  await page.reload();
+  await expect(page).not.toHaveURL(/inv=/);
+  await expect(flow).toHaveAttribute("aria-label", /0 of 4 steps complete/, { timeout: 30_000 });
+  await expect(page.getByText("All four steps complete")).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem("trace:lastInvestigation"))).toBeNull();
+  expect(txs.map((t) => t.op)).toEqual(["approve", "ship"]);
 });
+

@@ -21,6 +21,14 @@ import type { TraceConfig } from "./config.js";
 
 export type InvestigationJob = { investigationId: string; wallet: string; days: number };
 
+/** Thrown at a stage boundary when the run was cancelled (restart / new investigation). */
+export class InvestigationCancelled extends Error {
+  constructor(id: string) {
+    super(`investigation ${id} was cancelled`);
+    this.name = "InvestigationCancelled";
+  }
+}
+
 /** Downsample a series for the UI (keeps first/last; the backtest uses the full series). */
 function thin<T>(xs: T[], max: number): T[] {
   if (xs.length <= max) return xs;
@@ -38,7 +46,7 @@ export async function runInvestigation(job: InvestigationJob, db: Db, cfg: Trace
   const beat = setInterval(() => {
     db.query(
       `update investigations set progress = progress || jsonb_build_object('liveRpcCalls', $2::int), updated_at = now()
-        where id = $1 and status not in ('done','no_positions','failed')`,
+        where id = $1 and status not in ('done','no_positions','failed','cancelled')`,
       [id, chain.rpcCallCount()],
     ).catch(() => undefined);
   }, 2_500);
@@ -51,9 +59,14 @@ export async function runInvestigation(job: InvestigationJob, db: Db, cfg: Trace
 
 async function runStages(job: InvestigationJob, db: Db, cfg: TraceConfig, chain: ReturnType<typeof createTraceClient>): Promise<void> {
   const { investigationId: id, wallet } = job;
+  // Every stage transition doubles as a cancellation checkpoint: once the run is
+  // cancelled the status write is refused and the pipeline stops writing.
+  const advance = async (...args: Parameters<Db["setStatus"]>) => {
+    if (!(await db.setStatus(...args))) throw new InvestigationCancelled(id);
+  };
 
   // 1) Fetch real on-chain history.
-  await db.setStatus(id, "fetching", { stage: "Reading Sepolia: position NFTs, lifecycle logs, positions(), receipts" });
+  await advance(id, "fetching", { stage: "Reading Sepolia: position NFTs, lifecycle logs, positions(), receipts" });
   let history;
   try {
     history = await chain.fetchWalletHistory(wallet, { days: job.days });
@@ -61,13 +74,13 @@ async function runStages(job: InvestigationJob, db: Db, cfg: TraceConfig, chain:
     const e = err as TraceChainError;
     if (e.code === "NO_EVENTS") {
       // A genuine, completed answer: this wallet has no Uniswap V3 positions in the window.
-      await db.setStatus(id, "no_positions", { stage: "No Uniswap V3 positions found", message: e.message });
+      await advance(id, "no_positions", { stage: "No Uniswap V3 positions found", message: e.message });
       return;
     }
-    await db.setStatus(id, "failed", { errorCode: e.code ?? "RPC_ERROR" }, `${e.code ?? "RPC_ERROR"}: ${e.message}`);
+    await advance(id, "failed", { errorCode: e.code ?? "RPC_ERROR" }, `${e.code ?? "RPC_ERROR"}: ${e.message}`);
     return;
   }
-  await db.setStatus(id, "reconstructing", { events: history.events.length, positions: Object.keys(history.positions).length, rpcCalls: history.rpcCalls });
+  await advance(id, "reconstructing", { events: history.events.length, positions: Object.keys(history.positions).length, rpcCalls: history.rpcCalls });
 
   // 2) Reconstruct.
   const summary = reconstructSummary(history.events, history.positions, {
@@ -104,7 +117,7 @@ async function runStages(job: InvestigationJob, db: Db, cfg: TraceConfig, chain:
   }
 
   // 4) Strategy DNA + evidence-only baseline.
-  await db.setStatus(id, "inferring", { stage: "Strategy DNA, evidence baseline, 0G inference" });
+  await advance(id, "inferring", { stage: "Strategy DNA, evidence baseline, 0G inference" });
   const fingerprints = computeFingerprints(history.events, history.positions, series, history.window);
   await db.saveDna(id, {
     fingerprints,
@@ -136,7 +149,7 @@ async function runStages(job: InvestigationJob, db: Db, cfg: TraceConfig, chain:
   });
 
   // 6) Backtest on real swaps (basis = the wallet's most recent position in the most active priced pool).
-  await db.setStatus(id, "backtesting", { stage: "Look-ahead-safe backtest on real pool swaps" });
+  await advance(id, "backtesting", { stage: "Look-ahead-safe backtest on real pool swaps" });
   const basisPool = pools.find((p) => series[p]);
   const basis = basisPool ? byPool.get(basisPool)!.sort((a, b) => b.tokenId - a.tokenId)[0] : null;
   if (basis && basisPool) {
@@ -165,7 +178,7 @@ async function runStages(job: InvestigationJob, db: Db, cfg: TraceConfig, chain:
   }
 
   // 7) Archive to 0G Storage (genuine uploads only).
-  await db.setStatus(id, "archiving", { stage: "Archiving to 0G Storage (Galileo testnet)" });
+  await advance(id, "archiving", { stage: "Archiving to 0G Storage (Galileo testnet)" });
   const outcome = await archive({
     cfg: cfg.storage,
     artifacts: [
@@ -178,5 +191,5 @@ async function runStages(job: InvestigationJob, db: Db, cfg: TraceConfig, chain:
   await db.insertStorage(id, primaryId, outcome.refs);
   await db.setIntegrations(id, { storage: { status: outcome.status, errors: outcome.errors.slice(0, 4), uploaded: outcome.refs.length } });
 
-  await db.setStatus(id, "done", { stage: "Complete" });
+  await advance(id, "done", { stage: "Complete" });
 }

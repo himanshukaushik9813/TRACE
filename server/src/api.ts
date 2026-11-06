@@ -4,7 +4,9 @@
  *   GET  /health                               liveness + config summary
  *   GET  /integrations                         live integration probes (honest labels)
  *   GET  /wallets/suggested                    real active Sepolia LP wallets (found live)
- *   POST /investigations                       queue an investigation {wallet, days}
+ *   POST /investigations                       queue an investigation {wallet, days, restart?, supersedes?}
+ *   POST /investigations/:id/cancel            cancel an unfinished investigation
+ *   POST /plans/:id/reconcile                  find + record a tx confirmed while the page was gone
  *   GET  /investigations/recent
  *   GET  /investigations/:id                   status + progress
  *   GET  /investigations/:id/full              everything the screens render
@@ -23,6 +25,8 @@
  */
 
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
+import { createPublicClient, http } from "viem";
+import { sepolia } from "viem/chains";
 import { AQUA, SEPOLIA_CHAIN_ID, isAddress } from "@trace/chain-config";
 import { createTraceClient, scrubSecrets } from "@trace/chain-data";
 import { assessCompatibility, aquaClient, compilePlan } from "@trace/aqua-adapter";
@@ -161,24 +165,45 @@ export function createApi(deps: ApiDeps): Express {
 
   /* ---------------- investigations ---------------- */
 
+  /** Cancel a run: drop its queued job if it hasn't started; a running job stops at its next stage. */
+  const cancelRun = async (id: string, reason: string) => {
+    const was = await db.cancelInvestigation(id, reason);
+    const job = was ? await queue.cancel(id).catch(() => "absent" as const) : "absent";
+    return { cancelled: was, job };
+  };
+
   app.post("/investigations", limiter(10, 60_000), h(async (req, res) => {
-    const { wallet, days } = req.body ?? {};
+    const { wallet, days, restart, supersedes } = req.body ?? {};
     if (!isAddress(wallet)) return bad(res, "wallet must be a 0x-prefixed 40-hex address");
     const d = days == null ? 30 : Number(days);
     if (!Number.isInteger(d) || d < 1 || d > 365) return bad(res, "days must be an integer between 1 and 365");
-    // Same wallet + window already running → attach to it instead of reading the chain twice
-    // (double clicks and multiple tabs otherwise split the RPC budget between identical jobs).
-    const running = await db.query<{ id: string; status: string }>(
-      `select id, status from investigations
-        where lower(wallet) = lower($1) and window_days = $2
-          and status not in ('done','no_positions','failed') and created_at > now() - interval '30 minutes'
-        order by created_at desc limit 1`,
-      [wallet, d],
-    );
-    if (running.length) return res.status(202).json({ investigationId: running[0].id, status: running[0].status, reused: true });
+    // Starting a new investigation supersedes the one the user was watching.
+    if (typeof supersedes === "string" && /^[0-9a-f-]{36}$/i.test(supersedes)) await cancelRun(supersedes, "Superseded: a new investigation was started");
+    if (restart === true) {
+      // Explicit restart: never reattach. Cancel every unfinished run for this wallet and start fresh.
+      for (const old of await db.runningForWallet(wallet)) await cancelRun(old, "Restarted: replaced by a fresh investigation");
+    } else {
+      // Same wallet + window already running → attach to it instead of reading the chain twice
+      // (double clicks and multiple tabs otherwise split the RPC budget between identical jobs).
+      const running = await db.query<{ id: string; status: string }>(
+        `select id, status from investigations
+          where lower(wallet) = lower($1) and window_days = $2
+            and status not in ('done','no_positions','failed','cancelled') and created_at > now() - interval '30 minutes'
+          order by created_at desc limit 1`,
+        [wallet, d],
+      );
+      if (running.length) return res.status(202).json({ investigationId: running[0].id, status: running[0].status, reused: true });
+    }
     const id = await db.insertInvestigation(wallet, d);
     await queue.add({ investigationId: id, wallet, days: d });
     res.status(202).json({ investigationId: id, status: "queued" });
+  }));
+
+  app.post("/investigations/:id/cancel", limiter(30, 60_000), h(async (req, res) => {
+    const inv = await db.getInvestigation(P(req, "id")).catch(() => null);
+    if (!inv) return bad(res, "investigation not found", 404);
+    const r = await cancelRun(inv.id, "Cancelled by the user");
+    res.json({ investigationId: inv.id, ...r, status: r.cancelled ? "cancelled" : inv.status });
   }));
 
   app.get("/investigations/recent", h(async (req, res) => {
@@ -234,7 +259,8 @@ export function createApi(deps: ApiDeps): Express {
     const [authorizations, transactions] = planIds.length
       ? await Promise.all([
           db.query(
-            `select id, plan_id as "planId", wallet, action, validated, world_status as "worldStatus", created_at as "createdAt"
+            `select id, plan_id as "planId", wallet, action, validated, world_status as "worldStatus",
+                    expires_at as "expiresAt", (expires_at > now()) as live, created_at as "createdAt"
                from authorizations where plan_id = any($1::uuid[]) order by created_at desc`,
             [planIds],
           ),
@@ -464,9 +490,64 @@ export function createApi(deps: ApiDeps): Express {
     const p = await db.getPlan(auth.planId);
     if (!p.plan.steps.some((s: { op: string }) => s.op === op)) return bad(res, `plan has no "${op}" step`, 422);
     if (!auth.live && op === "ship") return bad(res, "authorization expired — sign a new one", 403);
-    await db.upsertTransaction({ planId: p.id, authorizationId, op, txHash });
+    // Idempotency: re-posting the same hash is a no-op re-check; a second live ship
+    // (or more approvals than the plan has) for the same plan is refused.
+    const prior = await db.query<{ tx_hash: string; op: string; status: string }>(`select tx_hash, op, status from transactions where plan_id = $1`, [p.id]);
+    const same = prior.find((t) => t.tx_hash.toLowerCase() === txHash.toLowerCase());
+    if (!same) {
+      const live = prior.filter((t) => t.op === op && t.status !== "reverted");
+      const allowed = p.plan.steps.filter((s: { op: string }) => s.op === op).length;
+      if (live.length >= allowed)
+        return res.status(409).json({ error: `this plan already has ${op === "ship" ? "a ship transaction" : `${live.length} ${op} transaction(s)`} pending or confirmed (${live.map((t) => t.tx_hash.slice(0, 10)).join(", ")}…); not recording a duplicate`, existing: live.map((t) => t.tx_hash) });
+      await db.upsertTransaction({ planId: p.id, authorizationId, op, txHash });
+    }
     const result = await verifyAndStore({ id: p.id, plan: p.plan }, authorizationId, op, txHash, auth.wallet);
     res.status(202).json(json({ txHash, ...result }));
+  }));
+
+  /**
+   * Recover a transaction the user confirmed in their wallet while the page was
+   * gone (refresh during the wallet prompt). The client records the maker's
+   * pending nonce and the block before asking the wallet to sign; here we scan
+   * Sepolia from that block for a tx from the maker that matches the plan step's
+   * exact calldata, and record it. Nothing is sent; this only reads the chain.
+   */
+  app.post("/plans/:id/reconcile", limiter(20, 60_000), h(async (req, res) => {
+    const { op, stepIndex, fromBlock, nonce } = req.body ?? {};
+    if (!["approve", "ship", "dock"].includes(op)) return bad(res, "unknown op");
+    if (!Number.isInteger(fromBlock) || !Number.isInteger(nonce)) return bad(res, "fromBlock and nonce must be integers");
+    const p = await db.getPlan(P(req, "id")).catch(() => null);
+    if (!p) return bad(res, "plan not found", 404);
+    const steps = p.plan.steps.filter((s: { op: string }) => s.op === op);
+    const step = steps[Number(stepIndex ?? 0)];
+    if (!step) return bad(res, `plan has no ${op} step ${stepIndex ?? 0}`, 422);
+    const known = await db.query(`select * from transactions where plan_id = $1 and op = $2 order by created_at desc`, [p.id, op]);
+    const pc = createPublicClient({ chain: sepolia, transport: http(cfg.sepoliaRpcUrl, { timeout: 20_000 }) });
+    const latest = Number(await pc.getBlockNumber());
+    const start = Math.max(fromBlock, latest - 150); // ~30 min of Sepolia blocks
+    for (let b = latest; b >= start; b--) {
+      const block = await pc.getBlock({ blockNumber: BigInt(b), includeTransactions: true });
+      const hit = block.transactions.find(
+        (t) => typeof t === "object" && t.from.toLowerCase() === p.maker.toLowerCase() && t.to?.toLowerCase() === step.to.toLowerCase() && t.input.toLowerCase() === step.data.toLowerCase(),
+      );
+      if (hit && typeof hit === "object") {
+        const already = known.find((k: { tx_hash: string }) => k.tx_hash.toLowerCase() === hit.hash.toLowerCase());
+        if (!already) {
+          const [auth] = await db.query<{ id: string }>(
+            `select id from authorizations where plan_id = $1 and validated and action = $2 order by created_at desc limit 1`,
+            [p.id, op === "dock" ? "aqua:dock" : "aqua:ship"],
+          );
+          if (!auth) return res.json({ status: "found_unauthorized", txHash: hit.hash });
+          await db.upsertTransaction({ planId: p.id, authorizationId: auth.id, op, txHash: hit.hash });
+          await verifyAndStore({ id: p.id, plan: p.plan }, auth.id, op, hit.hash, p.maker).catch(() => null);
+        }
+        const [row] = await db.query(`select * from transactions where tx_hash = $1`, [hit.hash]);
+        return res.json({ status: "recorded", tx: row ?? null });
+      }
+    }
+    // Not mined in the scanned range: did the wallet send anything at all?
+    const pendingNonce = await pc.getTransactionCount({ address: p.maker as `0x${string}`, blockTag: "pending" });
+    res.json({ status: pendingNonce > nonce ? "sent_not_found" : "not_sent", pendingNonce, scanned: [start, latest] });
   }));
 
   app.get("/transactions/:hash", h(async (req, res) => {

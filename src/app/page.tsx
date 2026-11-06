@@ -1,16 +1,17 @@
 "use client";
 
-import { useState } from "react";
-import { ChevronDown, ChevronRight, Crosshair, Search, Wallet } from "lucide-react";
+import { useRef, useState } from "react";
+import { ChevronDown, ChevronRight, Crosshair, Plus, RotateCcw, Search, Wallet } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { isAddress } from "@trace/chain-config";
 import { Page } from "@/components/page";
 import { EmptyState, ErrorState, Pill } from "@/components/ui";
 import { EngineMark, type EngineState } from "@/components/engine-mark";
-import { BestExecution, PendingPanel, PerformancePanel, PositionPanel, WalletOverview, Workflow, usePlanTransactions } from "@/components/investigate";
+import { BestExecution, PendingPanel, PerformancePanel, PositionPanel, WalletOverview, Workflow } from "@/components/investigate";
+import { useAquaExecution } from "@/lib/aqua-flow";
 import { useSepoliaWallet } from "@/components/wallet";
 import { fmt } from "@/lib/format";
-import { api, useCurrentInvestigationId, useFullInvestigation, useInvestigationStatus, useRecentInvestigations, useSuggestedWallets } from "@/lib/api";
+import { TERMINAL, api, useCurrentInvestigationId, useFullInvestigation, useInvestigationStatus, useRecentInvestigations, useSuggestedWallets } from "@/lib/api";
 
 const WINDOWS = [7, 14, 30, 90, 180];
 
@@ -19,35 +20,61 @@ export default function InvestigatePage() {
   const [days, setDays] = useState(30);
   const [submitErr, setSubmitErr] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [invId, setInvId] = useCurrentInvestigationId();
+  const [invId, setInvId, clearInvId] = useCurrentInvestigationId({ resetOnReload: true });
   const wallet = useSepoliaWallet();
   const qc = useQueryClient();
   const status = useInvestigationStatus(invId);
   const inv = status.data;
   const full = useFullInvestigation(inv?.status === "done" ? invId : null);
   const fullData = inv?.status === "done" ? (full.data ?? null) : null;
-  const txs = usePlanTransactions(fullData);
+  const exec = useAquaExecution(fullData, invId);
   const suggested = useSuggestedWallets();
   const recent = useRecentInvestigations();
 
-  const run = async (addr?: string, windowDays = days) => {
+  const running = Boolean(inv) && !TERMINAL.includes(inv!.status);
+  // Each start request gets a sequence number; only the latest one may switch
+  // the page to its investigation, so a slow earlier response can never
+  // overwrite a newer run.
+  const seq = useRef(0);
+
+  const run = async (addr?: string, windowDays = days, restart = false) => {
     const w = (addr ?? query).trim();
     setSubmitErr(null);
     if (!isAddress(w)) return setSubmitErr("Enter a valid 0x… Ethereum address (40 hex characters).");
     setQuery(w);
     setSubmitting(true);
+    const mine = ++seq.current;
     try {
-      const r = await api<{ investigationId: string }>("/investigations", { method: "POST", body: { wallet: w, days: windowDays } });
+      // A different wallet supersedes the run on screen: the server cancels it.
+      const supersedes = running && invId && inv && inv.wallet.toLowerCase() !== w.toLowerCase() ? invId : undefined;
+      const r = await api<{ investigationId: string }>("/investigations", { method: "POST", body: { wallet: w, days: windowDays, restart, supersedes } });
+      if (mine !== seq.current) return;
       setInvId(r.investigationId);
       await qc.invalidateQueries({ queryKey: ["recent"] });
     } catch (e) {
-      setSubmitErr((e as Error).message);
+      if (mine === seq.current) setSubmitErr((e as Error).message);
     } finally {
-      setSubmitting(false);
+      if (mine === seq.current) setSubmitting(false);
     }
   };
 
-  const running = Boolean(inv) && !["done", "no_positions", "failed"].includes(inv!.status);
+  /** Clear the page for a new wallet; a run still in progress is cancelled on the server. */
+  const startNew = async () => {
+    seq.current++;
+    setSubmitting(false);
+    setSubmitErr(null);
+    if (invId && running) {
+      try {
+        await api(`/investigations/${invId}/cancel`, { method: "POST", body: {} });
+      } catch (e) {
+        setSubmitErr(`The previous run could not be cancelled: ${(e as Error).message}`);
+      }
+    }
+    clearInvId();
+    setQuery("");
+    await qc.invalidateQueries({ queryKey: ["recent"] });
+  };
+
   const engine: EngineState = running || submitting ? "working" : fullData ? "ready" : "idle";
   const recentList = (recent.data?.investigations ?? []).filter((r, i, all) => all.findIndex((x) => x.wallet.toLowerCase() === r.wallet.toLowerCase()) === i).slice(0, 8);
 
@@ -136,7 +163,22 @@ export default function InvestigatePage() {
 
       {/* 2. Workflow, with the real stage of the current investigation */}
       <div className="mt-8 lg:mt-6">
-        <Workflow inv={inv} full={fullData} txs={txs} />
+        <Workflow inv={inv} full={fullData} exec={fullData ? exec : null} />
+        {inv && (
+          <div className="mt-2.5 px-1 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[0.76rem]">
+            <button
+              onClick={() => run(inv.wallet, inv.windowDays, true)}
+              disabled={submitting || exec.busy !== null}
+              className="inline-flex items-center gap-1.5 text-ink-600 hover:text-ink disabled:opacity-50"
+              title="Cancel any run in progress and read this wallet again from Sepolia under a new investigation ID"
+            >
+              <RotateCcw size={13} className="text-gold" /> Restart investigation
+            </button>
+            <button onClick={startNew} disabled={exec.busy !== null} className="inline-flex items-center gap-1.5 text-ink-600 hover:text-ink disabled:opacity-50">
+              <Plus size={13} className="text-gold" /> Start new investigation
+            </button>
+          </div>
+        )}
         {inv && running && (
           <p className="mt-2.5 px-1 text-[0.76rem] text-ink-600">
             Investigating <span className="tabular text-ink">{fmt.addr(inv.wallet)}</span>
@@ -165,6 +207,14 @@ export default function InvestigatePage() {
         </div>
       )}
 
+      {inv?.status === "cancelled" && (
+        <div className="mt-6">
+          <EmptyState title="Investigation cancelled" icon={<Crosshair size={17} />}>
+            {inv.error ?? "This run was stopped before it finished."} Nothing from it will be updated further. Restart it above, or start a new investigation.
+          </EmptyState>
+        </div>
+      )}
+
       {inv?.status === "failed" && (
         <div className="mt-6 space-y-3">
           <ErrorState title="Investigation stopped" message={inv.error ?? "unknown error"} />
@@ -175,7 +225,7 @@ export default function InvestigatePage() {
       )}
 
       {/* 3–5. Findings and the recommended action */}
-      {inv?.status !== "no_positions" && inv?.status !== "failed" && (
+      {inv?.status !== "no_positions" && inv?.status !== "failed" && inv?.status !== "cancelled" && (
         <div className="mt-6 grid lg:grid-cols-2 gap-5 items-start">
           <div className="space-y-5 min-w-0">
             {fullData && invId ? (
@@ -196,7 +246,7 @@ export default function InvestigatePage() {
             ) : (
               <PendingPanel title="Position performance">{running ? "Replaying the strategy on real pool swaps…" : "The wallet's strategy against buy-and-hold, replayed on real pool swaps."}</PendingPanel>
             )}
-            <BestExecution full={fullData} invId={invId} txs={txs} />
+            <BestExecution full={fullData} invId={invId} exec={exec} />
           </div>
         </div>
       )}
@@ -230,7 +280,7 @@ export default function InvestigatePage() {
                         {r.counts ? `${fmt.count(r.counts.positions, "position")}, ${fmt.count(r.counts.events, "event")}` : r.status === "no_positions" ? "No Uniswap V3 positions in the window" : r.status === "failed" ? (r.error ?? "failed").slice(0, 90) : r.status}
                       </div>
                     </div>
-                    <Pill tone={r.status === "done" ? "forest" : r.status === "failed" ? "brick" : r.status === "no_positions" ? "neutral" : "gold"}>{r.status === "no_positions" ? "no positions" : r.status}</Pill>
+                    <Pill tone={r.status === "done" ? "forest" : r.status === "failed" ? "brick" : r.status === "no_positions" || r.status === "cancelled" ? "neutral" : "gold"}>{r.status === "no_positions" ? "no positions" : r.status}</Pill>
                     <span className="text-[0.74rem] text-ink-600 tabular hidden sm:block whitespace-nowrap">
                       {new Date(r.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                     </span>

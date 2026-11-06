@@ -36,8 +36,27 @@ export class Db {
         const r = await this.query(`insert into investigations (wallet, window_days) values ($1, $2) returning id`, [wallet, days]);
         return r[0].id;
     }
+    /**
+     * Move an investigation to a new status. Returns false when the run was
+     * cancelled (restart / new investigation): a cancelled row is never
+     * overwritten, so a superseded worker can't revive or update it.
+     */
     async setStatus(id, status, progress = {}, error) {
-        await this.query(`update investigations set status = $2, progress = progress || $3::jsonb, error = coalesce($4, error), updated_at = now() where id = $1`, [id, status, JSON.stringify({ ...progress, [`${status}At`]: Math.floor(Date.now() / 1000) }), error ?? null]);
+        const r = await this.query(`update investigations set status = $2, progress = progress || $3::jsonb, error = coalesce($4, error), updated_at = now()
+        where id = $1 and status <> 'cancelled' returning id`, [id, status, JSON.stringify({ ...progress, [`${status}At`]: Math.floor(Date.now() / 1000) }), error ?? null]);
+        return r.length === 1;
+    }
+    /** Cancel a run that hasn't finished. Returns true if it was still running. */
+    async cancelInvestigation(id, reason) {
+        const r = await this.query(`update investigations set status = 'cancelled', error = $2,
+              progress = progress || jsonb_build_object('stage', 'Cancelled', 'cancelledAt', extract(epoch from now())::int), updated_at = now()
+        where id = $1 and status not in ('done','no_positions','failed','cancelled') returning id`, [id, reason]);
+        return r.length === 1;
+    }
+    /** Every unfinished run for a wallet (any window), oldest first. */
+    async runningForWallet(wallet) {
+        const r = await this.query(`select id from investigations where lower(wallet) = lower($1) and status not in ('done','no_positions','failed','cancelled') order by created_at`, [wallet]);
+        return r.map((x) => x.id);
     }
     /**
      * Investigations that never reached a terminal state when the process died.
@@ -46,7 +65,7 @@ export class Db {
      * which case the caller must NOT re-add or they run twice.
      */
     async requeueInterrupted() {
-        const rows = await this.query(`select id, wallet, window_days from investigations where status not in ('done','no_positions','failed') order by created_at`);
+        const rows = await this.query(`select id, wallet, window_days from investigations where status not in ('done','no_positions','failed','cancelled') order by created_at`);
         if (rows.length)
             await this.query(`update investigations set status = 'queued', progress = progress || '{"errorCode":"REQUEUED"}'::jsonb,
                 error = 'Re-running: the previous run was cut off by a server restart — retrying automatically', updated_at = now()

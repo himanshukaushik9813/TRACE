@@ -22,7 +22,7 @@ import type { InferenceRun } from "@trace/strategy-inference";
 
 export type DbConfig = { connectionString: string; ssl: boolean };
 
-export type InvestigationStatus = "queued" | "fetching" | "reconstructing" | "inferring" | "backtesting" | "archiving" | "done" | "no_positions" | "failed";
+export type InvestigationStatus = "queued" | "fetching" | "reconstructing" | "inferring" | "backtesting" | "archiving" | "done" | "no_positions" | "failed" | "cancelled";
 
 const s = (v: unknown) => (v == null ? null : typeof v === "bigint" ? v.toString() : String(v));
 
@@ -68,11 +68,38 @@ export class Db {
     return r[0].id;
   }
 
-  async setStatus(id: string, status: InvestigationStatus, progress: Record<string, unknown> = {}, error?: string) {
-    await this.query(
-      `update investigations set status = $2, progress = progress || $3::jsonb, error = coalesce($4, error), updated_at = now() where id = $1`,
+  /**
+   * Move an investigation to a new status. Returns false when the run was
+   * cancelled (restart / new investigation): a cancelled row is never
+   * overwritten, so a superseded worker can't revive or update it.
+   */
+  async setStatus(id: string, status: InvestigationStatus, progress: Record<string, unknown> = {}, error?: string): Promise<boolean> {
+    const r = await this.query(
+      `update investigations set status = $2, progress = progress || $3::jsonb, error = coalesce($4, error), updated_at = now()
+        where id = $1 and status <> 'cancelled' returning id`,
       [id, status, JSON.stringify({ ...progress, [`${status}At`]: Math.floor(Date.now() / 1000) }), error ?? null],
     );
+    return r.length === 1;
+  }
+
+  /** Cancel a run that hasn't finished. Returns true if it was still running. */
+  async cancelInvestigation(id: string, reason: string): Promise<boolean> {
+    const r = await this.query(
+      `update investigations set status = 'cancelled', error = $2,
+              progress = progress || jsonb_build_object('stage', 'Cancelled', 'cancelledAt', extract(epoch from now())::int), updated_at = now()
+        where id = $1 and status not in ('done','no_positions','failed','cancelled') returning id`,
+      [id, reason],
+    );
+    return r.length === 1;
+  }
+
+  /** Every unfinished run for a wallet (any window), oldest first. */
+  async runningForWallet(wallet: string): Promise<string[]> {
+    const r = await this.query<{ id: string }>(
+      `select id from investigations where lower(wallet) = lower($1) and status not in ('done','no_positions','failed','cancelled') order by created_at`,
+      [wallet],
+    );
+    return r.map((x) => x.id);
   }
 
   /**
@@ -83,7 +110,7 @@ export class Db {
    */
   async requeueInterrupted(): Promise<{ id: string; wallet: string; days: number | null }[]> {
     const rows = await this.query<{ id: string; wallet: string; window_days: number | null }>(
-      `select id, wallet, window_days from investigations where status not in ('done','no_positions','failed') order by created_at`,
+      `select id, wallet, window_days from investigations where status not in ('done','no_positions','failed','cancelled') order by created_at`,
     );
     if (rows.length)
       await this.query(

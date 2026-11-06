@@ -9,7 +9,7 @@
  */
 import { Queue, Worker } from "bullmq";
 import { Redis as IORedis } from "ioredis";
-import { runInvestigation } from "./pipeline.js";
+import { InvestigationCancelled, runInvestigation } from "./pipeline.js";
 export const QUEUE_NAME = "trace-investigations";
 export function redisConnection(url) {
     return new IORedis(url, { maxRetriesPerRequest: null, enableReadyCheck: true, lazyConnect: true });
@@ -34,6 +34,10 @@ async function guarded(job, db, cfg) {
         await runInvestigation(job, db, cfg);
     }
     catch (err) {
+        if (err instanceof InvestigationCancelled) {
+            console.log(`[worker] investigation ${job.investigationId} cancelled; stopped at a stage boundary`);
+            return;
+        }
         const msg = String(err?.message ?? err).slice(0, 500);
         console.error(`[worker] investigation ${job.investigationId} failed:`, msg);
         await db.setStatus(job.investigationId, "failed", { errorCode: "PIPELINE_ERROR" }, `PIPELINE_ERROR: ${msg}`).catch(() => { });
@@ -66,17 +70,30 @@ export function createBullQueue(cfg, db) {
                 return;
             await queue.add("investigate", job, { jobId: job.investigationId });
         },
+        cancel: async (id) => {
+            const j = await queue.getJob(id);
+            if (!j)
+                return "absent";
+            if ((await j.isWaiting()) || (await j.isDelayed())) {
+                await j.remove();
+                return "removed";
+            }
+            return (await j.isActive()) ? "running" : "absent";
+        },
     };
 }
 export function createInMemoryQueue(cfg, db) {
     const pending = [];
+    const active = new Set();
     let running = 0;
     const pump = () => {
         while (running < 2 && pending.length) {
             const job = pending.shift();
             running++;
+            active.add(job.investigationId);
             void guarded(job, db, cfg).finally(() => {
                 running--;
+                active.delete(job.investigationId);
                 pump();
             });
         }
@@ -84,8 +101,18 @@ export function createInMemoryQueue(cfg, db) {
     return {
         backend: "in-memory",
         add: async (job) => {
+            if (active.has(job.investigationId) || pending.some((p) => p.investigationId === job.investigationId))
+                return;
             pending.push(job);
             pump();
+        },
+        cancel: async (id) => {
+            const i = pending.findIndex((p) => p.investigationId === id);
+            if (i >= 0) {
+                pending.splice(i, 1);
+                return "removed";
+            }
+            return active.has(id) ? "running" : "absent";
         },
     };
 }
