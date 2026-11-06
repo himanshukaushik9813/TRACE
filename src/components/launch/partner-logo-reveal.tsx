@@ -28,8 +28,11 @@ type Props = {
   anchor: React.MutableRefObject<Anchor>;
 };
 
-/** Arc around the emblem, left→right in the same order as the final row. */
-const ARC_DEG = [198, 152, 90, 28, -18];
+/**
+ * Arc around the emblem, in the same order as the final row (Uniswap, Ethereum,
+ * 1inch, 0G): two cards on each side, none over the emblem — 1inch sits above 0G.
+ */
+const ARC_DEG = [200, 150, 30, -20];
 
 export const PartnerLogoReveal = forwardRef<PartnerCardsHandle, Props>(function PartnerLogoReveal({ logos, prepare, shown, settled, heading, still, anchor }, ref) {
   const cards = useRef<(HTMLElement | null)[]>([]);

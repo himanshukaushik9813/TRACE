@@ -1,3 +1,4 @@
+import { TraceMarkSvg } from "@/components/brand-mark";
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, IBM_Plex_Sans, Playfair_Display } from "next/font/google";
 import "./globals.css";
@@ -58,10 +59,6 @@ export const metadata: Metadata = {
     "Reconstruct real Uniswap V3 liquidity behaviour on Ethereum Sepolia, infer the strategy behind a wallet from on-chain evidence, backtest it on real pool swaps, and ship compatible rules as a 1inch Aqua strategy signed by your own wallet.",
 };
 
-/** Static star for the pre-paint cover (same path as the TRACE mark). */
-const COVER_STAR =
-  "M 12 2 Q 14 10 22 12 Q 14 14 12 22 Q 10 14 2 12 Q 10 10 12 2 Z";
-
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
@@ -74,11 +71,7 @@ export default function RootLayout({
       <body className="bg-ivory text-ink antialiased">
         <div id="trace-intro-cover" aria-hidden="true">
           <div className="cover-mark flex-col items-center">
-            <span className="grid place-items-center rounded-md2 border border-gold/35 bg-ivory-50 shadow-soft" style={{ width: 52, height: 52 }}>
-              <svg viewBox="0 0 24 24" width={32} height={32}>
-                <path d={COVER_STAR} fill="#B68A42" />
-              </svg>
-            </span>
+            <TraceMarkSvg size={52} />
             <div className="wordmark mt-3 leading-none tracking-[0.18em] text-ink text-[2.6rem]">TRACE</div>
           </div>
         </div>
