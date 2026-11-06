@@ -19,6 +19,7 @@ const STAGES = [
 
 /** Marks an onboarding step when rendered (for use inside render-prop gates). */
 export function MarkStep({ step }: { step: OnboardingStep }) {
+  useMarkOnboarding("investigated"); // these pages only render a completed investigation
   useMarkOnboarding(step);
   return null;
 }

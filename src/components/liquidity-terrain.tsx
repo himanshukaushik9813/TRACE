@@ -125,6 +125,42 @@ function FitCamera() {
   return null;
 }
 
+/**
+ * Axis labels: price along the back edge, time along the right edge. The price
+ * ends are anchored inward (left label grows right, right label grows left) so
+ * they never run off the canvas; on narrow canvases the time labels sit just
+ * inside the right edge (only "Latest block", which already shows which way
+ * time runs, so it cannot collide with the price label).
+ */
+function AxisLabels({ low, high }: { low: string; high: string }) {
+  const { size } = useThree();
+  const narrow = size.width < 520;
+  const tx = narrow ? W / 2 - 0.1 : W / 2 + 1.1;
+  const timeStyle = narrow ? { transform: "translate(-100%, -50%)", textAlign: "right" as const } : { transform: "translate(-50%, -50%)" };
+  const timeCls = `pointer-events-none block text-[0.66rem] text-ink-600 ${narrow ? "w-[3.6rem] leading-tight" : "whitespace-nowrap"}`;
+  return (
+    <>
+      <Html position={[-W / 2, 0, -D / 2 - 0.55]} zIndexRange={[10, 0]}>
+        <span className="pointer-events-none block whitespace-nowrap text-[0.66rem] text-ink-600" style={{ transform: "translate(0, -50%)" }}>{low}</span>
+      </Html>
+      <Html position={[W / 2, 0, -D / 2 - 0.55]} zIndexRange={[10, 0]}>
+        <span className="pointer-events-none block whitespace-nowrap text-[0.66rem] text-ink-600" style={{ transform: "translate(-100%, -50%)" }}>{high}</span>
+      </Html>
+      <Html position={[0, 0, -D / 2 - 1.05]} center zIndexRange={[10, 0]}>
+        <span className="pointer-events-none whitespace-nowrap text-[0.7rem] font-medium text-ink">Price (low → high)</span>
+      </Html>
+      {!narrow && (
+        <Html position={[tx, 0, -D / 2 + 0.3]} zIndexRange={[10, 0]}>
+          <span className={timeCls} style={timeStyle}>Start of window</span>
+        </Html>
+      )}
+      <Html position={[tx, 0, D / 2 - 0.9]} zIndexRange={[10, 0]}>
+        <span className={timeCls} style={timeStyle}>Latest block</span>
+      </Html>
+    </>
+  );
+}
+
 function Ground() {
   const lines: [number, number, number][][] = [];
   for (let i = 0; i <= 10; i++) {
@@ -188,22 +224,7 @@ export default function LiquidityTerrain({ data, onOpen, height = 380 }: { data:
         {data.slabs.map((s) => (
           <Slab key={s.id} s={s} sc={sc} hovered={hover === s.id} onHover={setHover} onOpen={onOpen} />
         ))}
-        {/* Axis labels: price along the back edge, time along the right edge */}
-        <Html position={[-W / 2, 0, -D / 2 - 0.55]} center zIndexRange={[10, 0]}>
-          <span className="pointer-events-none whitespace-nowrap text-[0.66rem] text-ink-600">{data.priceLabel(t0)}</span>
-        </Html>
-        <Html position={[W / 2, 0, -D / 2 - 0.55]} center zIndexRange={[10, 0]}>
-          <span className="pointer-events-none whitespace-nowrap text-[0.66rem] text-ink-600">{data.priceLabel(t1)}</span>
-        </Html>
-        <Html position={[0, 0, -D / 2 - 1.05]} center zIndexRange={[10, 0]}>
-          <span className="pointer-events-none whitespace-nowrap text-[0.7rem] font-medium text-ink">Price (low → high)</span>
-        </Html>
-        <Html position={[W / 2 + 1.1, 0, -D / 2 + 0.3]} center zIndexRange={[10, 0]}>
-          <span className="pointer-events-none whitespace-nowrap text-[0.66rem] text-ink-600">Start of window</span>
-        </Html>
-        <Html position={[W / 2 + 1.1, 0, D / 2 - 0.9]} center zIndexRange={[10, 0]}>
-          <span className="pointer-events-none whitespace-nowrap text-[0.66rem] text-ink-600">Latest block</span>
-        </Html>
+        <AxisLabels low={data.priceLabel(t0)} high={data.priceLabel(t1)} />
         <OrbitControls makeDefault enablePan={false} enableZoom={false} enableRotate={!coarse} enableDamping dampingFactor={0.12} minDistance={9} maxDistance={42} minPolarAngle={0.35} maxPolarAngle={1.32} target={[0.4, 0.1, 0.6]} />
       </Canvas>
     </div>

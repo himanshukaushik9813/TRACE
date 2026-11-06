@@ -27,7 +27,12 @@ export function Term({ k, children, className = "" }: { k: GlossaryKey; children
     setPos({ left, top: above ? r.top - 8 : r.bottom + 8, above });
   }, []);
 
+  // Hover and focus open the popover a moment before the click of the same
+  // tap/click lands (touch emulates mouseenter too), so a click right after
+  // opening keeps it open instead of toggling it shut.
+  const openedAt = useRef(0);
   const show = () => {
+    if (!open) openedAt.current = Date.now();
     place();
     setOpen(true);
   };
@@ -66,7 +71,7 @@ export function Term({ k, children, className = "" }: { k: GlossaryKey; children
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          if (open) setOpen(false);
+          if (open && Date.now() - openedAt.current > 400) setOpen(false);
           else show();
         }}
         className={`term inline cursor-help border-b border-dotted border-gold/70 text-inherit leading-[inherit] hover:border-gold focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 rounded-[2px] ${className}`}
