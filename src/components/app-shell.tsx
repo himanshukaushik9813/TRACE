@@ -20,19 +20,32 @@ const NAV = [
   { href: "/saved", label: "Strategy versions", icon: Bookmark },
 ];
 
-/** Carry the current investigation id across screens. */
+/**
+ * Carry the current investigation id across screens.
+ *
+ * Re-reads on every route change AND on "trace:last-investigation" (fired when
+ * a new investigation is started on the Investigate screen), so the nav links
+ * always carry the id the user just picked — not one captured at app load.
+ * Without this, clicking "Positions" after a fresh investigation landed on a
+ * *different, older* wallet's positions (stale ?inv= on the link).
+ */
 function useInvParam(): string | null {
   const path = usePathname();
   const [inv, setInv] = useState<string | null>(null);
   useEffect(() => {
-    const u = new URLSearchParams(window.location.search).get("inv");
-    let last: string | null = null;
-    try {
-      last = window.localStorage.getItem("trace:lastInvestigation");
-    } catch {
-      last = null;
-    }
-    setInv(u ?? last);
+    const read = () => {
+      const u = new URLSearchParams(window.location.search).get("inv");
+      let last: string | null = null;
+      try {
+        last = window.localStorage.getItem("trace:lastInvestigation");
+      } catch {
+        last = null;
+      }
+      setInv(u ?? last);
+    };
+    read();
+    window.addEventListener("trace:last-investigation", read);
+    return () => window.removeEventListener("trace:last-investigation", read);
   }, [path]);
   return inv;
 }

@@ -406,6 +406,10 @@ export function useCurrentInvestigationId(): [string | null, (id: string) => voi
     const url = new URL(window.location.href);
     url.searchParams.set("inv", next);
     window.history.replaceState(null, "", url.toString());
+    // Tell the app shell (nav links) to re-read the current investigation so
+    // "Positions" / "Strategy DNA" etc. carry the id the user just picked,
+    // not a stale one captured at app load.
+    window.dispatchEvent(new Event("trace:last-investigation"));
   }, []);
   return [id, set];
 }

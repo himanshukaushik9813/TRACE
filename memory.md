@@ -161,6 +161,7 @@ Editorial luxury fintech look:
 ### Test results (last run 2026-11-06, after the speed work)
 - typecheck ✓ · `next build` ✓
 - `npm test` 45/45 (live/fork/e2e were not re-run after the speed work) · `test:live` 4/4 · `test:fork` 1/1 · `test:e2e` 4/4 (the wallet test was re-run after the MetaMask fix: 2/2 ✓)
+- 2026-11-06 (after the resilience batch, commit ca51f2b): server tsc ✓, `node --check server/dist/*.js` ✓, `npm test` 45/45 ✓; every fix verified live on the user's Mac (Supabase pooler + Upstash BullMQ, all pages on :3000).
 
 ### Remaining user actions
 0. **Demo:** send ~0.06 Sepolia ETH to the demo wallet `0x9245B8eB7d1a2964b896607dfBe1Da30b3E10200`, then run `node --env-file=.env.local scripts/demo-wallet.mjs seed`. Import the key from `.demo-wallet.local.json` into MetaMask. See docs/DEMO_FLOW.md, section "Before the demo".
@@ -169,6 +170,9 @@ Editorial luxury fintech look:
 3. From wallet `0x5971…`, create WETH/USDC positions on Sepolia (app.uniswap.org), investigate the wallet, and do a real MetaMask approve → ship. That moves Aqua to VERIFIED TESTNET.
 4. Optional: World ID staging credentials.
 5. Optional: rotate the Infura key. It once appeared in a local RPC error during development, and also briefly in a test file; that was replaced with a dummy before any commit.
+
+### Resilience batch delivered 2026-11-06 (commit ca51f2b)
+Boot DB retry + `DATABASE_URL_DIRECT` fallback, EADDRINUSE handling, CORS for local dev origins, interrupted-investigation auto re-queue on boot (`db.requeueInterrupted`, idempotent BullMQ add), one-click "Re-run the interrupted investigation" button in `inv-gate.tsx`, and the frontend unreachable-error wording. All confirmed live on the user's Mac; frontend now on :3000 with Supabase + Upstash.
 
 ---
 
@@ -185,6 +189,11 @@ Editorial luxury fintech look:
 - **Don't run ad-hoc RPC scripts while the API is investigating.** They share the same Infura key, and the limiter is only process-wide.
 - **The web server runs `next start` (production).** UI changes need `npm run build` and a restart. API changes need `npm run build:server` and a restart of `node --env-file=.env.local server/dist/index.js`.
 - **Git authorship:** the user wants commits under **himanshukaushik9813 only — no Claude `Co-Authored-By` trailer**, ever.
+- **Supabase pooler DNS flaps (`EAI_AGAIN`)** used to kill the API at boot (one failed ping → exit → "API unreachable"). `index.ts` now retries 5× with backoff on `DATABASE_URL`, then falls back to `DATABASE_URL_DIRECT` (config.ts `databaseUrlFallback`); schema errors abort immediately.
+- **Port 4000 squatters**: a stale `node server/dist` process left running causes unhandled `EADDRINUSE`. `index.ts` now catches listen errors and prints the kill command. Habit: `lsof -ti :4000 | xargs kill` before restarting.
+- **CORS "API unreachable"**: opening the app on a non-:3000 port or a LAN/`.local` URL made the browser block every call and show "unreachable". `api.ts` now allows any local dev origin (localhost/127.0.0.1/IPv6-loopback/`.local`/RFC-1918, any port); external origins stay blocked.
+- **Stale `?inv=` on nav links**: sidebar links captured the investigation id once (app load), so "Positions" after a fresh investigation showed the *previous* wallet. Fixed via the `trace:last-investigation` window event (`useCurrentInvestigationId().set` dispatches it; `useInvParam` in `app-shell.tsx` listens). Symptom "a different wallet's positions" = check the URL's `?inv=` first — the data source is never hardcoded (verified: zero wallet literals in `src/`).
+- **`server/dist` is the real runtime**: `npm run start:server` runs the compiled output. After editing `server/src/*.ts`, rebuild with `tsc -p server/tsconfig.build.json` (the `build:packages` step hits the connected-folder no-delete EPERM; the tsc step alone suffices), then `node --check server/dist/index.js`.
 
 ---
 
@@ -238,3 +247,7 @@ All of these were replaced in the 2026-11-06 migration.
 - **2026-11-06 (DB boot resilience)** — API was intermittently unreachable ("TRACE API unreachable at http://localhost:4000") because `index.ts` exited on the *first* failed Supabase ping (transient `getaddrinfo EAI_AGAIN`). Now: boot tries `DATABASE_URL` (pooler) with 5 retries + backoff, then `DATABASE_URL_DIRECT` (direct host, previously unused) with the same; schema errors abort early instead of retrying. `dist` rebuilt. Frontend: `inv-gate.tsx` also gained the INTERRUPTED re-run button (same session as the re-queue fix above).
 - **2026-11-06 (EADDRINUSE + Supabase verified)** — Confirmed working on user's Mac: `database ok (pooler; migrations: 0001, 0002)`, `queue backend: bullmq` (Upstash reachable). Boot crashed with unhandled `EADDRINUSE :4000` when an old server process was still holding the port. `index.ts` now catches listen errors: clear "port in use — stop the old server" message + clean exit(1) instead of a raw stack trace. Recurring gotcha: kill stale `node server/dist` processes (lsof -ti :4000 | xargs kill) before restarting.
 - **2026-11-06 (CORS + final working state)** — Frontend was running on :3001 (a stale `next dev` squatting :3000), and the API only allowed origins on :3000, so every browser→:4000 call was CORS-blocked and reported as "API unreachable". `server/src/api.ts` now allows *any* local dev origin (localhost/127.0.0.1/IPv6-loopback/`.local`/private-RFC1918, any port) in addition to CORS_ORIGINS, while external origins stay blocked (verified with a unit test of the host classifier). `src/lib/api.ts` error text now distinguishes "server down" from "origin blocked". All pages green on :3000 (kill the stale PIDs 70747 etc., restart both `npm run start:server` + `npm run dev`). Uncommitted changes: server/src/{index,db,worker,config,api}.ts, src/components/inv-gate.tsx, src/lib/api.ts, server/dist/*.
+- **2026-11-06 (Positions showed a different wallet's positions)** — Not hardcoded data (all position data comes from `GET /investigations/:id/full`). The bug: sidebar nav links in `src/components/app-shell.tsx` built their `?inv=` param from a value captured *once* (app load / last route change), so after investigating wallet A on the Investigate page, clicking "Positions" carried the *previous* investigation B's id. Fix: `useCurrentInvestigationId().set` (in `src/lib/api.ts`) now dispatches a `trace:last-investigation` window event whenever an investigation is started; `useInvParam` in `app-shell.tsx` subscribes to it and re-reads `?inv=`/localStorage so nav links always carry the id the user just picked. Investigate page's "Recent investigations" clicks go through the same setter, so they sync too.
+  - How to verify: investigate wallet A, immediately click sidebar "Positions" — the URL must read `?inv=<A's id>` and the header "Positions · 0x…(A)". Click "Recent investigations" rows the same way. Hard refresh (Cmd+Shift+R) once so the running `next dev` picks up the new `api.ts`/`app-shell.tsx` (frontend-only change; no server restart needed).
+
+- **2026-11-06 (commit ca51f2b)** — Committed the resilience batch: server/src/{index,db,worker,config,api}.ts, src/components/inv-gate.tsx, src/lib/api.ts, server/dist/*, memory.md. Stale-`?inv=` positions fix + memory.md batch to be committed as the next commit.
