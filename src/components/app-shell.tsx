@@ -221,12 +221,12 @@ function MobileNav({ open, onClose }: { open: boolean; onClose: () => void }) {
 export function AppShell({ children }: { children: ReactNode }) {
   const [menu, setMenu] = useState(false);
   return (
-    <div className="flex h-[100dvh] overflow-hidden bg-ivory">
+    <div className="relative flex h-[100dvh] overflow-hidden bg-ivory">
       <Sidebar />
       <MobileNav open={menu} onClose={() => setMenu(false)} />
       <div className="flex-1 min-w-0 flex flex-col">
         <Topbar onMenu={() => setMenu(true)} />
-        <main className="flex-1 overflow-y-auto dark-scroll bg-ivory">
+        <main className="relative flex-1 overflow-y-auto dark-scroll bg-ivory">
           <div className="max-w-[1280px] mx-auto px-4 md:px-8 py-6 md:py-10">{children}</div>
         </main>
       </div>
