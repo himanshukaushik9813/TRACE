@@ -345,3 +345,29 @@ All of these were replaced in the 2026-11-06 migration.
   - Fresh production investigation `baf7b5ca-220d-4c76-8fcf-deca84fc9c21` has the new DNA fields (priceRangeExits 0, answered 0, median null; time in range 100%). This confirms the earlier missing fields came from an old worker on the shared queue.
   - Live Strategy page (desktop): "All 6 supporting transactions" lists each with event type, NFT #230171, block and UTC time. The 0G panel shows the real failed run (HTTP 503, 1018 ms, glm-4.7, request d5665974-a42b-4685-ba6c-871556bac728, trust mode "key default"). The DNA row reads "price never left a range".
   - At 390 px: no overflow, no duplicate ids, and the drawer logo star is visible (mark-g-<useId>).
+- **2026-11-07 (Phases 1–3 of the ETHGlobal upgrade brief)** — The user is sending the brief one phase at a time and says not to start the next phase until the current one is verified.
+  - **Phase 1:** audit only, in `docs/PHASE_1_AUDIT.md`.
+  - **Phase 2 (real wallet case study, deployed and verified):**
+    - Added `buildCaseStudy` (`packages/strategy-inference/src/case-study.ts`), the API route `GET /investigations/:id/case-study` (404 or 409), and the page `src/app/case-study/page.tsx` (timeline zoomed to the activity span, event detail, ranges, an observation table with tx links, coverage and limitations).
+    - Case study wallet `0x4A2268D5047E9A03c4C6A279d833337D9DD1909e`, investigation `d8f54fc4-b6b7-4437-a5fa-067027eba1b1`: 5 positions, 16 events, full coverage. Its backtest is `insufficient_data` (only 1 swap).
+    - Also fixed `isFullRangeLike` (ranges at the tick edge no longer give a "128,622,884×" width).
+    - Written up in `docs/PHASE_2_CASE_STUDY.md`.
+  - **Phase 3 (strategy reverse engineering and backtesting):**
+    - 651dbf4 (deployed and verified) added:
+      - the `price_triggered_repositioning` family;
+      - out-of-range and range re-set fingerprints;
+      - an `observationWindow` and `missingEvidence` on every rule;
+      - backtest `slippageCost`, the inferred-strategy RunCard and a fee and capital breakdown;
+      - pipeline integration tests.
+    - 9e0e3dc adds two accuracy fixes:
+      - fee cadence counts only fee-bearing collects;
+      - time in range needs at least 15 swaps (`MIN_PRICE_SAMPLES`).
+    - 56a3fe3 fixes the wording of a note.
+    - Live evidence is investigation `ffe6e45a-b197-4fa7-8c4f-da30c1f6101e`: passive_concentrated 0.75, a backtest over 794 swaps, the train/test gap enforced. Observed +37.99%, inferred +30.20%, passive +37.99%, hold +36.30%.
+    - Tests: unit 81/81 pass. The write-up, `docs/PHASE_3_STRATEGY_BACKTEST.md`, lists which metrics come from real data and which cannot be calculated reliably.
+  - **Pending:**
+    - The user needs to push 9e0e3dc, 56a3fe3 and the docs commit.
+    - Then re-run 0x4A22 (90 days) on prod. Its stored rules ("collects every 0.3 h", "~100% in range") predate 9e0e3dc.
+    - **Phase 4 is not started** and waits for the user's go-ahead.
+    - Still blocked: a standard-mode 0G key, a funded storage wallet, and World ID credentials.
+  - Gotcha: `test/api.test.mjs` stubs `db.getInvestigation` in an earlier test, so later tests must reset it.
