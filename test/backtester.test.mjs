@@ -64,3 +64,26 @@ test("too few real swaps → insufficient_data with a reason and no numbers", ()
   assert.match(bt.reason, /swap/);
   assert.equal(bt.runs.length, 0);
 });
+
+// What If options (widthMultiplier, recentre) must not change anything when left at their defaults.
+// test/data/backtest-golden.json was produced by the engine BEFORE these options existed.
+test("What If defaults are byte-identical to the pre-What-If engine", async () => {
+  const { readFileSync } = await import("node:fs");
+  const golden = JSON.parse(readFileSync(new URL("./data/backtest-golden.json", import.meta.url), "utf8"));
+  const run = (adjust, extra = {}) => JSON.stringify(runBacktest({ ir: ir(adjust), series, basis, events: [], meta: {}, opts: { startCapital: 0.01, ...extra } }));
+  assert.equal(run(true), JSON.stringify(golden.adjust));
+  assert.equal(run(false), JSON.stringify(golden.hold));
+  // Passing the defaults explicitly is also identical.
+  assert.equal(run(true, { widthMultiplier: 1, recentre: true }), JSON.stringify(golden.adjust));
+  assert.equal(run(false, { widthMultiplier: 1, recentre: false }), JSON.stringify(golden.hold));
+});
+
+test("What If changes only the counterfactual run", () => {
+  const base = runBacktest({ ir: ir(false), series, basis, events: [], meta: {}, opts: { startCapital: 0.01 } });
+  const wi = runBacktest({ ir: ir(false), series, basis, events: [], meta: {}, opts: { startCapital: 0.01, widthMultiplier: 0.25, recentre: true } });
+  const cf = (bt) => bt.runs.find((r) => r.kind === "counterfactual");
+  assert.match(cf(wi).label, /re-centre on exit, 0\.25× width/);
+  assert.notDeepEqual(cf(wi), cf(base));
+  assert.deepEqual(wi.runs.filter((r) => r.kind !== "counterfactual"), base.runs.filter((r) => r.kind !== "counterfactual"));
+  assert.throws(() => runBacktest({ ir: ir(false), series, basis, events: [], meta: {}, opts: { widthMultiplier: 0 } }), /widthMultiplier/);
+});

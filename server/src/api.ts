@@ -15,6 +15,7 @@
  *   POST /investigations/:id/archive           retry 0G Storage archiving
  *   GET  /strategies/by-wallet/:wallet         immutable strategy versions
  *   GET  /strategies/:id                       one version with its full IR (read-only)
+ *   POST /investigations/:id/whatif            re-run the counterfactual with user settings (not persisted)
  *   POST /strategies/:id/compatibility         on-chain Aqua compatibility {maker?}
  *   POST /strategies/:id/plan                  compile an execution plan {maker, amount0, amount1}
  *   GET  /plans/:id                            plan + authorizations + transactions
@@ -32,7 +33,8 @@ import { createTraceClient, scrubSecrets } from "@trace/chain-data";
 import { assessCompatibility, aquaClient, compilePlan } from "@trace/aqua-adapter";
 import { buildTypedData, newChallenge, verifyAuthorization, verifyWorldProof, worldConfigured, worldRpRequest, worldSignal } from "@trace/world-auth";
 import { archive } from "@trace/zero-g-storage";
-import type { AuthorizationClaims, ExecutionPlan, PositionMeta, StrategyIR } from "@trace/strategy-ir";
+import { runBacktest } from "@trace/backtester";
+import type { AuthorizationClaims, BacktestResult, ExecutionPlan, PositionMeta, PriceSeries, StrategyIR, V3Event } from "@trace/strategy-ir";
 import type { Db } from "./db.js";
 import type { TraceConfig } from "./config.js";
 import type { InvestigationQueue } from "./worker.js";
@@ -103,6 +105,9 @@ function pickBasis(metas: PositionMeta[], tokenId?: number): PositionMeta | null
   if (tokenId != null) return usable.find((m) => m.tokenId === tokenId) ?? null;
   return usable.find((m) => !m.burned) ?? usable[0] ?? null;
 }
+
+/** Real pool price series per (pool, window), reused across What If requests in this process. */
+const seriesCache = new Map<string, { series: PriceSeries }>();
 
 export function createApi(deps: ApiDeps): Express {
   const { db, queue, cfg } = deps;
@@ -290,6 +295,98 @@ export function createApi(deps: ApiDeps): Express {
     const [dna] = await db.query(`select data from strategy_dna where investigation = $1`, [P(req, "id")]);
     const series = pos.pool ? (dna?.data?.priceSeries?.[pos.pool] ?? null) : null;
     res.json({ position: pos, events, priceSeries: series });
+  }));
+
+  /**
+   * What If: re-run the stored backtest's counterfactual with the user's own
+   * settings, on the same real data (the investigation's stored events and
+   * positions, and the pool's real swap history, read through the cached,
+   * credit-limited chain client). Nothing is persisted. Both results are
+   * simulations and labelled as such; the baseline uses the same capital and
+   * slippage with the strategy's own width and re-centring, so the difference
+   * isolates the user's changes.
+   */
+  app.post("/investigations/:id/whatif", limiter(10, 60_000), h(async (req, res) => {
+    const id = P(req, "id");
+    if (!isUuid(id)) return bad(res, "investigation not found", 404);
+    const b = req.body ?? {};
+    const num = (v: unknown) => (v == null || v === "" ? undefined : Number(v));
+    const startCapital = num(b.startCapital);
+    const slippagePct = num(b.slippagePct);
+    const widthMultiplier = num(b.widthMultiplier) ?? 1;
+    if (startCapital !== undefined && !(startCapital > 0 && startCapital <= 1e12)) return bad(res, "startCapital must be a positive number");
+    if (slippagePct !== undefined && !(slippagePct >= 0 && slippagePct <= 0.1)) return bad(res, "slippagePct must be a fraction between 0 and 0.1");
+    if (!(widthMultiplier >= 0.25 && widthMultiplier <= 8)) return bad(res, "widthMultiplier must be between 0.25 and 8");
+    if (b.recentre != null && typeof b.recentre !== "boolean") return bad(res, "recentre must be true or false");
+
+    const inv = await db.getInvestigation(id).catch(() => null);
+    if (!inv || inv.status !== "done") return bad(res, "investigation not found or not finished", 404);
+    const [strategy] = await db.query(
+      `select id, ir_json as ir from strategies where investigation = $1 order by (role = 'ai_hypothesis') desc, created_at desc limit 1`,
+      [id],
+    );
+    if (!strategy) return bad(res, "no strategy stored for this investigation", 422);
+    const [stored] = await db.query(`select result_json as result from backtest_runs where strategy_id = $1 order by created_at desc limit 1`, [strategy.id]);
+    const prev = stored?.result as BacktestResult | undefined;
+    if (!prev || prev.status !== "completed") return bad(res, "this investigation has no completed backtest to build a What If on", 422);
+
+    // Same basis rule as the pipeline: most recent position in the backtested pool.
+    const metas = await positionMetas(db, id);
+    const inPool = metas.filter((m) => m.pool && m.pool.toLowerCase() === prev.pool.toLowerCase() && m.decimals0 != null && m.decimals1 != null);
+    const basis = inPool.sort((x, y) => y.tokenId - x.tokenId)[0];
+    if (!basis) return bad(res, "the backtested position is no longer available", 422);
+    const big = (v: unknown) => {
+      try {
+        return BigInt(String(v ?? 0));
+      } catch {
+        return Number(v ?? 0);
+      }
+    };
+    const events: V3Event[] = (await db.getEvents(id)).map((e) => ({
+      ...e,
+      block: Number(e.block),
+      timestamp: Number(e.timestamp),
+      logIndex: Number(e.logIndex),
+      tokenId: Number(e.tokenId),
+      liquidityDelta: big(e.liquidityDelta),
+      amount0: big(e.amount0),
+      amount1: big(e.amount1),
+      fee0: big(e.fee0),
+      fee1: big(e.fee1),
+      gasUsed: e.gasUsed ?? undefined,
+      effectiveGasPrice: e.effectiveGasPrice ?? undefined,
+    })) as V3Event[];
+
+    const fromBlock = Number(inv.fromBlock);
+    const toBlock = Number(inv.toBlock);
+    const key = `${basis.pool}:${fromBlock}:${toBlock}`;
+    let series = seriesCache.get(key)?.series;
+    if (!series) {
+      const chain = createTraceClient({ rpcUrl: cfg.sepoliaRpcUrl, fallbackRpcUrls: cfg.sepoliaFallbackRpcUrls });
+      series = await chain.fetchPoolPriceSeries(basis.pool!, fromBlock, toBlock, {
+        decimals0: basis.decimals0,
+        decimals1: basis.decimals1,
+        symbol0: basis.symbol0,
+        symbol1: basis.symbol1,
+        feeTier: basis.feeTier,
+        maxSwaps: 3_000,
+      });
+      if (seriesCache.size > 20) seriesCache.delete(seriesCache.keys().next().value as string);
+      seriesCache.set(key, { series });
+    }
+
+    const meta = Object.fromEntries(metas.map((m) => [String(m.tokenId), m]));
+    const shared = { startCapital: startCapital ?? prev.assumptions.startCapital, slippagePct: slippagePct ?? prev.assumptions.slippagePct };
+    const ir = strategy.ir as StrategyIR;
+    const baseline = runBacktest({ ir, series, basis, events, meta, opts: shared });
+    const whatIf = runBacktest({ ir, series, basis, events, meta, opts: { ...shared, widthMultiplier, ...(b.recentre != null ? { recentre: b.recentre } : {}) } });
+    res.json({
+      simulation: true,
+      label: "Simulation, not observed",
+      inputs: { ...shared, widthMultiplier, recentre: b.recentre ?? null, basisTokenId: basis.tokenId, pool: basis.pool },
+      baseline,
+      whatIf,
+    });
   }));
 
   app.post("/investigations/:id/archive", limiter(5, 60_000), h(async (req, res) => {

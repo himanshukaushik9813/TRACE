@@ -165,3 +165,14 @@ test("GET /strategies/:id validates the id and returns the stored version read-o
     db.query = q;
   }
 });
+
+test("What If validates its inputs and never runs for an unknown or unfinished investigation", async () => {
+  const id = "11111111-2222-4333-8444-555555555555";
+  assert.equal((await post("/investigations/not-a-uuid/whatif", {})).status, 404);
+  for (const body of [{ widthMultiplier: 0.1 }, { widthMultiplier: 9 }, { slippagePct: 0.5 }, { startCapital: -1 }, { recentre: "yes" }]) {
+    const r = await post(`/investigations/${id}/whatif`, body);
+    assert.equal(r.status, 400, JSON.stringify(body));
+  }
+  db.getInvestigation = async () => null;
+  assert.equal((await post(`/investigations/${id}/whatif`, { widthMultiplier: 2 })).status, 404);
+});

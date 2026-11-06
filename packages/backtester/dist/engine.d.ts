@@ -34,6 +34,17 @@ export type BacktestOptions = {
     trainFraction?: number;
     /** Slippage paid on each counterfactual rebalance, fraction (default 0.003). */
     slippagePct?: number;
+    /**
+     * What If only: scale the counterfactual run's range width (default 1 = the
+     * basis position's real width). Observed and benchmark runs are unaffected.
+     */
+    widthMultiplier?: number;
+    /**
+     * What If only: whether the counterfactual re-centres when the previous price
+     * left its range. Default: the IR decides (it re-centres only if it has an
+     * adjustment rule). Observed and benchmark runs are unaffected.
+     */
+    recentre?: boolean;
 };
 /** Canonical V3 position value (any consistent units). */
 export declare function positionValue(L: number, priceLo: number, priceHi: number, P: number): number;

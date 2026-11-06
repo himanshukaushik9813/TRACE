@@ -20,7 +20,7 @@ export const GLOSSARY = {
   buyHold: { term: "Buy and hold", text: "The comparison of just keeping the tokens (half and half by value) instead of providing liquidity." },
   passiveLp: { term: "Passive LP", text: "Comparison: keep the wallet's starting range and never touch it." },
   drawdown: { term: "Max drawdown", text: "The biggest fall from a high point to a later low point during the test. Smaller is less risky." },
-  capitalUtilization: { term: "Capital utilization", text: "The share of the time the deposited money was actually earning fees, which only happens while the price is in range." },
+  capitalUtilization: { term: "Capital utilization", text: "The share of the test period the money was deployed in a liquidity position instead of sitting idle. It earns fees only while the price is also in range." },
   aqua: { term: "1inch Aqua", text: "A 1inch protocol that lets a wallet offer liquidity through a strategy while its tokens stay in the wallet. TRACE can recreate supported strategy rules on it." },
   aquaCompatibility: { term: "Aqua compatibility", text: "Which of the strategy's rules can be expressed as a 1inch Aqua order. Rules that cannot are listed, never silently dropped." },
   authorization: { term: "Authorization", text: "A free signature from your wallet that approves exactly this plan. The server checks it before anything can be sent. It costs no gas and moves no tokens." },

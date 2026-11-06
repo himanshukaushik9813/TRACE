@@ -112,7 +112,16 @@ test("a completed investigation renders real data on every screen", async ({ pag
   if ((await page.getByRole("checkbox").count()) >= 2) await expect(page.getByRole("heading", { name: "Compare versions" })).toBeVisible();
 
   await page.goto(`/backtest?inv=${id}`);
-  await expect(page.getByText(/Backtest could not be completed|Insufficient real data|Historical replay on real swaps/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "How did this strategy perform?" })).toBeVisible();
+  await expect(page.getByText(/Backtest could not be completed|Insufficient real data|TRACE replayed \d+ real swaps/)).toBeVisible();
+  if (await page.getByRole("button", { name: "Run simulation" }).count()) {
+    // What If runs on the real API and is always labelled a simulation.
+    await page.getByRole("slider").focus();
+    await page.keyboard.press("ArrowRight");
+    await page.getByRole("button", { name: "Run simulation" }).click();
+    await expect(page.getByText("Your settings", { exact: true })).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByText(/^Simulation, not observed\. Both columns replay/)).toBeVisible();
+  }
 
   await page.goto(`/reports?inv=${id}`);
   await expect(page.getByRole("heading", { name: "Integration status" })).toBeVisible();

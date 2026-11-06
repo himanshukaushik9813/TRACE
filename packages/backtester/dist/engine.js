@@ -197,7 +197,10 @@ export function runBacktest(input) {
     assertNoLookAhead(split);
     const capitalRaw = startCapital * 10 ** dec1;
     const anchor = train[train.length - 1].rawPrice;
-    const width = basis.tickUpper - basis.tickLower;
+    const widthMultiplier = input.opts?.widthMultiplier ?? 1;
+    if (!(widthMultiplier > 0) || !Number.isFinite(widthMultiplier))
+        throw new Error("widthMultiplier must be a positive number");
+    const width = (basis.tickUpper - basis.tickLower) * widthMultiplier;
     const centered = (price) => {
         const t = Math.log(price) / Math.log(1.0001);
         return { lo: tickToRawPrice(t - width / 2), hi: tickToRawPrice(t + width / 2) };
@@ -247,7 +250,7 @@ export function runBacktest(input) {
     }
     // 2) Inferred strategy, counterfactual: observed width, centred on the last train price;
     //    re-centres only if the IR has an adjustment rule and the PREVIOUS price left the range.
-    const hasAdjust = ir.rules.some((r) => r.category === "adjustment");
+    const hasAdjust = input.opts?.recentre ?? ir.rules.some((r) => r.category === "adjustment");
     let cur = centered(anchor);
     const inferred = simulateLp(test, train, capitalRaw, basis.feeTier, slippage, (_i, history) => {
         const prev = history[history.length - 1].rawPrice;
@@ -255,7 +258,7 @@ export function runBacktest(input) {
             cur = centered(prev);
         return cur;
     });
-    pushLp(`Inferred strategy (${hasAdjust ? "re-centre on exit" : "hold range"})`, "counterfactual", inferred, 0);
+    pushLp(`Inferred strategy (${hasAdjust ? "re-centre on exit" : "hold range"}${widthMultiplier !== 1 ? `, ${widthMultiplier}× width` : ""})`, "counterfactual", inferred, 0);
     // 3) Passive LP benchmark: the basis position's real range, held untouched.
     const passive = simulateLp(test, train, capitalRaw, basis.feeTier, 0, () => fixedRange);
     pushLp("Passive LP (basis range held)", "benchmark", passive, 0);

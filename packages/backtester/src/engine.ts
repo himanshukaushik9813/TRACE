@@ -45,6 +45,17 @@ export type BacktestOptions = {
   trainFraction?: number;
   /** Slippage paid on each counterfactual rebalance, fraction (default 0.003). */
   slippagePct?: number;
+  /**
+   * What If only: scale the counterfactual run's range width (default 1 = the
+   * basis position's real width). Observed and benchmark runs are unaffected.
+   */
+  widthMultiplier?: number;
+  /**
+   * What If only: whether the counterfactual re-centres when the previous price
+   * left its range. Default: the IR decides (it re-centres only if it has an
+   * adjustment rule). Observed and benchmark runs are unaffected.
+   */
+  recentre?: boolean;
 };
 
 type Pt = PriceSeries["points"][number] & { rawPrice: number };
@@ -235,7 +246,9 @@ export function runBacktest(input: {
 
   const capitalRaw = startCapital * 10 ** dec1;
   const anchor = train[train.length - 1].rawPrice;
-  const width = basis.tickUpper - basis.tickLower;
+  const widthMultiplier = input.opts?.widthMultiplier ?? 1;
+  if (!(widthMultiplier > 0) || !Number.isFinite(widthMultiplier)) throw new Error("widthMultiplier must be a positive number");
+  const width = (basis.tickUpper - basis.tickLower) * widthMultiplier;
   const centered = (price: number) => {
     const t = Math.log(price) / Math.log(1.0001);
     return { lo: tickToRawPrice(t - width / 2), hi: tickToRawPrice(t + width / 2) };
@@ -289,14 +302,14 @@ export function runBacktest(input: {
 
   // 2) Inferred strategy, counterfactual: observed width, centred on the last train price;
   //    re-centres only if the IR has an adjustment rule and the PREVIOUS price left the range.
-  const hasAdjust = ir.rules.some((r) => r.category === "adjustment");
+  const hasAdjust = input.opts?.recentre ?? ir.rules.some((r) => r.category === "adjustment");
   let cur = centered(anchor);
   const inferred = simulateLp(test, train, capitalRaw, basis.feeTier, slippage, (_i, history) => {
     const prev = history[history.length - 1].rawPrice;
     if (hasAdjust && (prev < cur.lo || prev >= cur.hi)) cur = centered(prev);
     return cur;
   });
-  pushLp(`Inferred strategy (${hasAdjust ? "re-centre on exit" : "hold range"})`, "counterfactual", inferred, 0);
+  pushLp(`Inferred strategy (${hasAdjust ? "re-centre on exit" : "hold range"}${widthMultiplier !== 1 ? `, ${widthMultiplier}× width` : ""})`, "counterfactual", inferred, 0);
 
   // 3) Passive LP benchmark: the basis position's real range, held untouched.
   const passive = simulateLp(test, train, capitalRaw, basis.feeTier, 0, () => fixedRange);
