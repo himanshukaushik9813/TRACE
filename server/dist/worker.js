@@ -10,6 +10,7 @@
 import { Queue, Worker } from "bullmq";
 import { Redis as IORedis } from "ioredis";
 import { InvestigationCancelled, runInvestigation } from "./pipeline.js";
+/** Default queue name (local dev). Deployments set TRACE_QUEUE_NAME so they never share jobs with a dev machine on the same Redis. */
 export const QUEUE_NAME = "trace-investigations";
 export function redisConnection(url) {
     return new IORedis(url, { maxRetriesPerRequest: null, enableReadyCheck: true, lazyConnect: true });
@@ -49,6 +50,7 @@ export function requeueDecision(state, recover) {
 async function guarded(job, db, cfg) {
     try {
         await runInvestigation(job, db, cfg);
+        console.log(`[worker] investigation ${job.investigationId} finished (queue ${cfg.queueName})`);
     }
     catch (err) {
         if (err instanceof InvestigationCancelled) {
@@ -61,11 +63,11 @@ async function guarded(job, db, cfg) {
     }
 }
 export function createBullQueue(cfg, db) {
-    const queue = new Queue(QUEUE_NAME, {
+    const queue = new Queue(cfg.queueName, {
         connection: redisConnection(cfg.redisUrl),
         defaultJobOptions: { attempts: 1, removeOnComplete: 200, removeOnFail: 500 },
     });
-    const worker = new Worker(QUEUE_NAME, async (job) => guarded(job.data, db, cfg), {
+    const worker = new Worker(cfg.queueName, async (job) => guarded(job.data, db, cfg), {
         connection: redisConnection(cfg.redisUrl),
         concurrency: 2,
         // Investigations spend minutes in rate-limited RPC reads. A short lock lets

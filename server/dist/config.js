@@ -35,6 +35,7 @@ export function loadConfig() {
         databaseUrlFallback: dbDirect ?? "",
         databaseSsl: env("DATABASE_SSL") !== "disable",
         redisUrl: env("REDIS_URL") ?? null,
+        queueName: env("TRACE_QUEUE_NAME") ?? "trace-investigations",
         zeroG: {
             routerUrl: env("ZERO_G_ROUTER_URL"),
             apiKey: env("ZERO_G_API_KEY"),

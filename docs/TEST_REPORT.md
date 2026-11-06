@@ -73,7 +73,15 @@ handling only, **not** execution. Nothing in the production app returns mocked s
    *below*" and "Approve and ship *below*", but signing moved to the Execute page in Phase 6. They now
    say "…on the Execute page". File: `src/components/investigate.tsx`.
 
-Both fixes pass typecheck and lint. They go live on Vercel after the next `git push`; they were
+3. **Production jobs could run on a developer machine.** The BullMQ queue name was hard-coded, and the
+   Render API and the local dev API share the same Upstash Redis. Any local API left running (with older
+   code) competed for production investigations. Found after deploying `dad5f11`: three fresh production
+   runs came back without the new DNA fields. The queue name is now `TRACE_QUEUE_NAME` (Render:
+   `trace-investigations-prod`, set in `render.yaml`; local default `trace-investigations`). The worker
+   now logs `[worker] investigation … finished (queue …)` so the processing instance is visible.
+   Files: `server/src/{config,worker,index}.ts`, `render.yaml`, `.env.example`.
+
+Fixes 1–2 pass typecheck and lint. They go live on Vercel after the next `git push`; they were
 **not** visually re-verified on production yet.
 
 ---

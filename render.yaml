@@ -19,6 +19,9 @@ services:
       # ── Chain ──
       - key: TRACE_CHAIN_ID
         value: "11155111"
+      # Production's own BullMQ queue: a dev machine on the same Redis must never take its jobs.
+      - key: TRACE_QUEUE_NAME
+        value: trace-investigations-prod
       - key: SEPOLIA_RPC_URL
         sync: false
       - key: TRACE_OWNER_WALLET

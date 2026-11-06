@@ -16,6 +16,8 @@ export type TraceConfig = {
   databaseUrlFallback: string;
   databaseSsl: boolean;
   redisUrl: string | null;
+  /** BullMQ queue name. Give each deployment its own (prod vs local dev) so they never take each other's jobs. */
+  queueName: string;
   zeroG: { routerUrl?: string; apiKey?: string; model?: string; trustMode?: "standard" | "verified" | "private"; verifyTee: boolean };
   storage: { rpcUrl?: string; indexerUrl?: string; privateKey?: string };
   world: { appId?: string; rpId?: string; signingKey?: string; action: string; environment: "staging" | "production" };
@@ -53,6 +55,7 @@ export function loadConfig(): { config: TraceConfig; checks: Check[]; fatal: str
     databaseUrlFallback: dbDirect ?? "",
     databaseSsl: env("DATABASE_SSL") !== "disable",
     redisUrl: env("REDIS_URL") ?? null,
+    queueName: env("TRACE_QUEUE_NAME") ?? "trace-investigations",
     zeroG: {
       routerUrl: env("ZERO_G_ROUTER_URL"),
       apiKey: env("ZERO_G_API_KEY"),

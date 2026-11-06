@@ -79,7 +79,7 @@ async function main() {
         });
         console.log("[trace] chain log cache: memory + Redis (finalized chunks only)");
     }
-    console.log(`[trace] queue backend: ${queue.backend}${queue.backend === "in-memory" ? " (Redis unreachable — no job durability)" : ""}`);
+    console.log(`[trace] queue backend: ${queue.backend}${queue.backend === "bullmq" ? ` (queue "${config.queueName}")` : ""}${queue.backend === "in-memory" ? " (Redis unreachable — no job durability)" : ""}`);
     const app = createApi({ db, queue, cfg: config });
     const server = app.listen(config.port, () => {
         console.log(`[trace] API listening on :${config.port} — Ethereum Sepolia (${config.chainId})`);

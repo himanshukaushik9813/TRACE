@@ -14,6 +14,7 @@ import { InvestigationCancelled, runInvestigation, type InvestigationJob } from 
 import type { Db } from "./db.js";
 import type { TraceConfig } from "./config.js";
 
+/** Default queue name (local dev). Deployments set TRACE_QUEUE_NAME so they never share jobs with a dev machine on the same Redis. */
 export const QUEUE_NAME = "trace-investigations";
 
 export type InvestigationQueue = {
@@ -59,6 +60,7 @@ export function requeueDecision(state: string | null, recover: boolean): "add" |
 async function guarded(job: InvestigationJob, db: Db, cfg: TraceConfig) {
   try {
     await runInvestigation(job, db, cfg);
+    console.log(`[worker] investigation ${job.investigationId} finished (queue ${cfg.queueName})`);
   } catch (err) {
     if (err instanceof InvestigationCancelled) {
       console.log(`[worker] investigation ${job.investigationId} cancelled; stopped at a stage boundary`);
@@ -71,11 +73,11 @@ async function guarded(job: InvestigationJob, db: Db, cfg: TraceConfig) {
 }
 
 export function createBullQueue(cfg: TraceConfig, db: Db): InvestigationQueue {
-  const queue = new Queue<InvestigationJob>(QUEUE_NAME, {
+  const queue = new Queue<InvestigationJob>(cfg.queueName, {
     connection: redisConnection(cfg.redisUrl!),
     defaultJobOptions: { attempts: 1, removeOnComplete: 200, removeOnFail: 500 },
   });
-  const worker = new Worker<InvestigationJob>(QUEUE_NAME, async (job) => guarded(job.data, db, cfg), {
+  const worker = new Worker<InvestigationJob>(cfg.queueName, async (job) => guarded(job.data, db, cfg), {
     connection: redisConnection(cfg.redisUrl!),
     concurrency: 2,
     // Investigations spend minutes in rate-limited RPC reads. A short lock lets
