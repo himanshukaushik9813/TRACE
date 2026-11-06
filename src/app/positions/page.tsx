@@ -32,6 +32,12 @@ export default function PositionsPage() {
                 <p className="text-[0.86rem] text-ink-600 mt-1.5 max-w-[68ch] leading-relaxed">
                   Every <Term k="lpPosition">position</Term> this wallet opened on Uniswap V3 (Sepolia), rebuilt from on-chain events.
                   {s.counts.positions > 0 && ` ${active} still active, ${s.counts.positions - active} closed.`}
+                  {s.counts.positions > 0 && (
+                    <>
+                      {" "}
+                      <a href={withInv("/case-study", inv)} className="underline decoration-gold/50 text-ink hover:text-gold">See the full case study</a> for the timeline and evidence.
+                    </>
+                  )}
                 </p>
               </header>
               {s.positions.length === 0 ? (

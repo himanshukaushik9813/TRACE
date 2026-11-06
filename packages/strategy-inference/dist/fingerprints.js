@@ -8,6 +8,12 @@
  */
 import { reconstructPositions, rangeResets } from "@trace/uniswap-v3";
 const FULL_RANGE_TICKS = 1_700_000; // ≥ ~96% of the [-887272, 887272] span
+/** |tick| at or beyond this is the edge of the usable range (MAX_TICK = 887272, minus tick-spacing rounding). */
+const EDGE_TICK = 880_000;
+/** True when a range spans (near) the full tick range or is unbounded on either side. */
+export function isFullRangeLike(tickLower, tickUpper) {
+    return tickUpper - tickLower >= FULL_RANGE_TICKS || tickLower <= -EDGE_TICK || tickUpper >= EDGE_TICK;
+}
 function median(xs) {
     if (!xs.length)
         return null;
@@ -24,12 +30,13 @@ export function computeFingerprints(events, meta = {}, priceSeries = {}, window)
     const toTs = window?.toTs || (times.length ? Math.max(...times) : 0);
     const periodDays = Math.max(1, (toTs - fromTs) / 86_400);
     // Range widths (from positions(), the authoritative source).
-    const widths = ledgers
-        .map((t) => meta[String(t.tokenId)] ?? null)
-        .filter((m) => m != null)
-        .map((m) => m.tickUpper - m.tickLower);
+    const ranged = ledgers.map((t) => meta[String(t.tokenId)] ?? null).filter((m) => m != null);
+    const widths = ranged.map((m) => m.tickUpper - m.tickLower);
     const avgW = widths.length ? widths.reduce((a, b) => a + b, 0) / widths.length : null;
-    const concentrated = widths.filter((w) => w < FULL_RANGE_TICKS);
+    // Full-range-like: spans (near) the whole tick range, or reaches its edge on either side.
+    // A range like [-207244, 887272] is unbounded above, so it is not "concentrated" and its
+    // width must not enter the concentrated average (1.0001^width overflows into nonsense).
+    const concentrated = ranged.filter((m) => !isFullRangeLike(m.tickLower, m.tickUpper)).map((m) => m.tickUpper - m.tickLower);
     const avgConcW = concentrated.length ? concentrated.reduce((a, b) => a + b, 0) / concentrated.length : null;
     const repositions = rangeResets(ledger);
     const durations = ledgers

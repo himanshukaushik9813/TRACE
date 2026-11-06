@@ -19,7 +19,7 @@ export type Fingerprints = {
     avgRangeWidthTicks: number | null;
     /** Mean range width as a price ratio: 1.0001^width − 1 (e.g. 0.2 = 20%). */
     avgRangeWidthPct: number | null;
-    /** Share of positions spanning (near) the full tick range. */
+    /** Share of positions spanning (near) the full tick range or reaching its edge on either side. */
     fullRangeShare: number;
     /** Range re-sets: a new NFT in the same pool with a different range after reducing/closing the previous one. */
     repositionCount: number;
@@ -51,6 +51,8 @@ export type Fingerprints = {
     /** Median hours from the price leaving the range to that liquidity change (null if none). */
     medianResponseHours: number | null;
 };
+/** True when a range spans (near) the full tick range or is unbounded on either side. */
+export declare function isFullRangeLike(tickLower: number, tickUpper: number): boolean;
 export declare function computeFingerprints(events: V3Event[], meta?: Record<string, PositionMeta>, priceSeries?: Record<string, PriceSeries>, window?: {
     fromTs: number;
     toTs: number;

@@ -303,6 +303,36 @@ export type ExecutionPlan = {
 
 export type StorageArtifact = { kind: string; rootHash: string; txHash: string; contentHash: string; sizeBytes: number; network: string; retrievable: boolean; createdAt: string };
 
+/* ---------------- Case study (GET /investigations/:id/case-study) ---------------- */
+export type V3Kind = "MINT" | "INCREASE" | "DECREASE" | "COLLECT" | "TRANSFER" | "BURN";
+/** One source event. Amounts and liquidity are base-unit decimal strings. */
+export type CaseEvent = {
+  tx: string; block: number; logIndex: number; timestamp: number; kind: V3Kind; tokenId: number; pool: string | null;
+  liquidityDelta: string; liquidityAfter: string; amount0: string; amount1: string; fee0: string; fee1: string;
+  from: string | null; to: string | null; tickLower: number; tickUpper: number;
+};
+export type CasePosition = {
+  tokenId: number; pool: string | null; symbol0: string | null; symbol1: string | null; decimals0: number | null; decimals1: number | null;
+  feeTier: number | null; tickLower: number; tickUpper: number; status: "active" | "closed"; historyComplete: boolean;
+  opened: CaseEvent | null; closed: CaseEvent | null; events: CaseEvent[];
+  ownership: { from: string | null; to: string | null; event: CaseEvent }[]; feeCollections: CaseEvent[];
+  totals: { deposited0: string; deposited1: string; withdrawn0: string; withdrawn1: string; fees0: string; fees1: string };
+  peakLiquidity: string;
+};
+export type CaseObservation = { id: string; title: string; explanation: string; source: "measured" | "strategy_rule"; evidence: CaseEvent[]; missingRefs: string[] };
+export type CaseStudy = {
+  investigation: { id: string; status: string; windowDays: number | null; createdAt: string };
+  wallet: string; chainId: number;
+  window: { fromBlock: number; toBlock: number; fromTs: number; toTs: number } | null;
+  overview: { positions: number; active: number; closed: number; pools: number; events: number; byKind: Record<V3Kind, number>; firstEvent: CaseEvent | null; lastEvent: CaseEvent | null };
+  positions: CasePosition[];
+  rangeChanges: { pool: string; from: { tokenId: number; tickLower: number; tickUpper: number }; to: { tokenId: number; tickLower: number; tickUpper: number }; evidence: CaseEvent[] }[];
+  liquidityTimeline: CaseEvent[];
+  observations: CaseObservation[];
+  coverage: { events: number; eventsWithTimestamp: number; eventsWithReceipt: number; positions: number; positionsWithFullHistory: number; positionsWithMetadata: number; observations: number; observationsWithEvidence: number; ruleRefs: number; ruleRefsFound: number };
+  limitations: string[];
+};
+
 export type FullInvestigation = {
   investigation: Investigation;
   strategies: StrategyRow[];

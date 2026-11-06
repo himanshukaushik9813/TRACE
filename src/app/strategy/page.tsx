@@ -28,7 +28,7 @@ const hours = (h: number | null) => (h == null ? "—" : h >= 48 ? `${(h / 24).t
 /** The technical DNA table (kept, under Technical details). */
 function dnaRows(f: Fingerprints): { label: string; value: string; derived: string }[] {
   return [
-    { label: "Average range width", value: f.avgRangeWidthPct != null ? (f.avgRangeWidthPct >= 1 ? `${(1 + f.avgRangeWidthPct).toLocaleString("en-US", { maximumFractionDigits: 1 })}× price span` : `${fmt.frac(f.avgRangeWidthPct)} wide`) : f.fullRangeShare === 1 ? "Full range" : "—", derived: f.avgRangeWidthTicks != null ? `${Math.round(f.avgRangeWidthTicks)} ticks mean; ${fmt.frac(f.fullRangeShare, 0)} of positions full-range` : "no range known" },
+    { label: "Average range width", value: f.avgRangeWidthPct != null ? (f.avgRangeWidthPct >= 1e6 ? "effectively unbounded" : f.avgRangeWidthPct >= 1 ? `${(1 + f.avgRangeWidthPct).toLocaleString("en-US", { maximumFractionDigits: 1 })}× price span` : `${fmt.frac(f.avgRangeWidthPct)} wide`) : f.fullRangeShare === 1 ? "Full range" : "—", derived: f.avgRangeWidthTicks != null ? `${Math.round(f.avgRangeWidthTicks)} ticks mean; ${fmt.frac(f.fullRangeShare, 0)} of positions full-range` : "no range known" },
     { label: "Range adjustment frequency", value: `${f.repositionsPerWeek.toFixed(2)} / week`, derived: `${f.repositionCount} re-sets (new NFT in the same pool after reducing the previous)` },
     { label: "Position duration (median)", value: hours(f.medianPositionDurationHours), derived: `${f.closedPositions} closed of ${f.positionCount} positions` },
     { label: "Time in range", value: f.timeInRangePct != null ? fmt.frac(f.timeInRangePct) : "not measured", derived: f.timeInRangePct != null ? "share of real pool swaps inside each position's range" : "no swap price data for the pool(s)" },
@@ -57,7 +57,9 @@ function plainReasons(f: Fingerprints): string[] {
   if (f.fullRangeShare === 1) out.push("Its liquidity covers every possible price, so it never needs adjusting.");
   else if (f.avgRangeWidthPct != null)
     out.push(
-      f.avgRangeWidthPct >= 1
+      f.avgRangeWidthPct >= 1e6
+        ? "It sets a price range so wide it is effectively unbounded."
+        : f.avgRangeWidthPct >= 1
         ? `It sets a wide price range: the top is about ${(1 + f.avgRangeWidthPct).toLocaleString("en-US", { maximumFractionDigits: 1 })}× the bottom.`
         : `It sets a narrow price range, about ${fmt.frac(f.avgRangeWidthPct)} wide.`,
     );

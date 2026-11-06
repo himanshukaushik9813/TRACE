@@ -91,6 +91,7 @@ test("every page renders a real investigation with no console errors, no sideway
     [`/?inv=${id}`, /Investigate another wallet/],
     [`/positions?inv=${id}`, /liquidity positions?/],
     [detail!, /What went into this position/],
+    [`/case-study?inv=${id}`, /Evidence Explorer|Nothing to reconstruct/],
     [`/strategy?inv=${id}`, /A hypothesis, not confirmed intent/],
     [`/strategy?tab=versions&inv=${id}`, /Pick two to see what changed|No strategy versions/],
     [`/backtest?inv=${id}`, /How did this strategy perform\?/],

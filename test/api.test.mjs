@@ -26,6 +26,9 @@ function fakeDb() {
     ping: async () => ({ ok: true, migrations: ["0001_init.sql"] }),
     query: async () => [],
     insertInvestigation: async () => "inv-1",
+    investigations: {},
+    getInvestigation: async (id) => db.investigations[id] ?? null,
+    getEvents: async () => [],
     getPlan: async (id) => (id === plan.id ? plan : null),
     issueChallenge: async (planId, wallet, action, challenge, ttl) => challenges.set(challenge, { planId, wallet, action, exp: Date.now() + ttl * 1000, used: false }),
     consumeChallenge: async (challenge, planId, wallet, action) => {
@@ -175,4 +178,24 @@ test("What If validates its inputs and never runs for an unknown or unfinished i
   }
   db.getInvestigation = async () => null;
   assert.equal((await post(`/investigations/${id}/whatif`, { widthMultiplier: 2 })).status, 404);
+});
+
+test("case study: invalid or unknown ids are a 404, an unfinished run is a 409, an empty wallet is an honest empty report", async () => {
+  db.getInvestigation = async (id) => db.investigations[id] ?? null; // an earlier test stubs this to null
+  assert.equal((await fetch(`${base}/investigations/not-a-uuid/case-study`)).status, 404);
+  assert.equal((await fetch(`${base}/investigations/00000000-0000-4000-8000-000000000999/case-study`)).status, 404);
+  const running = "00000000-0000-4000-8000-000000000001";
+  const empty = "00000000-0000-4000-8000-000000000002";
+  db.investigations[running] = { id: running, wallet: account.address, chainId: 11155111, status: "fetching" };
+  db.investigations[empty] = { id: empty, wallet: account.address, chainId: 11155111, status: "no_positions", fromBlock: "100", toBlock: "200", fromTs: "1", toTs: "2" };
+  const r1 = await fetch(`${base}/investigations/${running}/case-study`);
+  assert.equal(r1.status, 409);
+  assert.match((await r1.json()).error, /fetching/);
+  const r2 = await fetch(`${base}/investigations/${empty}/case-study`);
+  assert.equal(r2.status, 200);
+  const s = await r2.json();
+  assert.equal(s.overview.positions, 0);
+  assert.equal(s.observations.length, 0);
+  assert.deepEqual(s.window, { fromBlock: 100, toBlock: 200, fromTs: 1, toTs: 2 });
+  assert.match(s.limitations[0], /^No Uniswap V3 position events/);
 });

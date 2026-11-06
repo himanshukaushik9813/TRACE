@@ -57,7 +57,8 @@ export async function runInvestigation(job: InvestigationJob, db: Db, cfg: Trace
   }
 }
 
-async function runStages(job: InvestigationJob, db: Db, cfg: TraceConfig, chain: ReturnType<typeof createTraceClient>): Promise<void> {
+/** Exported for tests (failure paths with a stand-in chain client); the app calls runInvestigation. */
+export async function runStages(job: InvestigationJob, db: Db, cfg: TraceConfig, chain: ReturnType<typeof createTraceClient>): Promise<void> {
   const { investigationId: id, wallet } = job;
   // Every stage transition doubles as a cancellation checkpoint: once the run is
   // cancelled the status write is refused and the pipeline stops writing.

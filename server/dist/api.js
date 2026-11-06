@@ -10,6 +10,7 @@
  *   GET  /investigations/recent
  *   GET  /investigations/:id                   status + progress
  *   GET  /investigations/:id/full              everything the screens render
+ *   GET  /investigations/:id/case-study        evidence-backed case study (positions, lifecycle, ownership, observations, coverage)
  *   GET  /investigations/:id/events            raw lifecycle evidence (?tokenId=)
  *   GET  /investigations/:id/positions/:tokenId
  *   POST /investigations/:id/archive           retry 0G Storage archiving
@@ -33,6 +34,7 @@ import { assessCompatibility, aquaClient, compilePlan } from "@trace/aqua-adapte
 import { buildTypedData, newChallenge, verifyAuthorization, verifyWorldProof, worldConfigured, worldRpRequest, worldSignal } from "@trace/world-auth";
 import { archive } from "@trace/zero-g-storage";
 import { runBacktest } from "@trace/backtester";
+import { buildCaseStudy } from "@trace/strategy-inference";
 import { integrationSnapshot } from "./integrations.js";
 /** Actions a signed authorization can cover, and the plan steps each allows. */
 export const ACTIONS = {
@@ -249,6 +251,40 @@ export function createApi(deps) {
             ])
             : [[], []];
         res.json(json({ investigation: inv, strategies, primaryStrategyId: primary?.id ?? null, inferenceRuns: runs, dna: dna[0] ?? null, positions, backtest, compatibility, plans, authorizations, transactions, storage }));
+    }));
+    /**
+     * Case study: the wallet's stored on-chain events, positions() metadata, DNA and
+     * primary strategy turned into a report where every observation cites its source
+     * events. Computed on request from what the investigation stored; nothing is fetched
+     * from the chain here and nothing is estimated.
+     */
+    app.get("/investigations/:id/case-study", h(async (req, res) => {
+        if (!isUuid(P(req, "id")))
+            return bad(res, "investigation not found", 404);
+        const inv = await db.getInvestigation(P(req, "id")).catch(() => null);
+        if (!inv)
+            return bad(res, "investigation not found", 404);
+        if (inv.status !== "done" && inv.status !== "no_positions")
+            return res.status(409).json({ error: `investigation is ${inv.status}; the case study is available once it has finished`, status: inv.status });
+        const [events, metas, dna, strategies] = await Promise.all([
+            db.getEvents(inv.id),
+            positionMetas(db, inv.id),
+            db.query(`select data from strategy_dna where investigation = $1`, [inv.id]),
+            db.query(`select role, ir_json as ir from strategies where investigation = $1 order by created_at`, [inv.id]),
+        ]);
+        const primary = strategies.find((s) => s.role === "ai_hypothesis") ?? strategies.find((s) => s.role === "evidence_baseline") ?? null;
+        const n = (v) => (v == null ? null : Number(v));
+        const window = inv.fromBlock != null && inv.toBlock != null ? { fromBlock: Number(inv.fromBlock), toBlock: Number(inv.toBlock), fromTs: n(inv.fromTs) ?? 0, toTs: n(inv.toTs) ?? 0 } : null;
+        const study = buildCaseStudy({
+            wallet: inv.wallet,
+            chainId: Number(inv.chainId ?? SEPOLIA_CHAIN_ID),
+            events: events,
+            meta: metas,
+            window,
+            fingerprints: dna[0]?.data?.fingerprints ?? null,
+            strategy: primary?.ir ?? null,
+        });
+        res.json(json({ investigation: { id: inv.id, status: inv.status, windowDays: inv.windowDays, createdAt: inv.createdAt }, ...study }));
     }));
     app.get("/investigations/:id/events", h(async (req, res) => {
         if (!isUuid(P(req, "id")))

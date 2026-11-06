@@ -430,6 +430,16 @@ export function WalletOverview({ full, invId }: { full: FullInvestigation; invId
         <ChevronRight size={16} className="text-ink-600 group-hover:text-gold shrink-0" aria-label="Open Strategy" />
       </Link>
 
+      {(c?.positions ?? 0) > 0 && (
+        <Link href={withInv("/case-study", invId)} className="group mt-2 flex items-center justify-between gap-3 rounded-md2 border border-gold/40 px-3.5 py-2.5 hover:bg-ivory">
+          <div className="min-w-0">
+            <div className="text-[0.88rem] font-medium text-ink">Open the full case study</div>
+            <div className="text-[0.72rem] text-ink-600">Timeline, ranges and every observation with its on-chain evidence</div>
+          </div>
+          <ChevronRight size={16} className="text-ink-600 group-hover:text-gold shrink-0" aria-hidden />
+        </Link>
+      )}
+
       <div className="mt-3 text-[0.72rem] text-ink-600 tabular">
         {inv.windowDays}-day window, {fmt.tsSec(inv.fromTs, false)} to {fmt.tsSec(inv.toTs, false)}
       </div>

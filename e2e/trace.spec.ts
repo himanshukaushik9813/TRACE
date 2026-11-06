@@ -354,3 +354,20 @@ test("first-visit welcome shows once: Skip hides it for the session, Don't show 
   await expect(page.getByText("Getting started").first()).toBeVisible();
   await expect(page.getByRole("progressbar", { name: "Getting started progress" }).first()).toHaveAttribute("aria-valuenow", "0");
 });
+
+test("case study: real investigation → timeline event detail and Evidence Explorer rows link to the explorer", async ({ page, request }) => {
+  const recent = await (await request.get(`${API}/investigations/recent?limit=50`)).json();
+  const done = recent.investigations.find((i: { status: string; counts: { positions?: number } | null }) => i.status === "done" && (i.counts?.positions ?? 0) > 0);
+  test.skip(!done, "no completed investigation with positions in the database yet");
+  const cs = await (await request.get(`${API}/investigations/${done.id}/case-study`)).json();
+  await page.goto(`/case-study?inv=${done.id}`);
+  await expect(page.getByRole("heading", { name: "Evidence Explorer" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(`${cs.overview.positions}`, { exact: true }).first()).toBeAttached();
+  // Select the first real event on the timeline: its detail shows the source event and links.
+  const first = cs.positions.flatMap((p: { events: { kind: string; tokenId: number; block: number }[] }) => p.events)[0];
+  await page.getByRole("button", { name: new RegExp(`NFT #${first.tokenId}, block ${first.block.toLocaleString("en-US")}`) }).first().click();
+  await expect(page.getByText(`${first.kind} (log index`).first()).toBeVisible();
+  // Every evidence row links its transaction to Sepolia Etherscan.
+  const txLinks = page.locator('table a[href*="sepolia.etherscan.io/tx/0x"]');
+  expect(await txLinks.count()).toBeGreaterThan(0);
+});

@@ -17,7 +17,11 @@ export function inferFromEvidence(input) {
 }
 const txs = (events, kinds, max = 6) => [...new Set(events.filter((e) => kinds.includes(e.kind)).map((e) => e.tx))].slice(0, max);
 const cadence = (days) => (days >= 1 ? `${days.toFixed(1)} days` : `${(days * 24).toFixed(1)} hours`);
-const width = (x) => (x >= 1 ? `spanning ${(1 + x).toLocaleString("en-US", { maximumFractionDigits: 1 })}× in price` : `${pct(x)} wide`);
+const width = (x) => !Number.isFinite(x) || x >= 1e6
+    ? "spanning more than a million× in price (effectively unbounded)"
+    : x >= 1
+        ? `spanning ${(1 + x).toLocaleString("en-US", { maximumFractionDigits: 1 })}× in price`
+        : `${pct(x)} wide`;
 const pct = (x) => `${(x * 100).toFixed(x < 0.1 ? 1 : 0)}%`;
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 export function familyLabel(f) {
@@ -36,7 +40,7 @@ export function scoreFamilies(fp) {
     out.push({
         family: "passive_full_range",
         score: clamp01(fp.fullRangeShare * (noResets ? 0.9 : 0.5)),
-        why: `${pct(fp.fullRangeShare)} of positions span the full tick range; ${fp.repositionCount} range re-sets`,
+        why: `${pct(fp.fullRangeShare)} of positions span the full tick range or reach its edge; ${fp.repositionCount} range re-sets`,
     });
     out.push({
         family: "passive_concentrated",
