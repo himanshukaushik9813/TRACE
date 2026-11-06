@@ -18,7 +18,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useReadContracts, useSendTransaction, useSignTypedData } from "wagmi";
 import { erc20Abi, formatUnits, parseUnits } from "viem";
 import { Check, ExternalLink, Loader2, Lock, X } from "lucide-react";
@@ -31,7 +31,7 @@ import { FAMILY, FAMILY_PLAIN } from "@/components/case-file";
 import { pickPosition } from "@/components/investigate";
 import { rangeLabel } from "@/components/positions";
 import { fmt } from "@/lib/format";
-import { API_URL, api, useIntegrations, withInv, type Compatibility, type ExecutionPlan, type FullInvestigation, type TxRow } from "@/lib/api";
+import { API_URL, api, useIntegrations, withInv, type Compatibility, type ExecutionPlan, type FullInvestigation, type StrategyState, type TxRow } from "@/lib/api";
 import { useAquaExecution, walletErr } from "@/lib/aqua-flow";
 
 type State = "done" | "current" | "upcoming" | "blocked";
@@ -274,11 +274,11 @@ export function GuidedExecute({ full, invId }: { full: FullInvestigation; invId:
               <>1inch Aqua is unavailable right now: {aqua?.detail}</>
             ) : compat ? (
               compat.verdict === "FULL" ? (
-                <>Every rule can run on Aqua.</>
+                <><span className="font-medium text-ink">Fully compatible within supported scope:</span> every rule can run on Aqua.</>
               ) : compat.verdict === "PARTIAL" ? (
-                <><Term k="aquaCompatibility">Partly compatible</Term>: {supported.length} of {compat.rules.length} rules can run on Aqua.</>
+                <><Term k="aquaCompatibility">Partially compatible</Term>: {supported.length} of {compat.rules.length} rules can run on Aqua; the rest stay manual.</>
               ) : (
-                <>This strategy cannot be expressed as an Aqua order. {compat.unsupportedNotes[compat.unsupportedNotes.length - 1] ?? ""}</>
+                <><span className="font-medium text-ink">Incompatible:</span> this strategy cannot be expressed as an Aqua order. {compat.checks.filter((c) => !c.ok && !/^(maker|taker|info)\./.test(c.key)).map((c) => c.label).join(", ") || compat.unsupportedNotes[compat.unsupportedNotes.length - 1] || ""}</>
               )
             ) : (
               "TRACE reads the Aqua contracts, the tokens and your wallet on Sepolia right now to see which parts of the strategy Aqua can run."
@@ -352,7 +352,7 @@ export function GuidedExecute({ full, invId }: { full: FullInvestigation; invId:
           state={states[3]}
           summary={
             havePlan || signed
-              ? <>Committed: {planAmounts.join(" and ") || "your amounts"}.{" "}{!signed && <button className="underline text-[#8A6528]" onClick={() => setEditing(true)} disabled={working}>Change amounts</button>}</>
+              ? <>Committed: {planAmounts.join(" and ") || "your amounts"}{plan?.plan.allocation ? <>, sized to the pool price at block {plan.plan.allocation.spot.block.toLocaleString("en-US")}</> : null}.{" "}{!signed && <button className="underline text-[#8A6528]" onClick={() => setEditing(true)} disabled={working}>Change amounts</button>}</>
               : "Set the most the Aqua order may use. Tokens stay in your wallet; Aqua takes them only when a trade fills."
           }
         >
@@ -384,7 +384,7 @@ export function GuidedExecute({ full, invId }: { full: FullInvestigation; invId:
                 </p>
               )}
               <p className="mt-2 text-[0.76rem] text-ink-600 max-w-[72ch]">
-                <span className="text-ink font-medium">Limit:</span> the approvals you sign are for exactly these amounts, so Aqua can never take more than you commit here.
+                <span className="text-ink font-medium">Limit:</span> these are maximums. TRACE sizes the order to the pool&apos;s current price (read from Sepolia), so it may use less of one token, never more. The approvals you sign are for exactly the amounts used.
               </p>
               {plan && !mine && <p className="mt-2 text-[0.76rem] text-ink-600">The last plan was prepared for {fmt.addr(plan.maker)}. Continuing prepares a new one for your connected wallet.</p>}
               <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -430,6 +430,11 @@ export function GuidedExecute({ full, invId }: { full: FullInvestigation; invId:
                   </li>
                 )}
               </ol>
+              {plan.plan.allocation && (
+                <p className="mt-2 text-[0.76rem] text-ink-600 max-w-[78ch]">
+                  <span className="text-ink font-medium">Sizing:</span> {plan.plan.allocation.note}. Pool price {fmt.price(plan.plan.allocation.spot.price)} {p ? `${p.token1}/${p.token0}` : ""} at block {plan.plan.allocation.spot.block.toLocaleString("en-US")}; you offered {plan.plan.allocation.requested.map((a, i) => `${fmt.amt(Number(formatUnits(BigInt(a), plan.plan.tokens[i].decimals)))} ${plan.plan.tokens[i].symbol}`).join(" and ")}.
+                </p>
+              )}
               {plan.plan.notCompiled.length > 0 && (
                 <ul className="mt-2 text-[0.76rem] text-[#8A6528] list-disc pl-5">
                   {plan.plan.notCompiled.map((n) => <li key={n}>Not included: {n}</li>)}
@@ -443,6 +448,8 @@ export function GuidedExecute({ full, invId }: { full: FullInvestigation; invId:
                   <div>Order {plan.plan.order ? (plan.plan.order.length - 2) / 2 : 0} bytes · fee {plan.plan.params.feeBps} bps · registry <ExplorerLink kind="address" value={AQUA.registry.address} /> · router <ExplorerLink kind="address" value={AQUA.swapVmRouter.address} /></div>
                   {plan.plan.steps.map((st, i) => <div key={i}>{st.op}: to {st.to} · calldata {st.data.slice(0, 26)}…</div>)}
                   {simulation && Object.entries(simulation).map(([k, v]) => <div key={k} className={v.ok ? "text-forest" : "text-brick"}>dry run {k.split(":")[0]}: {v.ok ? "ok" : v.error}</div>)}
+                  {plan.plan.source && <div>Compiled from strategy {plan.plan.source.strategyId}{plan.plan.source.strategyVersionHash ? ` (version ${plan.plan.source.strategyVersionHash})` : ""} by {plan.plan.source.compiler}</div>}
+                  {plan.plan.validation?.map((v) => <div key={v.key} className={v.ok ? "text-forest" : "text-brick"}>check {v.key}: {v.ok ? "ok" : "FAILED"} · {v.detail}</div>)}
                   <div>{AQUA_NOTES.deployment}</div>
                 </div>
               </Disclosure>
@@ -522,6 +529,7 @@ export function GuidedExecute({ full, invId }: { full: FullInvestigation; invId:
         {/* 8 */}
         <Step n={8} title="Receipt" state={states[7]} summary={shipped ? "Your strategy is live on 1inch Aqua (Sepolia)." : "Shown when the ship transaction is confirmed."}>
           {snap.ship && <Receipt tx={snap.ship} approvals={snap.approvals} />}
+          {shipped && plan && <OnChainState planId={plan.id} />}
         </Step>
       </ol>
 
@@ -563,6 +571,40 @@ function Receipt({ tx, approvals }: { tx: TxRow; approvals: TxRow[] }) {
           Approvals:
           {approvals.map((a) => <ExplorerLink key={a.tx_hash} kind="tx" value={a.tx_hash}>{fmt.hash(a.tx_hash)}</ExplorerLink>)}
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Step 10 of the brief: read the strategy back from Sepolia, independently of the
+ * receipt. Registry virtual balances per token, plus a read-only router quote that
+ * must price THIS order (same hash) inside its range. Reads only; nothing is sent.
+ */
+function OnChainState({ planId }: { planId: string }) {
+  const q = useQuery({ queryKey: ["plan-state", planId], queryFn: () => api<StrategyState>(`/plans/${planId}/state`), staleTime: 30_000, retry: 1 });
+  const s = q.data;
+  const label = { active: "Active on Aqua", docked: "Docked (removed)", partly_filled: "Active, balances moved by swaps", not_shipped: "Not found on Aqua" } as const;
+  return (
+    <div className="mt-3 rounded-md2 border border-line bg-white p-3.5 text-[0.8rem]">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-ink font-medium">Checked on Sepolia</span>
+        {q.isLoading && <Loader2 size={14} className="animate-spin" />}
+        {s && <Pill tone={s.status === "active" || s.status === "partly_filled" ? "forest" : s.status === "docked" ? "gold" : "brick"}>{label[s.status]}</Pill>}
+        {s && <span className="text-ink-600 text-[0.74rem]">block {s.block.toLocaleString("en-US")}</span>}
+        <button className={`${BTN_QUIET} ml-auto`} onClick={() => q.refetch()} disabled={q.isFetching}>{q.isFetching ? "Reading…" : "Check again"}</button>
+      </div>
+      {q.error && <Alert>Could not read the strategy from Sepolia: {(q.error as Error).message}</Alert>}
+      {s && (
+        <ul className="mt-2 space-y-1 text-[0.76rem]">
+          {s.checks.map((c) => (
+            <li key={c.key} className="flex gap-2">
+              <span className={c.ok ? "text-forest" : "text-brick"}>{c.ok ? <Check size={13} strokeWidth={3} className="mt-0.5" /> : <X size={13} className="mt-0.5" />}</span>
+              <span className="text-ink-600 break-words min-w-0">{c.detail}</span>
+            </li>
+          ))}
+          <li className="text-ink-600">Registry <ExplorerLink kind="address" value={s.registry} /> · router <ExplorerLink kind="address" value={s.app} /> · strategy hash <span className="break-all">{s.strategyHash}</span></li>
+        </ul>
       )}
     </div>
   );

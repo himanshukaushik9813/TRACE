@@ -61,8 +61,17 @@ export const AQUA = {
     swapVmRouter: { address: "0x016b417bc933370f5eacc40b1d58b015ac72b070", source: AQUA_DOCS },
     kycNft: { address: "0x26FFc7D378E8e49Be2c483295A3e3E511F96a468", source: AQUA_DOCS },
 };
+/**
+ * The CURRENT production pair (all 13 production chains), per the same docs page.
+ * Checked on Sepolia, 2026-11-07, block 12,078,498: the registry has code there,
+ * the router has none. Used only to report that fact; TRACE never ships to it on Sepolia.
+ */
+export const AQUA_PRODUCTION = {
+    registry: { address: "0x1111113ccf1426a8e30e2bff5e005d929bf6a90a", source: AQUA_DOCS },
+    swapVmRouter: { address: "0x111111338c5091e8440b67b168bae16a668ac0de", source: AQUA_DOCS },
+};
 export const AQUA_NOTES = {
-    deployment: "Sepolia test deployment (2026-07-16 registry + AquaSwapVMRouter v1.0.2), documented by 1inch as available for testing; not the production chain set.",
+    deployment: "Sepolia test deployment (2026-07-16 registry + AquaSwapVMRouter v1.0.2), documented by 1inch as available for testing; not the production chain set. The current production router (0x111111338c…c0de) is not deployed on Sepolia.",
     takerGate: "Taker swaps require holding the 1inch KycNFT; without it the swap leg is blocked by the protocol.",
     docsUrl: "https://business.1inch.com/portal/documentation/aqua/",
 };

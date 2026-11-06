@@ -1,7 +1,7 @@
 # TRACE — Phase 3: Strategy Reverse Engineering and Backtesting
 
 **Status:** implemented and tested (81/81 unit and integration tests, 0 skipped; typecheck and lint clean).
-`651dbf4` is **deployed and verified live**. `9e0e3dc` + `56a3fe3` (two evidence-accuracy fixes and a wording fix) are committed and need a push; their live check is recorded in section 8 once done.
+`651dbf4` is **deployed and verified live**. `9e0e3dc` + `56a3fe3` (two evidence-accuracy fixes and a wording fix) are deployed too (Render: live at b879680) and were verified live (section D).
 
 Builds on the Phase 2 case study (`docs/PHASE_2_CASE_STUDY.md`). Nothing here invents a rule or a result. Each number below is labelled as **real** (computed from on-chain data), **assumption** (a stated parameter) or **not reliable / not calculated**.
 
@@ -120,6 +120,22 @@ Profitability is never promised. The UI states that testnet prices are not marke
 These describe one thin Sepolia pool over one window, and are not a forecast. Observed equals passive here because this wallet never moved its range.
 
 **Phase 2 case-study wallet `0x4A22…909e` (`d8f54fc4…`):** backtest **`insufficient_data`**: "only 1 real swap(s) in the pool during the window; at least 15 are needed". No numbers are shown.
+
+**Re-run on the fixed code (`b879680`): `1deb2771-aa8d-4ab4-a8fd-aef61dabf0ca`** (same wallet, 90 days):
+- The earlier rules "collects fees roughly every 0.3 hours" and "~100% in range" are **gone**.
+- Time in range is withheld: "only 1 real swap(s) … too few to be reliable".
+- All six families are scored:
+
+| Family | Score |
+|---|---|
+| Capital redeployment | 0.55 |
+| Active range management | 0.52 |
+| Passive full range | 0.20 |
+| Passive concentrated | 0.11 |
+| Periodic range adjustment | 0.05 |
+| Price-triggered repositioning | 0.03 |
+
+- Every rule carries its observation window, for example blocks 12,060,037–12,061,512.
 
 ## E. Tests (`npm run test:unit`: **81 passed, 0 failed, 0 skipped**)
 

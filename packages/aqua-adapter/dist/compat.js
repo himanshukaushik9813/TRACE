@@ -12,6 +12,17 @@
  * performed (contracts deployed, token metadata, balances, allowances, the
  * KycNFT taker gate). Nothing here is assumed.
  */
+import { createRequire } from "node:module";
+import { humanPriceFromSqrt1e18, sqrtPrice1e18FromX96, sqrtPriceFromTick } from "./price.js";
+const require = createRequire(import.meta.url);
+const { instructions } = require("@1inch/swap-vm-sdk");
+export const VERDICT_LABEL = {
+    FULL: "Fully compatible within supported scope",
+    PARTIAL: "Partially compatible",
+    INCOMPATIBLE: "Incompatible",
+};
+/** Keys whose failure informs but does not block compilation (wallet state, taker gate, notes). */
+export const NON_BLOCKING = (key) => key.startsWith("maker.") || key.startsWith("taker.") || key.startsWith("info.");
 const AQUA_DOCS = "https://business.1inch.com/portal/documentation/aqua/";
 export const CAPABILITY_MODEL = {
     concentrated_range: { usable: true, note: "AquaXYCAmmStrategy.newConcentrate: constant-product liquidity concentrated between two prices." },
@@ -30,7 +41,100 @@ const RULE_MAP = {
     exit: { status: "partial", gap: "Exit is a manual dock transaction; no conditional exit." },
     risk: { status: "unsupported", gap: "No on-chain risk limits / stop conditions in Aqua." },
 };
-export function assessCompatibility(ir, basis, checks = []) {
+/**
+ * Structural checks that need no network: token identity and ordering, decimals,
+ * price bounds (built and validated with the SDK), what the strategy's rules need
+ * versus what Aqua can do, and — when the pool's real spot price is known — which
+ * tokens the range needs right now.
+ */
+export function structuralChecks(ir, basis, spot) {
+    const out = [];
+    if (!basis || !basis.pool)
+        return out;
+    const t0 = basis.token0.toLowerCase();
+    const t1 = basis.token1.toLowerCase();
+    out.push({ key: "tokens.distinct", label: "Two distinct tokens", ok: t0 !== t1, detail: `${basis.symbol0} ${basis.token0} / ${basis.symbol1} ${basis.token1}`, source: "chain" });
+    out.push({
+        key: "tokens.order",
+        label: "Token ordering matches SwapVM",
+        ok: BigInt(basis.token0) < BigInt(basis.token1),
+        detail: "Uniswap token0 has the lower address, which SwapVM calls tokenLt, so price = token1/token0 = tokenGt/tokenLt in both",
+        source: "chain",
+    });
+    const decOk = basis.decimals0 != null && basis.decimals1 != null && basis.decimals0 >= 0 && basis.decimals0 <= 36 && basis.decimals1 >= 0 && basis.decimals1 <= 36;
+    out.push({ key: "tokens.decimals", label: "Decimals usable for exact amounts", ok: decOk, detail: `${basis.symbol0}: ${basis.decimals0 ?? "?"}, ${basis.symbol1}: ${basis.decimals1 ?? "?"} (read from the token contracts)`, source: "chain" });
+    const fullRange = basis.tickUpper - basis.tickLower >= 1_700_000;
+    let bounds = null;
+    if (fullRange) {
+        out.push({ key: "price.bounds", label: "Price boundaries representable", ok: true, detail: "full-range position → plain constant-product (XYC) curve, no bounds", source: "ir" });
+    }
+    else {
+        try {
+            const min = sqrtPriceFromTick(basis.tickLower);
+            const max = sqrtPriceFromTick(basis.tickUpper);
+            instructions.concentrate.ConcentrateGrowLiquidity2DArgs.fromSqrtPrices(min, max);
+            bounds = { min, max };
+            const d0 = basis.decimals0 ?? 0;
+            const d1 = basis.decimals1 ?? 0;
+            out.push({
+                key: "price.bounds",
+                label: "Price boundaries representable",
+                ok: min < max,
+                detail: `ticks [${basis.tickLower}, ${basis.tickUpper}] → ${humanPriceFromSqrt1e18(min, d0, d1).toPrecision(6)}–${humanPriceFromSqrt1e18(max, d0, d1).toPrecision(6)} ${basis.symbol1} per ${basis.symbol0} (exact sqrt bounds, accepted by the SDK)`,
+                source: "ir",
+            });
+        }
+        catch (err) {
+            out.push({ key: "price.bounds", label: "Price boundaries representable", ok: false, detail: err.message, source: "ir" });
+        }
+    }
+    const needsTrigger = ir.rules.filter((r) => r.category === "adjustment" || r.category === "risk" || r.category === "exit");
+    out.push({
+        key: "info.conditions",
+        label: "Strategy conditions Aqua can enforce",
+        ok: needsTrigger.length === 0,
+        detail: needsTrigger.length
+            ? `${needsTrigger.length} rule(s) depend on conditions Aqua does not evaluate (price triggers, re-sets, exits, risk limits); they stay manual: ${needsTrigger.map((r) => r.rule).join("; ")}`
+            : "every rule is a static range + fee, which a shipped strategy expresses directly",
+        source: "ir",
+    });
+    out.push({
+        key: "info.operations",
+        label: "Operations used",
+        ok: true,
+        detail: "approve (exact amounts), ship, dock: maker side, permissionless. Swaps (taker side) need the 1inch KycNFT and are not part of this flow",
+        source: "docs",
+    });
+    if (spot) {
+        const s = sqrtPrice1e18FromX96(BigInt(spot.sqrtPriceX96));
+        const where = !bounds ? "full_range" : s <= bounds.min ? "below" : s >= bounds.max ? "above" : "inside";
+        out.push({
+            key: "liquidity.requirement",
+            label: "Tokens the range needs at today's price",
+            ok: true,
+            detail: where === "inside"
+                ? `pool price (block ${spot.block}, tick ${spot.tick}) is inside the range: both ${basis.symbol0} and ${basis.symbol1}, in the ratio the price sets`
+                : where === "below"
+                    ? `pool price (block ${spot.block}, tick ${spot.tick}) is below the range: only ${basis.symbol0}`
+                    : where === "above"
+                        ? `pool price (block ${spot.block}, tick ${spot.tick}) is above the range: only ${basis.symbol1}`
+                        : `full range: both tokens in the ratio of the pool price (block ${spot.block})`,
+            source: "chain",
+        });
+        out.push({
+            key: "capital.requirement",
+            label: "Capital requirement",
+            ok: true,
+            detail: "any non-zero amount; TRACE sizes it to the pool price and never commits more than you enter. Tokens stay in your wallet until a swap fills",
+            source: "docs",
+        });
+    }
+    else {
+        out.push({ key: "info.spot", label: "Pool price for sizing", ok: false, detail: "the pool's current price could not be read, so amounts cannot be sized yet", source: "chain" });
+    }
+    return out;
+}
+export function assessCompatibility(ir, basis, checks = [], spot) {
     const rules = ir.rules.map((r) => {
         const m = RULE_MAP[r.category] ?? { status: "unsupported", gap: `no Aqua equivalent for "${r.category}"` };
         return { rule: r.rule, category: r.category, status: m.status, gap: m.gap };
@@ -57,9 +161,10 @@ export function assessCompatibility(ir, basis, checks = []) {
             detail: basis ? `${basis.symbol0}: ${basis.decimals0 ?? "?"}, ${basis.symbol1}: ${basis.decimals1 ?? "?"}` : "—",
             source: "chain",
         },
+        ...structuralChecks(ir, basis, spot),
         ...checks,
     ];
-    const blocking = allChecks.filter((c) => !c.ok && !c.key.startsWith("maker.") && !c.key.startsWith("taker."));
+    const blocking = allChecks.filter((c) => !c.ok && !NON_BLOCKING(c.key));
     const verdict = blocking.length > 0 || rules.length === 0 || !rules.some((r) => r.status === "supported")
         ? "INCOMPATIBLE"
         : rules.every((r) => r.status === "supported")
@@ -68,6 +173,7 @@ export function assessCompatibility(ir, basis, checks = []) {
     return {
         strategyId: ir.id,
         verdict,
+        verdictLabel: VERDICT_LABEL[verdict],
         rules,
         capabilities: Object.keys(CAPABILITY_MODEL).map((name) => ({ name, ...CAPABILITY_MODEL[name] })),
         checks: allChecks,

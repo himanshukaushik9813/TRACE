@@ -199,3 +199,26 @@ test("case study: invalid or unknown ids are a 404, an unfinished run is a 409, 
   assert.deepEqual(s.window, { fromBlock: 100, toBlock: 200, fromTs: 1, toTs: 2 });
   assert.match(s.limitations[0], /^No Uniswap V3 position events/);
 });
+
+test("duplicate submission: a second ship for a plan that already has a live ship is refused with the existing hash", async () => {
+  const authorizationId = await signAuthorization();
+  const existing = `0x${"44".repeat(32)}`;
+  const realQuery = db.query;
+  db.query = async (sql) => (/from transactions where plan_id/.test(sql) ? [{ tx_hash: existing, op: "ship", status: "success" }] : []);
+  try {
+    const r = await post("/transactions", { authorizationId, op: "ship", txHash: `0x${"55".repeat(32)}` });
+    assert.equal(r.status, 409);
+    const body = await r.json();
+    assert.deepEqual(body.existing, [existing]);
+    assert.match(body.error, /not recording a duplicate/);
+  } finally {
+    db.query = realQuery;
+  }
+});
+
+test("plan state and reconcile only read: unknown plans are 404, malformed reconcile input is 400", async () => {
+  assert.equal((await fetch(`${base}/plans/nope/state`)).status, 404);
+  assert.equal((await post("/plans/plan-1/reconcile", { op: "ship", fromBlock: "x", nonce: 1 })).status, 400);
+  assert.equal((await post("/plans/plan-1/reconcile", { op: "swap", fromBlock: 1, nonce: 1 })).status, 400);
+  assert.equal((await post("/plans/nope/reconcile", { op: "ship", fromBlock: 1, nonce: 1 })).status, 404);
+});

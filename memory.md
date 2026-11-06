@@ -371,3 +371,36 @@ All of these were replaced in the 2026-11-06 migration.
     - **Phase 4 is not started** and waits for the user's go-ahead.
     - Still blocked: a standard-mode 0G key, a funded storage wallet, and World ID credentials.
   - Gotcha: `test/api.test.mjs` stubs `db.getInvestigation` in an earlier test, so later tests must reset it.
+- **2026-11-07 (Phase 4: 1inch Aqua execution proof)**
+  - **Pushed and verified live:**
+    - The user pushed b879680, and Render deployed it.
+    - The re-run of 0x4A22 (investigation `1deb2771-aa8d-4ab4-a8fd-aef61dabf0ca`) confirms both Phase 3 fixes live.
+  - **Sepolia facts** (block 12,078,498):
+    - The current production router `0x111111338c…c0de` is **not** on Sepolia.
+    - The current registry `0x1111113c…` is on Sepolia.
+    - TRACE keeps the 07-16 test pair: router `0x016b…` has `AQUA()` = registry `0xe802…`.
+  - **Bug found:**
+    - The compiler encoded concentrate bounds as sqrt(P)·1e9. The SDK wants sqrt(P)·1e18 in base units, so every range was 1e18 too low.
+    - All 5 real ships carry this error (plans 7adbbae6, fedc9f06, 7e0fe9ee, 088fa193, cac98225). They are still active on the registry.
+    - 4 of them registered only WETH.
+    - A live router quote on cac98225 returned a nonsense price, and the reverse quote reverts with `TakerTraitsAmountOutMustBeGreaterThanZero`.
+    - The user should dock all 5. TRACE never docks on its own.
+  - **Fix:**
+    - New `price.ts` with exact BigInt TickMath.
+    - Amounts are sized to the pool's slot0 with the SDK's `computeLiquidityFromAmounts`. The amounts the user enters are maximums.
+    - Both tokens are always registered on ship.
+    - `verifyCompiledPlan` decodes the output back with the SDKs and cross-checks it. A plan that fails is never returned.
+    - `plan.source` records the strategy version and the compiler.
+  - **New checks and routes:**
+    - Compatibility checks: tokens, order, decimals, bounds, conditions, operations, liquidity, capital, router↔registry, production-router info. Each assessment carries a `verdictLabel`.
+    - New `GET /plans/:id/state` returns registry `rawBalances` plus a read-only router quote. It checks that the order hash matches and the price is in range.
+    - The Execute receipt shows the result as "Checked on Sepolia".
+  - **Tests:** 93/93 pass. A new local JSON-RPC test double lives in `test/rpc-stub.mjs`. The fork test was rewritten but **not run** (it needs anvil on the Mac).
+  - **Docs:** `docs/PHASE_4_AQUA_EXECUTION.md`.
+  - **Pending:**
+    - The user pushes, then runs `npm run test:fork`.
+    - The user does a real small USDC/WETH ship with the fixed compiler, then docks the 5 old strategies.
+    - Phase 5 waits for the user.
+  - **Gotchas:**
+    - SwapVM `sqrt(P*1e18)` in the SDK docs means P is already 1e18-scaled. Use `Price.toSqrt` or `sqrt(P)·1e18`.
+    - A router quote needs no KycNFT. Swaps do.

@@ -466,7 +466,8 @@ export function createApi(deps) {
                 { address: ctx.basis.token1, symbol: ctx.basis.symbol1 },
             ])
             : [];
-        const compat = assessCompatibility(ctx.ir, ctx.basis, checks);
+        const spot = ctx.basis?.pool ? await aq.poolSpot(ctx.basis.pool).catch(() => null) : null;
+        const compat = assessCompatibility(ctx.ir, ctx.basis, checks, spot);
         const reportId = await db.insertCompatibility(P(req, "id"), maker ?? null, compat);
         res.json({ reportId, compatibility: compat });
     }));
@@ -486,11 +487,27 @@ export function createApi(deps) {
             { address: ctx.basis.token0, symbol: ctx.basis.symbol0, amount: BigInt(amount0) },
             { address: ctx.basis.token1, symbol: ctx.basis.symbol1, amount: BigInt(amount1) },
         ]);
-        const compat = assessCompatibility(ctx.ir, ctx.basis, checks);
+        // Amounts are sized against the pool's real current price; without it nothing is compiled.
+        const spot = ctx.basis.pool ? await aq.poolSpot(ctx.basis.pool).catch(() => null) : null;
+        const compat = assessCompatibility(ctx.ir, ctx.basis, checks, spot);
         await db.insertCompatibility(P(req, "id"), maker, compat);
+        if (!spot)
+            return res.status(503).json({ error: "could not read the pool's current price from Sepolia; try again", compatibility: compat });
         let plan;
         try {
-            plan = compilePlan({ ir: ctx.ir, compat, basis: ctx.basis, maker, amount0: String(amount0), amount1: String(amount1), registry: AQUA.registry.address, app: AQUA.swapVmRouter.address, chainId: SEPOLIA_CHAIN_ID });
+            plan = compilePlan({
+                ir: ctx.ir,
+                compat,
+                basis: ctx.basis,
+                maker,
+                amount0: String(amount0),
+                amount1: String(amount1),
+                spot,
+                registry: AQUA.registry.address,
+                app: AQUA.swapVmRouter.address,
+                chainId: SEPOLIA_CHAIN_ID,
+                strategyVersionHash: ctx.st.versionHash ?? undefined,
+            });
         }
         catch (err) {
             return res.status(422).json({ error: err.message, compatibility: compat });
@@ -510,6 +527,14 @@ export function createApi(deps) {
         const auths = await db.query(`select id, wallet, action, validated, verification_json as verification, world_status as "worldStatus", expires_at as "expiresAt", created_at as "createdAt"
          from authorizations where plan_id = $1 order by created_at desc limit 10`, [p.id]);
         res.json({ ...p, authorizations: auths, transactions: await db.listTransactions({ planId: p.id }) });
+    }));
+    /** Live on-chain state of a plan's strategy: registry balances + a read-only router quote. Reads only. */
+    app.get("/plans/:id/state", limiter(30, 60_000), h(async (req, res) => {
+        const p = await db.getPlan(P(req, "id")).catch(() => null);
+        if (!p)
+            return bad(res, "plan not found", 404);
+        const state = await aquaClient(cfg.sepoliaRpcUrl).strategyState(p.plan);
+        res.json(json({ planId: p.id, network: "sepolia", ...state }));
     }));
     app.post("/plans/:id/challenge", limiter(30, 60_000), h(async (req, res) => {
         const { wallet, action } = req.body ?? {};

@@ -285,6 +285,7 @@ export type CompatibilityCheck = { key: string; label: string; ok: boolean; deta
 export type Compatibility = {
   strategyId: string;
   verdict: "FULL" | "PARTIAL" | "INCOMPATIBLE";
+  verdictLabel?: string;
   rules: { rule: string; category: string; status: "supported" | "partial" | "unsupported"; gap?: string }[];
   capabilities: { name: string; usable: boolean; note: string }[];
   checks: CompatibilityCheck[];
@@ -308,6 +309,31 @@ export type ExecutionPlan = {
   params: { priceLow: number; priceHigh: number; sqrtPriceMin: string; sqrtPriceMax: string; feeBps: number; salt: string };
   steps: ExecutionStep[];
   notCompiled: string[];
+  source?: { strategyId: string; strategyVersionHash?: string; compiler: string };
+  allocation?: {
+    requested: [string, string];
+    shipped: [string, string];
+    spot: { sqrtPriceX96: string; tick: number; block: number; pool: string; sqrtPrice1e18: string; price: number };
+    position: "in_range" | "below_range" | "above_range" | "full_range";
+    impliedSqrtPrice1e18?: string;
+    note: string;
+  };
+  validation?: { key: string; ok: boolean; detail: string }[];
+};
+
+/** GET /plans/:id/state — read live from Sepolia (registry balances + a read-only router quote). */
+export type StrategyState = {
+  planId: string;
+  network: string;
+  checkedAt: number;
+  block: number;
+  registry: string;
+  app: string;
+  strategyHash: string;
+  tokens: { symbol: string; address: string; planned: string; balance: string; registered: boolean }[];
+  status: "active" | "docked" | "partly_filled" | "not_shipped";
+  quotes: { direction: string; amountIn: string; amountOut: string; orderHashMatches: boolean; price: number | null; insideRange: boolean | null; error?: string }[];
+  checks: { key: string; ok: boolean; detail: string }[];
 };
 
 export type StorageArtifact = { kind: string; rootHash: string; txHash: string; contentHash: string; sizeBytes: number; network: string; retrievable: boolean; createdAt: string };

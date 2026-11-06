@@ -270,6 +270,8 @@ export type CompatibilityCheck = {
 export type CompatibilityAssessment = {
     strategyId: string;
     verdict: "FULL" | "PARTIAL" | "INCOMPATIBLE";
+    /** Plain label: "Fully compatible within supported scope" | "Partially compatible" | "Incompatible". */
+    verdictLabel?: string;
     /** Rule-by-rule: which strategy rules Aqua can express, with gaps. */
     rules: {
         rule: string;
@@ -347,6 +349,38 @@ export type ExecutionPlan = {
     /** Strategy rules that could not be compiled (kept visible, never silently dropped). */
     notCompiled: string[];
     deterministic: true;
+    /** The immutable strategy version this plan was compiled from, and the compiler that did it. */
+    source?: {
+        strategyId: string;
+        strategyVersionHash?: string;
+        compiler: string;
+    };
+    /**
+     * How the shipped amounts were sized: the user's maximums, the real pool spot price
+     * they were sized against (read on-chain), and the amounts actually committed.
+     */
+    allocation?: {
+        requested: [string, string];
+        shipped: [string, string];
+        spot: {
+            sqrtPriceX96: string;
+            tick: number;
+            block: number;
+            pool: string;
+            sqrtPrice1e18: string;
+            price: number;
+        };
+        position: "in_range" | "below_range" | "above_range" | "full_range";
+        /** sqrt(P) the shipped balances imply on-chain (SDK computeLiquidityAndPrice), 1e18 fixed-point. */
+        impliedSqrtPrice1e18?: string;
+        note: string;
+    };
+    /** Checks run on the compiled output (decoded back with the SDKs) before it was accepted. */
+    validation?: {
+        key: string;
+        ok: boolean;
+        detail: string;
+    }[];
 };
 export type BacktestRun = {
     label: string;
