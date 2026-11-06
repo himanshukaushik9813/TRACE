@@ -202,7 +202,7 @@ function IntegrationStatuses() {
 
 function Topbar({ onMenu }: { onMenu: () => void }) {
   const path = usePathname();
-  const title = NAV.find((n) => isActive(n, path))?.label ?? "TRACE";
+  const title = NAV.find((n) => isActive(n, path))?.label ?? (path.startsWith("/case-study") ? "Case study" : "TRACE");
   return (
     <header className="sticky top-0 z-30 bg-ivory/90 backdrop-blur-md border-b border-line">
       <div className="flex items-center gap-3 px-4 md:px-8 h-16">

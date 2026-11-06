@@ -64,9 +64,16 @@ function Timeline({ cs, selected, onSelect }: { cs: CaseStudy; selected: CaseEve
   const [shown, setShown] = useState<Set<V3Kind>>(new Set(KINDS));
   const all = cs.positions.flatMap((p) => p.events);
   const timed = all.filter((e) => e.timestamp > 0);
-  const t0 = cs.window?.fromTs || Math.min(...timed.map((e) => e.timestamp));
-  const t1 = cs.window?.toTs || Math.max(...timed.map((e) => e.timestamp));
+  // Zoom to the activity, not the whole look-back window: a burst of events at the end of a
+  // 90-day window would otherwise collapse into one point. Bars still run to the edges when a
+  // position opened before (or is still open after) the shown span.
+  const first = Math.min(...timed.map((e) => e.timestamp));
+  const last = Math.max(...timed.map((e) => e.timestamp));
+  const padT = Math.max(600, (last - first) * 0.04);
+  const t0 = Math.max(cs.window?.fromTs || first - padT, first - padT);
+  const t1 = Math.min(cs.window?.toTs || last + padT, last + padT);
   const span = Math.max(1, t1 - t0);
+  const zoomed = cs.window ? t0 > cs.window.fromTs + 60 || t1 < cs.window.toTs - 60 : false;
   const x = (ts: number) => `${Math.max(0, Math.min(100, ((ts - t0) / span) * 100))}%`;
   const lanes = [...cs.positions].sort((a, b) => (a.opened?.block ?? 0) - (b.opened?.block ?? 0) || a.tokenId - b.tokenId);
 
@@ -93,6 +100,7 @@ function Timeline({ cs, selected, onSelect }: { cs: CaseStudy; selected: CaseEve
         {lanes.map((p) => {
           const start = p.opened?.timestamp || t0;
           const end = p.closed?.timestamp || (p.status === "closed" ? p.events.at(-1)?.timestamp || t1 : t1);
+          // Active positions run past the right edge of the shown span.
           return (
             <div key={p.tokenId} className="grid grid-cols-[88px_minmax(0,1fr)] sm:grid-cols-[150px_minmax(0,1fr)] items-center gap-2">
               <div className="text-[0.72rem] text-ink-600 leading-tight min-w-0">
@@ -131,6 +139,7 @@ function Timeline({ cs, selected, onSelect }: { cs: CaseStudy; selected: CaseEve
       </div>
       <p className="text-[0.72rem] text-ink-600 mt-3">
         Each dot is a real event, placed by its block time. Bars show when each position was open; a dashed start means it opened before the window. Select a dot to see its evidence.
+        {zoomed && cs.window && ` Zoomed to the activity; the full look-back window is ${fmt.tsSec(cs.window.fromTs, false)} to ${fmt.tsSec(cs.window.toTs, false)}.`}
       </p>
       <EventDetail e={selected} cs={cs} />
     </Card>
@@ -247,7 +256,7 @@ function Observation({ o, cs }: { o: CaseObservation; cs: CaseStudy }) {
           <tbody>
             {rows.map((e) => (
               <tr key={`${e.tx}-${e.logIndex}`} className="border-t border-line">
-                <td className="py-1.5 pr-3"><span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: KIND[e.kind].color }} aria-hidden />{e.kind} <span className="text-ink-600">#{e.logIndex}</span></span></td>
+                <td className="py-1.5 pr-3"><span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: KIND[e.kind].color }} aria-hidden />{e.kind} <span className="text-ink-600">log {e.logIndex}</span></span></td>
                 <td className="py-1.5 pr-3 tabular">#{e.tokenId}</td>
                 <td className="py-1.5 pr-3"><ExplorerLink kind="block" value={e.block}>{e.block.toLocaleString("en-US")}</ExplorerLink></td>
                 <td className="py-1.5 pr-3 tabular">{when(e.timestamp)}</td>
