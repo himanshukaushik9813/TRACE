@@ -277,7 +277,7 @@ All of these were replaced in the 2026-11-06 migration.
 
 - **2026-11-06 (first REAL Aqua execution + refresh starts fresh)** — The user ran the full flow from MetaMask `0x658355B1…d2De` on investigation `94b71fa1…` (wallet `0xae1D…31Cf`): plan `7adbbae6…`, server-validated EIP-712 authorization, approve `0x04b632a8…` and **ship `0x48350bf84602ae70e3193a80de39359debf8395a6e973e47b4a1dbdf4fa0ae37` both `success` on Sepolia**. So Aqua ship and EIP-712 auth are now proven with real MetaMask on Sepolia. The integration labels are still static (`IMPLEMENTED BUT NOT VERIFIED`); update them in `server/src/integrations.ts` if wanted. User then reported "on refresh the steps get executed automatically". Nothing re-executed (exactly 1 approve + 1 ship in the DB); the page *restored* the investigation from `?inv=` / localStorage and redrew the server's 4-of-4 state. The user wants a refresh to start from the beginning. Fix: `useCurrentInvestigationId({ resetOnReload: true })` (used only by the Investigate page, `src/app/page.tsx`): when the document was loaded by a browser reload (`PerformanceNavigationTiming.type === "reload"`, consumed once per document so later sidebar navigation back to Investigate still shows the current case), it drops `?inv=` and `trace:lastInvestigation`, so the page opens empty (0 of 4). Exception: a pending `trace:send-intent:*` (refresh while MetaMask was sending) keeps the investigation open so the send is reconciled, never repeated. Opening an investigation by link, Recent investigations or the sidebar still shows its saved progress. E2E #5 now uses `goto` instead of `reload`; E2E #6 ends with reload → no `?inv=`, 0 of 4, nothing re-sent. Verified: frontend typecheck ✓, lint ✓, unit 45/45, E2E 6/6, rebuilt + restarted :3000, and against the real shipped investigation: link → 4 of 4, refresh → `/` with 0 of 4. Not committed.
 
-- **2026-11-06 (audit + beginner redesign, in progress: phases 1–7 of 8 committed)** — Working the pasted "Complete Feature Audit, Testing & Beginner-Friendly UI Redesign" brief. The plan is at `~/.claude/plans/pasted-content-id-68fd-trace-quiet-backus.md`. User decisions: real three.js 3D, What If backtest + version compare, phased commits on main with no Claude trailer.
+- **2026-11-06 (audit + beginner redesign, complete: all 8 phases committed, not pushed)** — Working the pasted "Complete Feature Audit, Testing & Beginner-Friendly UI Redesign" brief. The plan is at `~/.claude/plans/pasted-content-id-68fd-trace-quiet-backus.md`. User decisions: real three.js 3D, What If backtest + version compare, phased commits on main with no Claude trailer.
   - b32ef5f Phase 1: `docs/AUDIT.md` and backend fixes B1–B10.
   - e245b98 Phase 2: glossary + `<Term>`, Disclosure, NextStep, 7-item nav, beginner Investigate.
   - 67644d7 Phase 3: `/positions` has a 3D liquidity terrain (`src/components/liquidity-terrain.tsx` + `liquidity-view.tsx`; r3f 8 / drei 9 / three 0.169; WebGL fallback to the 2D RangeBand; wheel-zoom and touch-rotate off so the page still scrolls); plain position cards; `/positions/[id]` technical details collapsed.
@@ -293,4 +293,12 @@ All of these were replaced in the 2026-11-06 migration.
   - Gotchas:
     - `api()` JSON-stringifies `body` itself, so never pass a pre-stringified body.
     - jsonb reorders keys, so compare stored JSON deep-equal.
-  - Next: Phase 8. Run the full suites (unit, live, fork, Playwright plus a 390px mobile project), take screenshots of every page at 1440/390 into `docs/screenshots/`, then finish `docs/AUDIT.md`.
+  - 23b3001 Phase 8 (QA):
+    - `playwright.config.ts` now has a "desktop" (1440) and a "mobile" (390 touch, runs `e2e/ux.spec.ts` only) project. 15/15 pass. Other suites: unit 56/56, live 4/4, fork 1/1.
+    - Fixed B12: a `<Term>` tap never showed its tooltip, because the emulated mouseenter opened it and the click toggled it shut.
+    - Fixed B13: terrain edge labels ran off the canvas at 390.
+    - Screenshots of every page at 1440/390 are in `docs/screenshots/`.
+    - `docs/AUDIT.md` is final, with sections 1–11.
+  - Not pushed yet. When the user asks, push with `git push https://github.com/himanshukaushik9813/TRACE.git main`.
+  - Screenshot gotcha: the app scrolls inside `<main>` in a `h-[100dvh] overflow-hidden` shell. To get full-page shots, inject CSS that unclips both; see `docs/AUDIT.md` §9.
+  - Pre-existing `npm audit`: `next` is critical and needs Next 16, a major upgrade; left alone deliberately.
