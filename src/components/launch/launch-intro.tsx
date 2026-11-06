@@ -16,7 +16,7 @@
 import dynamic from "next/dynamic";
 import { Component, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { BrandMark } from "@/components/brand-mark";
-import { INTRO_REPLAY_EVENT, lowPowerDevice, markIntroSeen, markIntroSession, prefersReducedMotion, readIntroMode, webglUsable, type IntroMode } from "@/lib/intro";
+import { INTRO_REPLAY_EVENT, lowPowerDevice, markIntroSeen, prefersReducedMotion, readIntroMode, webglUsable, type IntroMode } from "@/lib/intro";
 import { PARTNERS, type PartnerLogos } from "@/lib/partners";
 import type { SceneQuality } from "./trace-launch-scene";
 import { T, flagsAt, frozenAt, type Anchor } from "./timeline";
@@ -52,7 +52,20 @@ class SceneBoundary extends Component<{ onError: () => void; children: ReactNode
   }
 }
 
+/**
+ * The launch intro is decided once per page load (a fresh visit, a reload or a
+ * restart of the site). Module state survives React re-renders and remounts and
+ * resets only when the document itself is reloaded, so client-side navigation
+ * between screens can never replay it. Only "Replay intro" plays it again.
+ */
+let launchConsumed = false;
+let launchMode: IntroMode = "none";
+
 export function LaunchIntro({ logos }: { logos: PartnerLogos }) {
+  // Server-rendered props arrive as a new object on every navigation: keep them in
+  // a ref so they never change the identity of play() and re-run the launch effect.
+  const logosRef = useRef(logos);
+  logosRef.current = logos;
   const [mode, setMode] = useState<IntroMode>("none");
   const [variant, setVariant] = useState<Variant>("short");
   const [quality, setQuality] = useState<SceneQuality>("high");
@@ -132,7 +145,6 @@ export function LaunchIntro({ logos }: { logos: PartnerLogos }) {
         setPhase("gone");
         return;
       }
-      markIntroSession();
       const reduce = prefersReducedMotion();
       setCalm(reduce);
       let v: Variant = "short";
@@ -150,7 +162,7 @@ export function LaunchIntro({ logos }: { logos: PartnerLogos }) {
         for (const p of PARTNERS) {
           const img = new Image();
           img.referrerPolicy = "no-referrer";
-          img.src = logos[p.key] ?? p.logo.src;
+          img.src = logosRef.current[p.key] ?? p.logo.src;
         }
       }
       if (v === "webgl") {
@@ -166,13 +178,26 @@ export function LaunchIntro({ logos }: { logos: PartnerLogos }) {
       }
       if (at == null) after(HARD_LIMIT_MS / 1000, () => finish(true));
     },
-    [begin, finish, logos],
+    [begin, finish],
   );
 
+  const playRef = useRef(play);
+  playRef.current = play;
+  const ownsLaunch = useRef(false); // this instance played the launch intro
+
+  // Mount only (empty deps): nothing a navigation changes can re-run this.
   useIsoLayoutEffect(() => {
-    play(readIntroMode());
+    if (!launchConsumed) {
+      launchConsumed = true;
+      ownsLaunch.current = true;
+      launchMode = readIntroMode();
+    }
+    // StrictMode's dev-only remount of the same instance restarts the same launch
+    // cleanly (its timers were cleared); any other later mount shows nothing.
+    if (ownsLaunch.current) playRef.current(launchMode);
+    else setDecided(true);
     return clearTimers;
-  }, [play]);
+  }, []);
 
   useEffect(() => {
     const onReplay = () => play("full");

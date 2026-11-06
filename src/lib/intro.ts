@@ -2,20 +2,20 @@
  * Launch intro state. Lives in this browser only; nothing is sent anywhere.
  *
  *   localStorage   "trace:intro:v1"      set once the full intro has played or been skipped
- *   sessionStorage "trace:intro:session" set once a launch transition has played this session
  *
- * Modes, decided before first paint by INTRO_BOOT_SCRIPT (so there is no flash of
- * the dashboard before the cover, and no layout shift):
+ * The intro plays only when the site is launched: opened, reloaded or restarted.
+ * It is decided once per page load, before first paint, by INTRO_BOOT_SCRIPT (so
+ * there is no flash of the dashboard before the cover, and no layout shift), and
+ * never again while moving between screens (client-side navigation keeps the page):
  *   full  — first visit on the landing route: the complete 3D intro (Skip available)
- *   short — later visits, or a first visit through a deep link: a ~1 s brand transition
- *   none  — already shown this session, or the intro query asks for none
+ *   short — every later launch, or a first visit through a deep link: a ~1 s brand transition
+ *   none  — only when the intro query asks for none
  *
  * QA switches (query string, for testing): ?intro=full | short | none,
  * ?introFallback=css (skip WebGL), ?introMotion=reduce (simulate reduced motion).
  */
 
 export const INTRO_SEEN_KEY = "trace:intro:v1";
-export const INTRO_SESSION_KEY = "trace:intro:session";
 export const INTRO_REPLAY_EVENT = "trace:intro:replay";
 
 export type IntroMode = "full" | "short" | "none";
@@ -24,8 +24,8 @@ export type IntroMode = "full" | "short" | "none";
 export const INTRO_BOOT_SCRIPT = `(function(){try{
 var d=document.documentElement,q=new URLSearchParams(location.search),f=q.get("intro"),m;
 if(f==="full"||f==="short"||f==="none"){m=f;}
-else{var seen=localStorage.getItem("${INTRO_SEEN_KEY}"),ses=sessionStorage.getItem("${INTRO_SESSION_KEY}");
-m=ses?"none":(!seen&&location.pathname==="/")?"full":"short";}
+else{var seen=localStorage.getItem("${INTRO_SEEN_KEY}");
+m=(!seen&&location.pathname==="/")?"full":"short";}
 d.setAttribute("data-intro",m);
 }catch(e){}})();`;
 
@@ -40,14 +40,6 @@ export function markIntroSeen() {
     window.localStorage.setItem(INTRO_SEEN_KEY, JSON.stringify({ seen: true, at: Date.now() }));
   } catch {
     /* storage unavailable: the intro may show again next visit, never blocks */
-  }
-}
-
-export function markIntroSession() {
-  try {
-    window.sessionStorage.setItem(INTRO_SESSION_KEY, "1");
-  } catch {
-    /* ignore */
   }
 }
 
