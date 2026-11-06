@@ -20,6 +20,7 @@ import { FAMILY } from "@/components/case-file";
 import { LineChart, sig } from "@/components/charts";
 import { TokenPair, rangeLabel } from "@/components/positions";
 import { useSepoliaWallet } from "@/components/wallet";
+import { Term } from "@/components/term";
 import { snapshot, type AquaExecution, type ExecSnapshot } from "@/lib/aqua-flow";
 import { fmt } from "@/lib/format";
 import { api, useIntegrations, withInv, type FullInvestigation, type Investigation, type TxRow, type V3Position } from "@/lib/api";
@@ -93,6 +94,29 @@ const STATE_LABEL: Record<StageState, string> = {
   cancelled: "Cancelled",
 };
 
+/** The four stages in beginner language (exact wording from the product brief). */
+export const STAGE_TEXT = {
+  analyze: "Discover real wallet activity and liquidity positions.",
+  understand: "Identify the wallet's possible strategy using AI.",
+  verify: "Review the strategy and authorize the action.",
+  execute: "Run supported strategy rules through 1inch Aqua.",
+} as const;
+
+/** Pipeline statuses in plain words (the server's stage text is technical). */
+const PLAIN_PROGRESS: Record<string, string> = {
+  queued: "Waiting for a free worker",
+  fetching: "Reading the wallet's history from the Sepolia blockchain",
+  reconstructing: "Rebuilding each liquidity position from its transactions",
+};
+
+/** What happens after each stage, for the "Next" line under the strip. */
+const NEXT_TEXT = [
+  "TRACE identifies the wallet's possible strategy from what it found.",
+  "You review the strategy and its backtest, then authorize it with a free wallet signature.",
+  "You confirm the transactions in your wallet to run the supported rules on 1inch Aqua.",
+  "Nothing further: the strategy is live on 1inch Aqua (Sepolia).",
+];
+
 const VERIFY_BUSY = { check: "Checking Aqua compatibility live", compile: "Compiling and simulating the plan", challenge: "Preparing the authorization", wallet: "Confirm the signature in MetaMask", server: "The server is verifying your signature" } as const;
 
 function stagesFor(inv: Investigation | undefined, full: FullInvestigation | null | undefined, exec: AquaExecution | null, aquaBlocked: boolean): Stage[] {
@@ -104,14 +128,14 @@ function stagesFor(inv: Investigation | undefined, full: FullInvestigation | nul
   const analyze: Pick<Stage, "state" | "status"> = !inv
     ? { state: "waiting", status: "Waiting for a wallet" }
     : idx >= 0 && idx <= 2
-      ? { state: "active", status: inv.progress.stage ?? "Reading Sepolia" }
+      ? { state: "active", status: PLAIN_PROGRESS[inv.status] ?? "Reading the wallet's history on Sepolia" }
       : st === "no_positions"
         ? { state: "done", status: "No V3 positions found" }
         : st === "cancelled" && !inv.summary
           ? { state: "cancelled", status: inv.error ?? "Cancelled" }
           : st === "failed" && !inv.summary
             ? { state: "blocked", status: err || "Stopped" }
-            : { state: "done", status: c ? `${fmt.count(c.events, "event")} read` : "Complete" };
+            : { state: "done", status: c ? `Found ${fmt.count(c.positions, "position")} from ${fmt.count(c.events, "on-chain event")}` : "Complete" };
 
   const primary = full?.strategies.find((s) => s.id === full.primaryStrategyId);
   const understand: Pick<Stage, "state" | "status"> =
@@ -120,20 +144,20 @@ function stagesFor(inv: Investigation | undefined, full: FullInvestigation | nul
       : st === "cancelled"
         ? { state: "cancelled", status: "Not run: investigation cancelled" }
         : st === "inferring"
-          ? { state: "active", status: "Inferring the strategy" }
+          ? { state: "active", status: "Looking for a pattern in how the wallet manages its positions" }
           : st === "failed"
             ? inv.summary
               ? { state: "blocked", status: err || "Stopped" }
               : { state: "waiting", status: "Not reached" }
             : st !== "done"
-              ? { state: "active", status: st === "backtesting" ? "Backtesting on real swaps" : "Archiving the analysis" }
+              ? { state: "active", status: st === "backtesting" ? "Testing the strategy on real past trading" : "Saving the analysis" }
               : !full
                 ? { state: "active", status: "Loading the analysis" }
                 : !primary
                   ? { state: "blocked", status: "No strategy was stored" }
                   : primary.family === "inconclusive"
                     ? { state: "warn", status: "Too little evidence to act on" }
-                    : { state: "done", status: FAMILY[primary.family] ?? primary.family };
+                    : { state: "done", status: `${FAMILY[primary.family] ?? primary.family}${primary.role === "ai_hypothesis" ? " (AI, checked against the evidence)" : " (from the evidence; the AI service is unavailable)"}` };
 
   const snap: ExecSnapshot = exec?.snap ?? snapshot(full);
   const compat = full?.compatibility?.report;
@@ -186,10 +210,10 @@ function stagesFor(inv: Investigation | undefined, full: FullInvestigation | nul
                       : { state: "waiting", status: "After verification" };
 
   return [
-    { title: "Analyze", subtitle: "Read on-chain data", icon: Search, ...analyze },
-    { title: "Understand", subtitle: "AI strategy analysis", icon: Sparkles, ...understand },
-    { title: "Verify", subtitle: "Human authorization", icon: ShieldCheck, ...verify },
-    { title: "Execute", subtitle: "Via 1inch Aqua", icon: Zap, ...execute },
+    { title: "Analyze", subtitle: STAGE_TEXT.analyze, icon: Search, ...analyze },
+    { title: "Understand", subtitle: STAGE_TEXT.understand, icon: Sparkles, ...understand },
+    { title: "Verify", subtitle: STAGE_TEXT.verify, icon: ShieldCheck, ...verify },
+    { title: "Execute", subtitle: STAGE_TEXT.execute, icon: Zap, ...execute },
   ];
 }
 
@@ -253,7 +277,7 @@ export function Workflow({ inv, full, exec }: { inv: Investigation | undefined; 
   return (
     <div>
       <ol
-        className={`relative grid grid-cols-2 lg:grid-cols-4 rounded-card border bg-ivory-50 shadow-lift overflow-hidden transition-colors duration-700 ${allDone ? "all-done border-forest/40" : "border-line"}`}
+        className={`relative grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 rounded-card border bg-ivory-50 shadow-lift overflow-hidden transition-colors duration-700 ${allDone ? "all-done border-forest/40" : "border-line"}`}
         aria-label={`Investigation workflow, ${completed} of ${list.length} steps complete`}
       >
         {list.map((s, i) => {
@@ -262,15 +286,16 @@ export function Workflow({ inv, full, exec }: { inv: Investigation | undefined; 
             <li
               key={s.title}
               aria-current={s.state === "active" ? "step" : undefined}
-              className={`relative flex items-start gap-3 px-4 md:px-6 py-4 min-w-0 ${i % 2 === 1 ? "border-l border-line" : ""} ${i >= 2 ? "border-t lg:border-t-0 border-line" : ""} ${i === 2 ? "lg:border-l" : ""}`}
+              className={`relative flex items-start gap-3 px-4 md:px-6 py-4 min-w-0 border-line ${STEP_BORDERS[i]}`}
             >
               <StepBadge icon={s.icon} done={painted && done} dim={s.state === "waiting"} delay={i * 140} />
               <div className="min-w-0">
-                <div className="text-[0.95rem] font-semibold text-ink">
+                <div className="text-[0.74rem] font-semibold tracking-[0.14em] uppercase text-ink">
+                  <span className="text-gold tabular mr-1.5">{i + 1}</span>
                   {s.title}
                   <span className="sr-only">{done ? ", complete" : s.state === "active" ? ", in progress" : ""}</span>
                 </div>
-                <div className="text-[0.78rem] text-ink-600">{s.subtitle}</div>
+                <div className="text-[0.8rem] text-ink-600 leading-snug mt-0.5">{s.subtitle}</div>
                 <div className={`mt-1.5 flex items-start gap-1.5 text-[0.74rem] ${STATE_TEXT[s.state]}`}>
                   <span className={`h-1.5 w-1.5 rounded-full shrink-0 mt-[0.4rem] ${STATE_DOT[s.state]}`} />
                   <span className="min-w-0">
@@ -292,6 +317,10 @@ export function Workflow({ inv, full, exec }: { inv: Investigation | undefined; 
         />
       </ol>
 
+      {!allDone && inv && (
+        <WorkflowNow stage={list[lead]} index={lead} />
+      )}
+
       {allDone && (
         <div role="status" className="complete-in mt-3 flex flex-wrap items-center gap-3 rounded-card border border-forest/30 bg-forest/[0.06] px-4 py-3">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-forest text-white">
@@ -309,6 +338,32 @@ export function Workflow({ inv, full, exec }: { inv: Investigation | undefined; 
             </a>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/** Cell borders for 1 column (phone), 2 columns (tablet) and 4 columns (desktop). */
+const STEP_BORDERS = ["", "border-t sm:border-t-0 sm:border-l", "border-t lg:border-t-0 lg:border-l", "border-t sm:border-l lg:border-t-0"];
+
+/** Under the strip: the current stage in a sentence, what comes next, and whether the user must act. */
+function WorkflowNow({ stage, index }: { stage: Stage; index: number }) {
+  const needsYou = stage.state === "awaiting";
+  const stuck = stage.state === "blocked" || stage.state === "unavailable" || stage.state === "warn" || stage.state === "cancelled";
+  return (
+    <div role="status" aria-live="polite" className="mt-3 grid sm:grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 rounded-card border border-line bg-ivory-50 px-4 py-3 text-[0.8rem]">
+      <div className="font-semibold text-ink whitespace-nowrap">
+        Now: <span className="uppercase tracking-[0.12em] text-[0.72rem]">{stage.title}</span>
+      </div>
+      <div className="text-ink-600 min-w-0 break-words">
+        {stage.status}.
+        {needsYou && <span className="ml-1.5 inline-flex items-center rounded-full bg-amber/15 text-[#8A6528] px-2 py-0.5 text-[0.7rem] font-semibold">Your action is needed</span>}
+      </div>
+      {!stuck && (
+        <>
+          <div className="font-semibold text-ink whitespace-nowrap">Next:</div>
+          <div className="text-ink-600 min-w-0">{NEXT_TEXT[index]}</div>
+        </>
       )}
     </div>
   );
@@ -342,7 +397,7 @@ export function WalletOverview({ full, invId }: { full: FullInvestigation; invId
 
       <dl className="mt-5 grid grid-cols-3 border-t border-line pt-4">
         <div className="min-w-0 pr-3">
-          <dt className="text-[0.78rem] text-ink-600">Positions</dt>
+          <dt className="text-[0.78rem] text-ink-600"><Term k="lpPosition">Positions</Term></dt>
           <dd className="text-[1.25rem] sm:text-[1.5rem] font-semibold text-ink tabular leading-tight mt-0.5">{c?.positions ?? "—"}</dd>
         </div>
         <div className="min-w-0 px-3 border-l border-line">
@@ -352,8 +407,8 @@ export function WalletOverview({ full, invId }: { full: FullInvestigation; invId
         <div className="min-w-0 pl-3 border-l border-line">
           {observed ? (
             <>
-              <dt className="text-[0.78rem] text-ink-600" title="Replay of this wallet's own ranges on the pool's real swaps, valued in the backtest's quote token">
-                Observed return
+              <dt className="text-[0.78rem] text-ink-600">
+                <Term k="observed">Observed</Term> return
               </dt>
               <dd className={`text-[1.25rem] sm:text-[1.5rem] font-semibold tabular leading-tight mt-0.5 ${observed.net >= 0 ? "text-forest" : "text-brick"}`}>{fmt.pct(observed.net * 100)}</dd>
             </>
@@ -368,15 +423,15 @@ export function WalletOverview({ full, invId }: { full: FullInvestigation; invId
 
       <Link href={withInv("/strategy", invId)} className="group mt-4 flex items-center justify-between gap-3 rounded-md2 bg-ivory px-3.5 py-3 hover:bg-ivory-100">
         <div className="min-w-0">
-          <div className="text-[0.74rem] text-ink-600">Identified strategy</div>
+          <div className="text-[0.74rem] text-ink-600">Possible <Term k="strategy">strategy</Term></div>
           <div className="text-[0.92rem] font-medium text-ink break-anywhere">{primary ? FAMILY[primary.family] ?? primary.family : "Not inferred"}</div>
           {primary && (
             <div className="text-[0.72rem] text-ink-600 mt-0.5">
-              {fmt.frac(Number(primary.confidence), 0)} fit to evidence, {primary.role === "ai_hypothesis" ? "0G hypothesis checked against evidence" : "evidence only"}
+              {fmt.frac(Number(primary.confidence), 0)} <Term k="confidence">confidence</Term> · {primary.role === "ai_hypothesis" ? "AI hypothesis checked against the evidence" : "from the on-chain evidence"}
             </div>
           )}
         </div>
-        <ChevronRight size={16} className="text-ink-600 group-hover:text-gold shrink-0" aria-label="Open Strategy DNA" />
+        <ChevronRight size={16} className="text-ink-600 group-hover:text-gold shrink-0" aria-label="Open Strategy" />
       </Link>
 
       <div className="mt-3 text-[0.72rem] text-ink-600 tabular">
@@ -390,7 +445,7 @@ export function WalletOverview({ full, invId }: { full: FullInvestigation; invId
 /*  3b. Uniswap V3 position                                            */
 /* ------------------------------------------------------------------ */
 
-function Row({ k, children }: { k: string; children: React.ReactNode }) {
+function Row({ k, children }: { k: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-3 py-2 border-t border-line first:border-t-0 items-baseline">
       <dt className="text-[0.82rem] text-ink-600">{k}</dt>
@@ -405,7 +460,7 @@ export function PositionPanel({ full, invId }: { full: FullInvestigation; invId:
   if (!p)
     return (
       <Panel>
-        <h2 className="font-sans text-[1.05rem] font-semibold text-ink">Uniswap V3 position</h2>
+        <h2 className="font-sans text-[1.05rem] font-semibold text-ink">Main position</h2>
         <div className="mt-2">
           <Quiet>No positions were reconstructed in this window.</Quiet>
         </div>
@@ -418,7 +473,7 @@ export function PositionPanel({ full, invId }: { full: FullInvestigation; invId:
   return (
     <Panel>
       <div className="flex items-center justify-between gap-3">
-        <h2 className="font-sans text-[1.05rem] font-semibold text-ink">Uniswap V3 position</h2>
+        <h2 className="font-sans text-[1.05rem] font-semibold text-ink">Main <Term k="lpPosition">position</Term></h2>
         <Chip tone={p.status === "active" ? "good" : "neutral"}>{p.status === "active" ? "Active" : "Closed"}</Chip>
       </div>
 
@@ -438,28 +493,25 @@ export function PositionPanel({ full, invId }: { full: FullInvestigation; invId:
       </div>
 
       <dl className="mt-3">
-        <Row k="Liquidity">{fmt.big(p.liquidity)}</Row>
         {acct && (
-          <Row k="Deposited">
+          <Row k={<Term k="deposited">Deposited</Term>}>
             {fmt.amt(acct.deposited.token0)} {p.token0} and {fmt.amt(acct.deposited.token1)} {p.token1}
           </Row>
         )}
-        <Row k="Range">
-          {rangeLabel(p)}
-          {!isFullRange(p) && (
-            <span className="block text-[0.72rem] text-ink-600">
-              ticks {p.tickLower.toLocaleString("en-US")} to {p.tickUpper.toLocaleString("en-US")}
-            </span>
-          )}
-        </Row>
-        <Row k="Last swap price">
+        <Row k={<Term k="priceRange">Price range</Term>}>{rangeLabel(p)}</Row>
+        {acct && (acct.feesCollected.token0 > 0 || acct.feesCollected.token1 > 0) && (
+          <Row k={<Term k="feesCollected">Fees collected</Term>}>
+            {fmt.amt(acct.feesCollected.token0)} {p.token0} and {fmt.amt(acct.feesCollected.token1)} {p.token1}
+          </Row>
+        )}
+        <Row k="Current price">
           {swap ? (
             <span className="flex flex-wrap items-center justify-between gap-2">
               <span>
-                {fmt.price(swap.price)} {p.token1}/{p.token0}
-                <span className="block text-[0.72rem] text-ink-600">block {swap.block.toLocaleString("en-US")}</span>
+                {fmt.price(swap.price)} {p.token1} per {p.token0}
+                <span className="block text-[0.72rem] text-ink-600">last real swap, block {swap.block.toLocaleString("en-US")}</span>
               </span>
-              {inRange != null && <Chip tone={inRange ? "good" : "warn"}>{inRange ? "In range" : "Out of range"}</Chip>}
+              {inRange != null && <Chip tone={inRange ? "good" : "warn"}>{inRange ? <Term k="inRange">In range</Term> : "Out of range, not earning fees"}</Chip>}
             </span>
           ) : (
             <span className="text-ink-600">No swaps read for this pool in the window</span>
@@ -469,7 +521,7 @@ export function PositionPanel({ full, invId }: { full: FullInvestigation; invId:
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3 text-[0.78rem]">
         <Link href={withInv(`/positions/${p.tokenId}`, invId)} className="inline-flex items-center gap-1 text-[#8A6528] font-medium hover:text-gold">
-          Position evidence <ChevronRight size={14} />
+          View details <ChevronRight size={14} />
         </Link>
         {total > 1 && (
           <Link href={withInv("/positions", invId)} className="text-ink-600 hover:text-ink">
@@ -493,7 +545,7 @@ export function PerformancePanel({ full }: { full: FullInvestigation }) {
   if (!bt || bt.status !== "completed") {
     return (
       <Panel>
-        <h2 className="font-sans text-[1.05rem] font-semibold text-ink">Position performance</h2>
+        <h2 className="font-sans text-[1.05rem] font-semibold text-ink">Performance</h2>
         <div className="mt-3">
           <Quiet>
             {bt?.status === "insufficient_data"
@@ -518,7 +570,7 @@ export function PerformancePanel({ full }: { full: FullInvestigation }) {
     <Panel>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="font-sans text-[1.05rem] font-semibold text-ink">Position performance</h2>
+          <h2 className="font-sans text-[1.05rem] font-semibold text-ink">Performance</h2>
           <div className="text-[0.76rem] text-ink-600 mt-0.5">
             {bt.pair}, {shortDate(bt.period.fromTs)} to {shortDate(bt.period.toTs)}
           </div>
@@ -526,7 +578,7 @@ export function PerformancePanel({ full }: { full: FullInvestigation }) {
         {run && (
           <div className="text-right">
             <div className={`text-[1.7rem] font-semibold tabular leading-none ${run.net >= 0 ? "text-forest" : "text-brick"}`}>{fmt.pct(run.net * 100)}</div>
-            {hold && <div className="text-[0.76rem] text-ink-600 mt-1 tabular">vs {fmt.pct(hold.net * 100)} buy &amp; hold</div>}
+            {hold && <div className="text-[0.76rem] text-ink-600 mt-1 tabular">vs {fmt.pct(hold.net * 100)} <Term k="buyHold">buy and hold</Term></div>}
           </div>
         )}
       </div>
@@ -549,6 +601,12 @@ export function PerformancePanel({ full }: { full: FullInvestigation }) {
         </div>
       )}
 
+      <p className="mt-3 text-[0.78rem] text-ink-600 leading-relaxed">
+        {run?.kind === "observed" ? "The wallet's real ranges, replayed on the pool's real trades" : "A simulation of the inferred strategy on the pool's real trades"}, compared with simply holding the tokens.{" "}
+        <Link href={withInv("/backtest", full.investigation.id)} className="text-[#8A6528] font-medium hover:text-gold whitespace-nowrap">
+          Full backtest →
+        </Link>
+      </p>
       <details className="mt-3 border-t border-line pt-3 group">
         <summary className="flex items-center gap-1 text-[0.78rem] text-ink-600 hover:text-ink">
           <ChevronRight size={14} className="transition-transform group-open:rotate-90" /> Source and assumptions
@@ -829,7 +887,7 @@ export function BestExecution({ full, invId, exec }: { full: FullInvestigation |
     action = "No position to take a range from.";
     reason = "No reconstructed position.";
   } else {
-    action = `Run this wallet's ${(FAMILY[primary!.family] ?? primary!.family).toLowerCase()} range as a 1inch Aqua order, signed from your own wallet.`;
+    action = `Recreate this wallet's ${(FAMILY[primary!.family] ?? primary!.family).toLowerCase()} strategy on 1inch Aqua, from your own wallet. You approve every step; nothing runs automatically.`;
   }
 
   const verdict = compat?.verdict;
@@ -851,7 +909,7 @@ export function BestExecution({ full, invId, exec }: { full: FullInvestigation |
         <>
           <dl className="mt-4 grid sm:grid-cols-2 gap-3">
             <div className="rounded-md2 bg-ivory px-3.5 py-3 min-w-0">
-              <dt className="text-[0.74rem] text-ink-600">Wallet&apos;s current range</dt>
+              <dt className="text-[0.74rem] text-ink-600">Wallet&apos;s current <Term k="priceRange">price range</Term></dt>
               <dd className="text-[0.9rem] font-medium text-ink tabular mt-0.5 break-anywhere">{rangeLabel(p)}</dd>
               <dd className="text-[0.7rem] text-ink-600 mt-0.5">Position #{p.tokenId}</dd>
             </div>
@@ -866,8 +924,8 @@ export function BestExecution({ full, invId, exec }: { full: FullInvestigation |
       )}
 
       <div className="mt-5 flex flex-wrap items-center gap-2">
-        {verdict === "FULL" && <Chip tone="good">Compatible with Aqua</Chip>}
-        {verdict === "PARTIAL" && <Chip tone="warn">Partially compatible: {supported} of {compat!.rules.length} rules compile</Chip>}
+        {verdict === "FULL" && <Chip tone="good"><Term k="aquaCompatibility">Compatible with Aqua</Term></Chip>}
+        {verdict === "PARTIAL" && <Chip tone="warn"><Term k="aquaCompatibility">Partly compatible</Term>: {supported} of {compat!.rules.length} rules can run on Aqua</Chip>}
         {verdict === "INCOMPATIBLE" && <Chip tone="bad">Not compatible</Chip>}
         {full && !compat && !reason && <Chip tone="neutral">Compatibility is checked when you execute</Chip>}
         {ship && (

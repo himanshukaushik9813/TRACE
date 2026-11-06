@@ -3,23 +3,29 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { Search, Boxes, BrainCircuit, FlaskConical, Terminal, FileText, Activity, Bookmark, Menu, X, ExternalLink, Zap, Cpu, Database, ScanFace } from "lucide-react";
+import { Search, Boxes, BrainCircuit, FlaskConical, Terminal, FileText, Activity, Menu, X, ExternalLink, Zap, Cpu, Database, ScanFace } from "lucide-react";
 import { SEPOLIA_CHAIN_ID, explorer } from "@trace/chain-config";
 import { art } from "@/lib/assets";
 import { useIntegrations, withInv, type IntegrationStatus } from "@/lib/api";
 import { starPath } from "@/components/engine-mark";
 import { WalletButton, NetworkBanner } from "@/components/wallet";
+import { plainStatus } from "@/lib/status";
 
+/**
+ * Seven destinations, in the order a first investigation flows through them.
+ * Strategy versions live inside Strategy (a tab); /saved redirects there.
+ */
 const NAV = [
-  { href: "/", label: "Investigate", icon: Search },
-  { href: "/positions", label: "Positions", icon: Boxes },
-  { href: "/strategy", label: "Strategy DNA", icon: BrainCircuit },
-  { href: "/backtest", label: "Backtest", icon: FlaskConical },
-  { href: "/execute", label: "Execute · Aqua", icon: Terminal },
-  { href: "/reports", label: "Reports", icon: FileText },
-  { href: "/activity", label: "Activity", icon: Activity },
-  { href: "/saved", label: "Strategy Versions", icon: Bookmark },
+  { href: "/", label: "Investigate", icon: Search, hint: "Start here: enter a wallet address" },
+  { href: "/positions", label: "Positions", icon: Boxes, hint: "The wallet's liquidity positions" },
+  { href: "/strategy", label: "Strategy", icon: BrainCircuit, hint: "What the wallet appears to be doing", also: ["/saved"] },
+  { href: "/backtest", label: "Backtest", icon: FlaskConical, hint: "How it performed on real past trading" },
+  { href: "/execute", label: "Execute", icon: Terminal, hint: "Recreate it on 1inch Aqua from your wallet" },
+  { href: "/reports", label: "Reports", icon: FileText, hint: "Summary, integrations and downloads" },
+  { href: "/activity", label: "Activity", icon: Activity, hint: "Investigations and transactions" },
 ];
+const isActive = (item: (typeof NAV)[number], path: string) =>
+  item.href === "/" ? path === "/" : path.startsWith(item.href) || (item.also ?? []).some((a) => path.startsWith(a));
 
 /**
  * Carry the current investigation id across screens.
@@ -57,7 +63,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <nav className="flex-1 px-3 space-y-0.5 mt-2">
       {NAV.map((item) => {
-        const active = item.href === "/" ? path === "/" : path.startsWith(item.href);
+        const active = isActive(item, path);
         const Icon = item.icon;
         return (
           <Link
@@ -65,6 +71,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
             href={withInv(item.href, inv)}
             onClick={onNavigate}
             aria-current={active ? "page" : undefined}
+            title={item.hint}
             className={`group flex items-center gap-3 rounded-md2 px-3 py-2.5 transition-colors ${
               active ? "bg-gold text-white shadow-glow" : "text-ink hover:bg-ivory-100"
             }`}
@@ -173,11 +180,13 @@ function IntegrationStatuses() {
       {INTEGRATIONS.map(({ key, label, icon: Icon }) => {
         const i = data.integrations.find((x) => x.key === key);
         if (!i) return null;
+        const plain = plainStatus(i.status);
         return (
-          <span key={key} className="inline-flex items-center gap-1.5 rounded-full border border-line bg-ivory-50 px-2.5 h-8 text-[0.74rem] font-medium text-ink whitespace-nowrap" title={`${i.status}: ${i.detail}`}>
+          <span key={key} className="inline-flex items-center gap-1.5 rounded-full border border-line bg-ivory-50 px-2.5 h-8 text-[0.74rem] font-medium text-ink whitespace-nowrap" title={`${label}: ${plain.label}. ${i.detail}`}>
             <Icon size={13} strokeWidth={1.8} className="text-gold" />
             {label}
-            <span className={`h-1.5 w-1.5 rounded-full ${DOT[i.status] ?? "bg-ink/25"}`} aria-label={i.status} />
+            <span className={`h-1.5 w-1.5 rounded-full ${DOT[i.status] ?? "bg-ink/25"}`} aria-hidden />
+            <span className="sr-only">: {plain.label}</span>
           </span>
         );
       })}
@@ -187,7 +196,7 @@ function IntegrationStatuses() {
 
 function Topbar({ onMenu }: { onMenu: () => void }) {
   const path = usePathname();
-  const title = NAV.find((n) => (n.href === "/" ? path === "/" : path.startsWith(n.href)))?.label ?? "TRACE";
+  const title = NAV.find((n) => isActive(n, path))?.label ?? "TRACE";
   return (
     <header className="sticky top-0 z-30 bg-ivory/90 backdrop-blur-md border-b border-line">
       <div className="flex items-center gap-3 px-4 md:px-8 h-16">

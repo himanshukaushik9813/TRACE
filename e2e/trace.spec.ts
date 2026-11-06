@@ -75,7 +75,7 @@ test("a wallet with no Uniswap positions gets a genuine empty state", async ({ p
   const empty = `0x${Array.from({ length: 40 }, () => "0123456789abcdef"[Math.floor(Math.random() * 16)]).join("")}`;
   await page.goto("/");
   await page.getByLabel("Wallet address").fill(empty);
-  await page.getByLabel("Observation window").selectOption("7");
+  await page.getByLabel("How far back to look").selectOption("7");
   await page.getByRole("button", { name: /^Investigate/ }).click();
   await expect(page.getByText("No supported Uniswap V3 positions found")).toBeVisible({ timeout: 200_000 });
 });

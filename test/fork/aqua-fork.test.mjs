@@ -19,7 +19,9 @@ let anvil;
 
 before(async () => {
   if (!process.env.SEPOLIA_RPC_URL) throw new Error("SEPOLIA_RPC_URL required for fork tests");
-  anvil = spawn("anvil", ["--fork-url", process.env.SEPOLIA_RPC_URL, "--port", String(PORT), "--silent", "--no-rate-limit"], { stdio: "ignore" });
+  // Pace fork state reads to the free Infura key's measured budget (~250 credits/s)
+  // instead of bursting (--no-rate-limit got 429s and timed out the first tx).
+  anvil = spawn("anvil", ["--fork-url", process.env.SEPOLIA_RPC_URL, "--port", String(PORT), "--silent", "--compute-units-per-second", "240", "--fork-retry-backoff", "1000", "--retries", "10"], { stdio: "ignore" });
   const pc = createPublicClient({ chain: sepolia, transport: http(RPC) });
   for (let i = 0; i < 60; i++) {
     try {
@@ -34,7 +36,8 @@ before(async () => {
 after(() => anvil?.kill());
 
 test("compiled plan executes on the real Aqua registry: approve → ship → dock, verified from receipts", async () => {
-  const client = createTestClient({ chain: sepolia, mode: "anvil", transport: http(RPC) }).extend(publicActions).extend(walletActions);
+  // Fork state is fetched lazily from Sepolia on first touch, so the first calls can take a while.
+  const client = createTestClient({ chain: sepolia, mode: "anvil", transport: http(RPC, { timeout: 180_000 }) }).extend(publicActions).extend(walletActions);
   assert.equal(await client.getChainId(), 11155111);
   assert.ok((await client.getCode({ address: AQUA.registry.address }))?.length > 2, "Aqua registry present on the fork");
 

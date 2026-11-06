@@ -1,12 +1,13 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Crosshair, Plus, RotateCcw, Search, Wallet } from "lucide-react";
+import { ChevronDown, ChevronRight, Crosshair, Plus, RotateCcw, Search, Sparkles, Wallet } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { isAddress } from "@trace/chain-config";
 import { Page } from "@/components/page";
 import { EmptyState, ErrorState, Pill } from "@/components/ui";
 import { EngineMark, type EngineState } from "@/components/engine-mark";
+import { Term } from "@/components/term";
 import { BestExecution, PendingPanel, PerformancePanel, PositionPanel, WalletOverview, Workflow } from "@/components/investigate";
 import { useAquaExecution } from "@/lib/aqua-flow";
 import { useSepoliaWallet } from "@/components/wallet";
@@ -14,6 +15,9 @@ import { fmt } from "@/lib/format";
 import { TERMINAL, api, useCurrentInvestigationId, useFullInvestigation, useInvestigationStatus, useRecentInvestigations, useSuggestedWallets } from "@/lib/api";
 
 const WINDOWS = [7, 14, 30, 90, 180];
+
+/** A real Sepolia WETH/USDC liquidity provider, investigated end to end by TRACE (see memory.md §3). */
+const EXAMPLE_WALLET = "0x4797a94741b2512c3236d61ca0195638c44deb4c";
 
 export default function InvestigatePage() {
   const [query, setQuery] = useState("");
@@ -75,21 +79,29 @@ export default function InvestigatePage() {
     await qc.invalidateQueries({ queryKey: ["recent"] });
   };
 
+  /** Once a case is open the hero steps back so the findings come first. */
+  const compact = Boolean(invId && inv);
   const engine: EngineState = running || submitting ? "working" : fullData ? "ready" : "idle";
   const recentList = (recent.data?.investigations ?? []).filter((r, i, all) => all.findIndex((x) => x.wallet.toLowerCase() === r.wallet.toLowerCase()) === i).slice(0, 8);
 
   return (
     <Page>
-      {/* 1. Wallet search */}
-      <section className="grid lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_380px] items-center gap-6 lg:gap-10">
+      {/* 1. What TRACE does + the wallet input (the one thing to do first) */}
+      <section className="grid lg:grid-cols-[minmax(0,1fr)_300px] xl:grid-cols-[minmax(0,1fr)_360px] items-center gap-6 lg:gap-10">
         <div className="min-w-0">
-          <h1 className="serif text-[2.4rem] md:text-[3.25rem] leading-[1.05] text-ink">Investigate a wallet</h1>
-          <p className="mt-3 text-[1rem] md:text-[1.12rem] text-ink-600 leading-relaxed max-w-[50ch]">
-            Analyze real on-chain activity, understand the strategy, and get an execution recommendation.
-          </p>
+          {compact ? (
+            <h1 className="serif text-[1.6rem] md:text-[1.9rem] leading-tight text-ink">Investigate another wallet</h1>
+          ) : (
+            <>
+              <h1 className="serif text-[2.2rem] md:text-[3.1rem] leading-[1.06] text-ink max-w-[20ch]">Understand how a wallet manages liquidity.</h1>
+              <p className="mt-3 text-[1rem] md:text-[1.1rem] text-ink-600 leading-relaxed max-w-[54ch]">
+                Explore real blockchain activity, discover its strategy and evaluate whether it can be recreated.
+              </p>
+            </>
+          )}
 
           <form
-            className="mt-7 flex flex-col sm:flex-row gap-2 rounded-card border border-line bg-ivory-50 p-2 shadow-lift max-w-[720px]"
+            className={`${compact ? "mt-4" : "mt-7"} flex flex-col sm:flex-row gap-2 rounded-card border border-gold/40 bg-ivory-50 p-2 shadow-lift max-w-[720px] focus-within:border-gold`}
             onSubmit={(e) => {
               e.preventDefault();
               run();
@@ -100,11 +112,13 @@ export default function InvestigatePage() {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Enter an Ethereum Sepolia wallet address"
+                placeholder="Paste a wallet address (0x…)"
                 aria-label="Wallet address"
+                aria-describedby="wallet-help"
                 spellCheck={false}
                 autoComplete="off"
-                className="w-full min-w-0 bg-transparent text-ink placeholder:text-ink-600/70 text-[0.95rem] outline-none py-2.5 tabular"
+                autoFocus={!invId}
+                className="w-full min-w-0 bg-transparent text-ink placeholder:text-ink-600/70 text-[0.98rem] py-2.5 tabular !outline-none !ring-0 !shadow-none"
               />
             </label>
             <div className="flex gap-2">
@@ -112,7 +126,7 @@ export default function InvestigatePage() {
                 <select
                   value={days}
                   onChange={(e) => setDays(Number(e.target.value))}
-                  aria-label="Observation window"
+                  aria-label="How far back to look"
                   className="w-full h-11 appearance-none rounded-md2 border border-line bg-ivory pl-3.5 pr-9 text-[0.86rem] font-medium text-ink"
                 >
                   {WINDOWS.map((d) => (
@@ -133,36 +147,58 @@ export default function InvestigatePage() {
             </div>
           </form>
 
-          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[0.78rem] text-ink-600 max-w-[720px]">
+          <p id="wallet-help" className={`${compact ? "sr-only" : ""} mt-2.5 text-[0.8rem] text-ink-600 max-w-[720px] leading-relaxed`}>
+            Any Ethereum <Term k="sepolia">Sepolia</Term> address that provides <Term k="liquidity">liquidity</Term> on Uniswap V3. TRACE only reads public data; nothing is signed or sent.
+          </p>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-[0.8rem]">
+            <button
+              onClick={() => run(EXAMPLE_WALLET)}
+              disabled={submitting}
+              className="inline-flex items-center gap-1.5 rounded-full border border-gold/45 bg-ivory-50 px-3.5 h-9 font-medium text-ink hover:bg-ivory-100 disabled:opacity-50"
+              title={`A real Sepolia liquidity provider: ${EXAMPLE_WALLET} (WETH/USDC). Investigated and verified by TRACE.`}
+            >
+              <Sparkles size={14} className="text-gold" /> Try an example wallet
+            </button>
             {wallet.connected && wallet.address && (
-              <button onClick={() => run(wallet.address!)} className="inline-flex items-center gap-1.5 hover:text-ink">
+              <button onClick={() => run(wallet.address!)} disabled={submitting} className="inline-flex items-center gap-1.5 rounded-full border border-line bg-ivory-50 px-3.5 h-9 text-ink-600 hover:text-ink disabled:opacity-50">
                 <Wallet size={13} className="text-gold" /> Use my wallet <span className="tabular">{fmt.addr(wallet.address)}</span>
               </button>
             )}
-            {suggested.data && suggested.data.wallets.length > 0 && <span>Or try a live liquidity provider:</span>}
-            {suggested.data?.wallets.slice(0, 3).map((s) => (
-              <button
-                key={s.wallet}
-                onClick={() => run(s.wallet)}
-                className="inline-flex items-center gap-1 underline decoration-gold/40 underline-offset-2 hover:text-ink tabular"
-                title={`${suggested.data!.source}. ${s.mints} position mints; ${s.poolSwaps} real swaps in its pool recently.`}
-              >
-                {s.pair ?? fmt.addr(s.wallet)}
-              </button>
-            ))}
-            {suggested.isLoading && <span>Finding active liquidity providers on Sepolia…</span>}
           </div>
+
+          {(suggested.data?.wallets.length ?? 0) > 0 && (
+            <details className="mt-3 max-w-[720px] group">
+              <summary className="inline-flex items-center gap-1 text-[0.78rem] text-ink-600 hover:text-ink">
+                <ChevronRight size={14} className="transition-transform group-open:rotate-90" /> More real liquidity providers found on Sepolia right now
+              </summary>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {suggested.data!.wallets.slice(0, 5).map((s) => (
+                  <button
+                    key={s.wallet}
+                    onClick={() => run(s.wallet)}
+                    className="inline-flex items-center gap-2 rounded-md2 border border-line bg-ivory-50 px-3 py-1.5 text-[0.76rem] text-ink hover:border-gold/50"
+                    title={`${suggested.data!.source}. ${s.mints} position mints; ${s.poolSwaps} real swaps in its pool recently.`}
+                  >
+                    <span className="font-medium">{s.pair ?? "Unknown pair"}</span>
+                    <span className="tabular text-ink-600">{fmt.addr(s.wallet)}</span>
+                  </button>
+                ))}
+              </div>
+            </details>
+          )}
           {submitErr && (
             <div className="mt-3 max-w-[720px]">
               <ErrorState title="Could not start the investigation" message={submitErr} />
             </div>
           )}
         </div>
-        <EngineMark state={engine} className="hidden lg:block w-full h-auto" />
+        <EngineMark state={engine} className={`hidden lg:block h-auto ${compact ? "w-[220px] justify-self-end" : "w-full"}`} />
       </section>
 
-      {/* 2. Workflow, with the real stage of the current investigation */}
-      <div className="mt-8 lg:mt-6">
+      {/* 2. The four stages: an explainer before a run, live status during and after it */}
+      <div className="mt-9 lg:mt-7">
+        {!inv && <h2 className="text-[0.78rem] font-semibold uppercase tracking-[0.14em] text-ink-600 mb-2.5">How it works</h2>}
         <Workflow inv={inv} full={fullData} exec={fullData ? exec : null} />
         {inv && (
           <div className="mt-2.5 px-1 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[0.76rem]">
@@ -182,8 +218,8 @@ export default function InvestigatePage() {
         {inv && running && (
           <p className="mt-2.5 px-1 text-[0.76rem] text-ink-600">
             Investigating <span className="tabular text-ink">{fmt.addr(inv.wallet)}</span>
-            {inv.progress.events != null && `: ${inv.progress.events} events, ${inv.progress.positions} positions, ${inv.progress.rpcCalls} RPC calls`}
-            {inv.progress.events == null && inv.progress.liveRpcCalls != null && `: ${inv.progress.liveRpcCalls} RPC calls so far`}. Free-tier RPC limits apply; wallets with many positions take a few minutes.
+            {inv.progress.events != null && `: ${fmt.count(inv.progress.events, "event")} and ${fmt.count(inv.progress.positions ?? 0, "position")} found so far`}
+            {inv.progress.events == null && inv.progress.liveRpcCalls != null && `: ${inv.progress.liveRpcCalls} blockchain reads so far`}. A wallet seen for the first time can take a minute or two.
           </p>
         )}
         {status.isError && (
@@ -225,7 +261,7 @@ export default function InvestigatePage() {
       )}
 
       {/* 3–5. Findings and the recommended action */}
-      {inv?.status !== "no_positions" && inv?.status !== "failed" && inv?.status !== "cancelled" && (
+      {inv && inv.status !== "no_positions" && inv.status !== "failed" && inv.status !== "cancelled" && (
         <div className="mt-6 grid lg:grid-cols-2 gap-5 items-start">
           <div className="space-y-5 min-w-0">
             {fullData && invId ? (
@@ -235,8 +271,8 @@ export default function InvestigatePage() {
               </>
             ) : (
               <>
-                <PendingPanel title="Wallet overview">{running ? "Filled in when the analysis completes." : "Positions, pools and observed performance for the wallet you investigate."}</PendingPanel>
-                <PendingPanel title="Uniswap V3 position">{running ? "Rebuilding positions from on-chain events…" : "Token pair, liquidity, tick range and whether the price is inside it."}</PendingPanel>
+                <PendingPanel title="Wallet overview">Filled in when the analysis completes.</PendingPanel>
+                <PendingPanel title="Main position">Rebuilding the wallet&apos;s positions from its transactions…</PendingPanel>
               </>
             )}
           </div>
@@ -244,7 +280,7 @@ export default function InvestigatePage() {
             {fullData ? (
               <PerformancePanel full={fullData} />
             ) : (
-              <PendingPanel title="Position performance">{running ? "Replaying the strategy on real pool swaps…" : "The wallet's strategy against buy-and-hold, replayed on real pool swaps."}</PendingPanel>
+              <PendingPanel title="Performance">Testing the strategy on the pool&apos;s real past trades…</PendingPanel>
             )}
             <BestExecution full={fullData} invId={invId} exec={exec} />
           </div>
