@@ -327,3 +327,15 @@ All of these were replaced in the 2026-11-06 migration.
   - Credentials hygiene: the user pasted the real DB password, Upstash token, 0G key and storage key into the chat. Advised rotating them after the hackathon (Supabase password, Upstash token, 0G key; the storage key is a testnet burner). After rotating, update `.env.local` and the Render env.
 - **2026-11-06 22:20 IST (nicer URL)** — The user wanted a URL like trace.vercel.com. `*.vercel.com` belongs to Vercel; `trace.vercel.app`, `trace-app`, `tracefi`, `usetrace`, `gettrace` and `trace-lp` were taken. The user picked **trace-eth.vercel.app**, added under Vercel → Settings → Domains (type the name, press Enter, then Add Domain). Render `CORS_ORIGINS` now lists both Vercel domains; redeployed.
 - **2026-11-06 22:30 IST (E2E guide)** — Added `docs/E2E_TESTING.md`. It covers what the 11 Playwright tests check (15 runs across the desktop and mobile projects) and what is real vs mocked: an injected test wallet; Execute API calls mocked; only test #3 writes a real empty-wallet investigation. It also covers how to run locally (3 terminals) or against production with `TRACE_WEB_URL` / `TRACE_API_URL` (wake Render first), reading results and traces, a manual walkthrough, troubleshooting, and the unit/live/fork layers. Not run from the Claude VM (no network/browser there); the last real run was 15/15 on 2026-11-06.
+- **2026-11-06 22:55 IST (verification pass + audit, docs/TEST_REPORT.md)** — Offline checks in the VM: unit 56/56, frontend/server/packages typecheck clean, lint clean (before and after the fixes). Live checks through the deployed API and browser pane:
+  - Real investigations `02503ab3…` and `81bb6025…` (restart) of wallet 0x4797…eb4c ran end to end.
+  - 0G inference failed live: 503 `no_provider_for_trust_mode`, request `f1197eb1…`. The key is private-tier.
+  - 0G Storage: uploader balance is 0. World ID is unconfigured.
+  - Aqua compatibility PARTIAL, 7/7 checks.
+  - All 8 recorded approve/ship txs were re-verified `status 0x1` via the publicnode Sepolia RPC. All were sent from 0x6583…d2De; ships go to the Aqua registry.
+  - Onboarding, tooltips (real Tab/Escape), refresh and navigation work; 0 overflow at 1440 and 390.
+  - The secret scan of git history and `.next/static` is clean.
+
+  Fixed: (1) the mobile-drawer logo was invisible (duplicate SVG gradient id `mark-g`; now `useId`; same fix for RangeBand `band`); (2) Investigate said "Sign/Approve… below", now "…on the Execute page".
+  - Not run: E2E, test:live, test:fork (no network or browser in the VM).
+  - The user then sent a bigger ETHGlobal "winning-level audit & upgrade" brief (phases 1–7). TEST_REPORT.md §6 holds the proposed order; waiting for the user's go-ahead and decisions (0G key, faucet, World ID 4.0 vs AgentKit).

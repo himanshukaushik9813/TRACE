@@ -211,12 +211,14 @@ export function RangeBand({
   const path = linePath(price, x, y);
 
   const inRange = price.map((v) => v >= lo && v <= hi);
+  // Unique per chart: a shared id breaks when another chart with the same id is hidden.
+  const bandId = `band-${useId().replace(/:/g, "")}`;
 
   return (
     <div className="w-full" ref={box}>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" aria-label="Price against the position's range">
         <defs>
-          <linearGradient id="band" x1="0" y1="0" x2="0" y2="1">
+          <linearGradient id={bandId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="#78866B" stopOpacity="0.22" />
             <stop offset="100%" stopColor="#78866B" stopOpacity="0.04" />
           </linearGradient>
@@ -234,7 +236,7 @@ export function RangeBand({
           );
         })}
 
-        <rect x={padL} y={y(hi)} width={plotW} height={Math.max(0, y(lo) - y(hi))} fill="url(#band)" />
+        <rect x={padL} y={y(hi)} width={plotW} height={Math.max(0, y(lo) - y(hi))} fill={`url(#${bandId})`} />
         <line x1={padL} x2={W - 12} y1={y(hi)} y2={y(hi)} stroke="rgba(120,134,107,0.6)" strokeDasharray="4 4" />
         <line x1={padL} x2={W - 12} y1={y(lo)} y2={y(lo)} stroke="rgba(120,134,107,0.6)" strokeDasharray="4 4" />
         <text x={W - 12} y={y(hi) - 5} textAnchor="end" fontSize="9" fill="#5E6B52" className="tabular">

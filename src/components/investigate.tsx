@@ -180,7 +180,7 @@ function stagesFor(inv: Investigation | undefined, full: FullInvestigation | nul
               ? { state: "unavailable", status: `Not available: ${why}` }
               : snap.expired
                 ? { state: "awaiting", status: "Your signature expired; sign again" }
-                : { state: "awaiting", status: "Sign the authorization below" };
+                : { state: "awaiting", status: "Sign the authorization on the Execute page" };
 
   const pendingApprove = snap.approvals.some((t) => t.status === "submitted");
   const execute: Pick<Stage, "state" | "status"> = shipped
@@ -202,7 +202,7 @@ function stagesFor(inv: Investigation | undefined, full: FullInvestigation | nul
                   : why
                     ? { state: "unavailable", status: `Not available: ${why}` }
                     : verify.state === "done"
-                      ? { state: "awaiting", status: "Approve and ship below" }
+                      ? { state: "awaiting", status: "Approve and ship on the Execute page" }
                       : { state: "waiting", status: "After verification" };
 
   return [
