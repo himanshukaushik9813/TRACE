@@ -101,9 +101,29 @@ export function createApi(deps: ApiDeps): Express {
   app.disable("x-powered-by");
   app.use(express.json({ limit: "1mb" }));
 
+  /**
+   * CORS policy: the configured origins (CORS_ORIGINS) plus local-dev origins.
+   * The Next dev server prints several URLs (localhost, LAN IP, *.local); opening
+   * any of them must work against the local API, or the browser silently blocks
+   * every call and the UI shows a misleading "API unreachable". TRACE only serves
+   * Sepolia public data and the caller's own investigations, so echoing local
+   * origins is safe.
+   */
+  const isLocalDevOrigin = (origin: string): boolean => {
+    let host = "";
+    try {
+      host = new URL(origin).hostname.replace(/^\[|\]$/g, ""); // drop [::1] brackets
+    } catch {
+      return false;
+    }
+    if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "0.0.0.0") return true;
+    if (host.endsWith(".local")) return true;
+    if (/^192\.168\./.test(host) || /^10\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
+    return false;
+  };
   app.use((req, res, next) => {
     const origin = req.headers.origin;
-    if (origin && cfg.corsOrigins.includes(origin)) {
+    if (origin && (cfg.corsOrigins.includes(origin) || isLocalDevOrigin(origin))) {
       res.header("Access-Control-Allow-Origin", origin);
       res.header("Vary", "Origin");
     }

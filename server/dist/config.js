@@ -22,6 +22,7 @@ export function loadConfig() {
     const db = env("DATABASE_URL");
     if (!db)
         fatal.push("DATABASE_URL is required (Postgres / Supabase)");
+    const dbDirect = env("DATABASE_URL_DIRECT");
     const trust = env("ZERO_G_TRUST_MODE");
     if (trust && !["standard", "verified", "private"].includes(trust))
         fatal.push("ZERO_G_TRUST_MODE must be standard | verified | private");
@@ -31,6 +32,7 @@ export function loadConfig() {
         sepoliaRpcUrl: rpc ?? "",
         sepoliaFallbackRpcUrls: (env("SEPOLIA_RPC_FALLBACK_URLS") ?? "").split(",").map((s) => s.trim()).filter(Boolean),
         databaseUrl: db ?? "",
+        databaseUrlFallback: dbDirect ?? "",
         databaseSsl: env("DATABASE_SSL") !== "disable",
         redisUrl: env("REDIS_URL") ?? null,
         zeroG: {

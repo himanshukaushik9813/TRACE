@@ -13,6 +13,7 @@ export type TraceConfig = {
   sepoliaRpcUrl: string;
   sepoliaFallbackRpcUrls: string[];
   databaseUrl: string;
+  databaseUrlFallback: string;
   databaseSsl: boolean;
   redisUrl: string | null;
   zeroG: { routerUrl?: string; apiKey?: string; model?: string; trustMode?: "standard" | "verified" | "private"; verifyTee: boolean };
@@ -38,6 +39,7 @@ export function loadConfig(): { config: TraceConfig; checks: Check[]; fatal: str
   else if (/mainnet|eth-mainnet|\/\/mainnet\./i.test(rpc)) fatal.push("SEPOLIA_RPC_URL looks like a MAINNET endpoint — refusing to start");
   const db = env("DATABASE_URL");
   if (!db) fatal.push("DATABASE_URL is required (Postgres / Supabase)");
+  const dbDirect = env("DATABASE_URL_DIRECT");
 
   const trust = env("ZERO_G_TRUST_MODE");
   if (trust && !["standard", "verified", "private"].includes(trust)) fatal.push("ZERO_G_TRUST_MODE must be standard | verified | private");
@@ -48,6 +50,7 @@ export function loadConfig(): { config: TraceConfig; checks: Check[]; fatal: str
     sepoliaRpcUrl: rpc ?? "",
     sepoliaFallbackRpcUrls: (env("SEPOLIA_RPC_FALLBACK_URLS") ?? "").split(",").map((s) => s.trim()).filter(Boolean),
     databaseUrl: db ?? "",
+    databaseUrlFallback: dbDirect ?? "",
     databaseSsl: env("DATABASE_SSL") !== "disable",
     redisUrl: env("REDIS_URL") ?? null,
     zeroG: {

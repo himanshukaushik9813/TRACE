@@ -66,6 +66,9 @@ export function createBullQueue(cfg: TraceConfig, db: Db): InvestigationQueue {
   return {
     backend: "bullmq",
     add: async (job) => {
+      // Idempotent: a job already in the queue (durable across restarts) is kept, not re-added.
+      const existing = await queue.getJob(job.investigationId);
+      if (existing) return;
       await queue.add("investigate", job, { jobId: job.investigationId });
     },
   };

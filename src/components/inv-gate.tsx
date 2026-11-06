@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { Loader2, RotateCcw } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { EmptyState, ErrorState, LoadingState } from "@/components/ui";
+import { Button, EmptyState, ErrorState, LoadingState } from "@/components/ui";
 import { fmt } from "@/lib/format";
 import { api, useCurrentInvestigationId, useFullInvestigation, useSuggestedWallets, type FullInvestigation } from "@/lib/api";
 
@@ -36,12 +37,18 @@ export function InvestigationGate({ children }: { children: (full: FullInvestiga
     );
   if (st === "failed") {
     const noEvents = data.investigation.progress.errorCode === "NO_EVENTS";
+    const interrupted = /INTERRUPTED|restarted|cut off|Re-running/i.test(String(data.investigation.error ?? ""));
     return (
       <div className="space-y-3">
         <ErrorState
-          title={noEvents ? "No supported positions for this wallet" : "This investigation failed"}
-          message={data.investigation.error ?? "unknown error"}
+          title={noEvents ? "No supported positions for this wallet" : interrupted ? "The previous run was interrupted" : "This investigation failed"}
+          message={
+            noEvents
+              ? `${data.investigation.wallet} has no Uniswap V3 positions in the last ${data.investigation.windowDays} days, so there is nothing to analyse.`
+              : data.investigation.error ?? "unknown error"
+          }
         />
+        <RerunButton wallet={data.investigation.wallet} days={data.investigation.windowDays} onStarted={setInvId} label={interrupted ? "Re-run the interrupted investigation" : "Re-run investigation"} />
         {noEvents && <SuggestedLpWallets onStarted={setInvId} />}
       </div>
     );
@@ -52,6 +59,38 @@ export function InvestigationGate({ children }: { children: (full: FullInvestiga
       />
     );
   return <>{children(data, invId)}</>;
+}
+
+/**
+ * One-click recovery from a failed/interrupted investigation: re-queue the same
+ * wallet + window (fresh row), point the app at it, and let the poller pick up
+ * the new live progress instead of the stale banner.
+ */
+function RerunButton({ wallet, days, onStarted, label }: { wallet: string; days: number; onStarted: (id: string) => void; label: string }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const qc = useQueryClient();
+  const rerun = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await api<{ investigationId: string }>("/investigations", { method: "POST", body: { wallet, days } });
+      onStarted(r.investigationId);
+      await qc.invalidateQueries({ queryKey: ["recent"] });
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div>
+      <Button variant="gold" onClick={rerun} disabled={busy}>
+        {busy ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />} {busy ? "Queuing…" : label}
+      </Button>
+      {err && <div className="text-[0.78rem] text-brick mt-2">{err}</div>}
+    </div>
+  );
 }
 
 /**

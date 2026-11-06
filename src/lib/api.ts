@@ -34,7 +34,13 @@ export async function api<T>(path: string, init?: { method?: string; body?: unkn
       cache: "no-store",
     });
   } catch {
-    throw new ApiError(0, `TRACE API unreachable at ${API_URL} — start the server (npm run start:server)`);
+    // Covers both real causes of a rejected fetch: the API process is down,
+    // and the browser blocking the call (CORS/origin mismatch — e.g. the app
+    // was opened at a LAN IP instead of localhost). Tell the user how to fix both.
+    throw new ApiError(
+      0,
+      `TRACE API unreachable at ${API_URL} — make sure the server is running (npm run start:server in its own terminal) and that you opened the app at http://localhost:3000 (other local URLs can be blocked by the browser's CORS rules).`,
+    );
   }
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(res.status, (body as { error?: string }).error ?? `HTTP ${res.status}`, body);

@@ -21,26 +21,51 @@ async function main() {
   printConfigReport(checks, fatal);
   if (fatal.length) process.exit(1);
 
-  const db = new Db({ connectionString: config.databaseUrl, ssl: config.databaseSsl });
-  try {
-    const p = await db.ping();
-    console.log(`[trace] database ok (migrations: ${p.migrations.join(", ") || "none"})`);
-    // The API and worker are one process: anything still mid-pipeline at startup was cut off by the
-    // previous process (restart/crash) and can never finish — say so instead of "running" forever.
-    const stale = await db.query<{ id: string }>(
-      `update investigations set status = 'failed', progress = progress || '{"errorCode":"INTERRUPTED"}'::jsonb,
-              error = 'INTERRUPTED: the server restarted while this investigation was running — run it again', updated_at = now()
-        where status not in ('done','no_positions','failed')
-        returning id`,
-    );
-    if (stale.length) console.log(`[trace] marked ${stale.length} interrupted investigation(s) as failed`);
-  } catch (err) {
-    console.error("[trace] database unavailable or not migrated — run `npm run db:migrate`:", (err as Error).message);
+  // Reach the database: try the pooler (DATABASE_URL) then the direct host
+  // (DATABASE_URL_DIRECT), each with a few retries and backoff — Supabase
+  // resolves intermittently (EAI_AGAIN) and one failed ping at boot must not
+  // take the whole API down.
+  const candidates = [config.databaseUrl, ...(config.databaseUrlFallback ? [config.databaseUrlFallback] : [])];
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  let db: Db | null = null;
+  outer: for (const url of candidates) {
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      const candidate = new Db({ connectionString: url, ssl: config.databaseSsl });
+      try {
+        const p = await candidate.ping();
+        db = candidate;
+        console.log(`[trace] database ok (${url === config.databaseUrl ? "pooler" : "direct host"}; migrations: ${p.migrations.join(", ") || "none"})`);
+        break outer;
+      } catch (err) {
+        const msg = (err as Error).message;
+        console.error(`[trace] database ${url === config.databaseUrl ? "pooler" : "direct"} ping ${attempt}/5 failed:`, msg);
+        await candidate.close().catch(() => {});
+        if (/schema_migrations|relation .* does not exist/i.test(msg)) break outer; // not migrated — retrying is pointless
+        if (attempt < 5) await sleep(3_000 * attempt);
+      }
+    }
+  }
+  if (!db) {
+    console.error("[trace] database unavailable on all configured URLs — check your internet/VPN and restart, or run `npm run db:migrate` if not migrated yet");
     process.exit(1);
   }
 
   const redisUp = await redisReachable(config.redisUrl);
   const queue = redisUp ? createBullQueue(config, db) : createInMemoryQueue(config, db);
+
+  // Recovery: a run still mid-pipeline when the previous process stopped was cut off
+  // mid-way, but everything is idempotent (raw_events keyed by tx/log, strategies by
+  // ir_id, etc.), so the job finishes cleanly when re-run.
+  //   - in-memory queue: the in-flight work is genuinely gone — re-queue it now.
+  //   - BullMQ queue: Redis kept the job, so getJob() finds it and the add is a no-op.
+  const interrupted = await db.requeueInterrupted();
+  if (interrupted.length) {
+    for (const inv of interrupted)
+      await queue
+        .add({ investigationId: inv.id, wallet: inv.wallet, days: inv.days ?? 30 })
+        .catch((err) => console.error(`[trace] failed to re-queue interrupted ${inv.id}:`, err.message));
+    console.log(`[trace] re-queued ${interrupted.length} interrupted investigation(s)`);
+  }
   if (redisUp && config.redisUrl) {
     // Finalized Sepolia log chunks are immutable: keep them in Redis so repeat
     // investigations (and shared pool swap history) skip the RPC entirely.
@@ -57,7 +82,7 @@ async function main() {
   console.log(`[trace] queue backend: ${queue.backend}${queue.backend === "in-memory" ? " (Redis unreachable — no job durability)" : ""}`);
 
   const app = createApi({ db, queue, cfg: config });
-  app.listen(config.port, () => {
+  const server = app.listen(config.port, () => {
     console.log(`[trace] API listening on :${config.port} — Ethereum Sepolia (${config.chainId})`);
     // Warm the live "suggested LP wallets" scan so the first visitor doesn't wait on it.
     fetch(`http://127.0.0.1:${config.port}/wallets/suggested`)
@@ -68,6 +93,15 @@ async function main() {
         for (const i of s.integrations) console.log(`[trace]   ${i.status.padEnd(30)} ${i.label}`);
       })
       .catch((err) => console.error("[trace] integration probe failed:", err.message));
+  });
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      console.error(`[trace] port ${config.port} is already in use — a previous TRACE server is still running.`);
+      console.error(`[trace] stop it: lsof -ti :${config.port} | xargs kill  (or Ctrl+C that other terminal), then re-run: npm run start:server`);
+    } else {
+      console.error("[trace] server error:", err.message);
+    }
+    process.exit(1);
   });
 }
 

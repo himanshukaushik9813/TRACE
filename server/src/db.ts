@@ -75,6 +75,26 @@ export class Db {
     );
   }
 
+  /**
+   * Investigations that never reached a terminal state when the process died.
+   * With the in-memory queue (no Redis) the in-flight work is truly lost, so the
+   * caller re-queues them to finish; with BullMQ they may still be in Redis, in
+   * which case the caller must NOT re-add or they run twice.
+   */
+  async requeueInterrupted(): Promise<{ id: string; wallet: string; days: number | null }[]> {
+    const rows = await this.query<{ id: string; wallet: string; window_days: number | null }>(
+      `select id, wallet, window_days from investigations where status not in ('done','no_positions','failed') order by created_at`,
+    );
+    if (rows.length)
+      await this.query(
+        `update investigations set status = 'queued', progress = progress || '{"errorCode":"REQUEUED"}'::jsonb,
+                error = 'Re-running: the previous run was cut off by a server restart — retrying automatically', updated_at = now()
+          where id = any($1::uuid[])`,
+        [rows.map((r) => r.id)],
+      );
+    return rows.map((r) => ({ id: r.id, wallet: r.wallet, days: r.window_days }));
+  }
+
   async saveReconstruction(id: string, r: { summary: ReconstructionSummary; window: { fromBlock: number; toBlock: number; fromTs: number; toTs: number }; notes: string[] }) {
     await this.query(
       `update investigations set summary_json = $2, events_fingerprint = $3, window_from_block = $4, window_to_block = $5,
