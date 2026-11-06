@@ -7,8 +7,9 @@
  * official file, loaded from the brand's own host and displayed unmodified (no
  * recolouring, stretching, rotation or effects): uniform scaling only. `height` sets
  * a visually balanced size; `margin` only overlaps transparent canvas around the mark
- * (Ethereum's landscape file has wide built-in padding). A file placed in
- * public/brand/partners/<key>.svg overrides the remote one (self-hosting). If a logo
+ * (Ethereum's landscape file has wide built-in padding). The same official files are
+ * self-hosted in public/brand/partners/<key>.svg (downloaded 2026-11-07 from the sources
+ * below) and served from TRACE's own domain; the remote URL is the fallback. If a logo
  * fails to load, the card shows a plain text wordmark. See docs/BRAND_ASSETS.md.
  */
 

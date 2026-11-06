@@ -69,10 +69,10 @@ void main() {
   float diff = clamp(dot(normalize(vN), L), 0.0, 1.0);
   vec3 col = uBase * (0.9 + 0.1 * diff);
   float f = vH * 8.0 + 4.0 + uTime * 0.12;           // contours drift gently
-  float line = 1.0 - smoothstep(0.0, fwidth(f) * 1.25, abs(fract(f - 0.5) - 0.5));
+  float line = 1.0 - smoothstep(0.0, max(fwidth(f), 1e-4) * 1.25, abs(fract(f - 0.5) - 0.5)); // max(): flat ground has fwidth 0
   col = mix(col, uLine, line * 0.6);
   float g = f / 5.0;                                   // every 5th: champagne gold
-  float gl = 1.0 - smoothstep(0.0, fwidth(g) * 1.6, abs(fract(g - 0.5) - 0.5));
+  float gl = 1.0 - smoothstep(0.0, max(fwidth(g), 1e-4) * 1.6, abs(fract(g - 0.5) - 0.5));
   float pulse = 0.45 + 0.55 * pow(0.5 + 0.5 * sin(vWorld.x * 0.55 + vWorld.z * 0.35 - uTime * 0.9), 3.0);
   col = mix(col, uGold, gl * pulse * 0.75);
   float fog = smoothstep(9.0, 24.0, length(vWorld - cameraPosition));
