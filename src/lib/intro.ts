@@ -7,8 +7,8 @@
  * It is decided once per page load, before first paint, by INTRO_BOOT_SCRIPT (so
  * there is no flash of the dashboard before the cover, and no layout shift), and
  * never again while moving between screens (client-side navigation keeps the page):
- *   full  — first visit on the landing route: the complete 3D intro (Skip available)
- *   short — every later launch, or a first visit through a deep link: a ~1 s brand transition
+ *   full  — every launch: the complete 3D intro (Skip available; reduced-motion users get a calm version)
+ *   short — a ~1 s brand transition, only when the intro query asks for it
  *   none  — only when the intro query asks for none
  *
  * QA switches (query string, for testing): ?intro=full | short | none,
@@ -24,8 +24,7 @@ export type IntroMode = "full" | "short" | "none";
 export const INTRO_BOOT_SCRIPT = `(function(){try{
 var d=document.documentElement,q=new URLSearchParams(location.search),f=q.get("intro"),m;
 if(f==="full"||f==="short"||f==="none"){m=f;}
-else{var seen=localStorage.getItem("${INTRO_SEEN_KEY}");
-m=(!seen&&location.pathname==="/")?"full":"short";}
+else{m="full";}
 d.setAttribute("data-intro",m);
 }catch(e){}})();`;
 
