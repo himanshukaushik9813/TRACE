@@ -1,4 +1,4 @@
-export { computeFingerprints, computePriceResponse, isFullRangeLike, type Fingerprints } from "./fingerprints.js";
+export { computeFingerprints, computePriceResponse, isFullRangeLike, MIN_PRICE_SAMPLES, type Fingerprints } from "./fingerprints.js";
 export { inferFromEvidence, scoreFamilies, familyLabel, CONFIDENCE_NOTE, type InferenceInput, type EvidenceWindow } from "./infer.js";
 export {
   runZeroGInference,

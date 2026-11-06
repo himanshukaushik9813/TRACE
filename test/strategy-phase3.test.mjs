@@ -82,3 +82,33 @@ test("backtest capital breakdown: slippage is paid only on counterfactual moves 
   else assert.equal(cf.slippageCost, 0);
   for (const r of bt.runs) assert.ok(Math.abs(r.net - (r.finalValue - bt.assumptions.startCapital) / bt.assumptions.startCapital) < 1e-12, "net return = (end − start) / start");
 });
+
+test("fee collection counts only collects that carried fees (principal-only collects are not fee events)", () => {
+  const fp = computeFingerprints(h.events, h.positions, {}, h.window);
+  const collects = h.events.filter((e) => e.kind === "COLLECT");
+  const withFees = collects.filter((e) => Number(e.fee0) > 0 || Number(e.fee1) > 0);
+  assert.equal(fp.collectEventCount, collects.length);
+  assert.equal(fp.collectCount, withFees.length);
+  assert.ok(fp.collectCount < fp.collectEventCount, "this real wallet has principal-only collects");
+  const { ir } = inferFromEvidence({ events: h.events, wallet: h.wallet, window: h.window, meta: h.positions, fingerprints: fp });
+  const fee = ir.rules.find((r) => r.category === "fee");
+  if (fp.collectCount < 2) assert.equal(fee, undefined, "no cadence rule from a single fee collect");
+  else for (const t of fee.evidenceRefs) assert.ok(withFees.some((e) => e.tx === t), "fee rule cites only fee-bearing collects");
+});
+
+test("time in range needs at least 15 real swaps; fewer are reported as not reliable, never as a number", async () => {
+  const { MIN_PRICE_SAMPLES } = await import("@trace/strategy-inference");
+  // Test-only: one REAL position placed in the pool with REAL captured swaps, open for the whole series vs. only its last few swaps.
+  const id = 234012;
+  const meta = { [id]: { ...h.positions[id], pool, tickLower: 173000, tickUpper: 175000 } };
+  const mint = (block) => [{ ...h.events.find((e) => e.tokenId === id && e.kind === "MINT"), pool, block, tickLower: 173000, tickUpper: 175000 }];
+  const full = computeFingerprints(mint(s.points[0].block - 1), meta, { [pool]: s });
+  assert.equal(full.timeInRangeSamples, s.points.length);
+  assert.ok(s.points.length >= MIN_PRICE_SAMPLES && full.timeInRangePct != null);
+  const late = computeFingerprints(mint(s.points.at(-5).block - 1), meta, { [pool]: s });
+  assert.equal(late.timeInRangeSamples, 5);
+  assert.equal(late.timeInRangePct, null, "5 swaps are too few to report occupancy");
+  const { ir } = inferFromEvidence({ events: mint(s.points.at(-5).block - 1), wallet: h.wallet, window: h.window, meta, fingerprints: late });
+  assert.ok(!ir.rules.some((r) => r.category === "risk"), "no occupancy rule from sparse prices");
+  assert.ok(ir.limitations.some((l) => /only 5 real swap/.test(l)));
+});

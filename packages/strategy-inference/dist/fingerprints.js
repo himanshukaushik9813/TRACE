@@ -7,6 +7,8 @@
  * price series) are `null`, never estimated.
  */
 import { reconstructPositions, rangeResets } from "@trace/uniswap-v3";
+/** Fewer real swaps than this during the positions' lives → time in range is not reported (same bar as the backtest split). */
+export const MIN_PRICE_SAMPLES = 15;
 const FULL_RANGE_TICKS = 1_700_000; // ≥ ~96% of the [-887272, 887272] span
 /** |tick| at or beyond this is the edge of the usable range (MAX_TICK = 887272, minus tick-spacing rounding). */
 const EDGE_TICK = 880_000;
@@ -43,7 +45,9 @@ export function computeFingerprints(events, meta = {}, priceSeries = {}, window)
         .filter((t) => t.status === "closed" && t.openedTs && t.lastActivityTs)
         .map((t) => ((t.closedTs ?? t.lastActivityTs) - t.openedTs) / 3600)
         .filter((h) => h >= 0);
-    const collects = sorted.filter((e) => e.kind === "COLLECT");
+    const allCollects = sorted.filter((e) => e.kind === "COLLECT");
+    // Fee collection = collects that carried fees; principal-only collects (after a withdrawal) are not fee events.
+    const collects = allCollects.filter((e) => Number(e.fee0 ?? 0) > 0 || Number(e.fee1 ?? 0) > 0);
     const collectGaps = [];
     for (let i = 1; i < collects.length; i++)
         if (collects[i].timestamp && collects[i - 1].timestamp)
@@ -79,7 +83,8 @@ export function computeFingerprints(events, meta = {}, priceSeries = {}, window)
                 maxSwing = Math.max(maxSwing, (peak - trough) / peak);
         }
     }
-    const timeInRangePct = computeTimeInRange(ledgers, meta, priceSeries);
+    const occupancy = computeTimeInRange(ledgers, meta, priceSeries);
+    const timeInRangePct = occupancy.samples >= MIN_PRICE_SAMPLES ? occupancy.inside / occupancy.samples : null;
     const response = computePriceResponse(ledgers, sorted, meta, priceSeries);
     const gasEvents = new Map();
     for (const e of sorted)
@@ -102,11 +107,13 @@ export function computeFingerprints(events, meta = {}, priceSeries = {}, window)
         increaseCount: sorted.filter((e) => e.kind === "INCREASE" || e.kind === "MINT").length,
         decreaseCount: sorted.filter((e) => e.kind === "DECREASE").length,
         collectCount: collects.length,
+        collectEventCount: allCollects.length,
         collectCadenceDays: median(collectGaps),
         withdrawRedeployCount: reentry.length,
         medianReentryHours: median(reentry),
         maxLiquiditySwingPct: maxSwing,
         timeInRangePct,
+        timeInRangeSamples: occupancy.samples,
         gasSpentEth,
         priceRangeExits: response.exits,
         exitsAnsweredByAction: response.answered,
@@ -202,5 +209,5 @@ function computeTimeInRange(ledgers, meta, series) {
                 inside++;
         }
     }
-    return total > 0 ? inside / total : null;
+    return { inside, samples: total };
 }

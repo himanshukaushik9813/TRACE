@@ -128,8 +128,8 @@ function mineRules(fp, events, meta) {
         rules.push({
             category: "fee",
             rule: fp.collectCadenceDays != null ? `Collects fees roughly every ${cadence(fp.collectCadenceDays)}` : "Collects fees repeatedly",
-            evidence: `${fp.collectCount} Collect events`,
-            evidenceRefs: txs(events, ["COLLECT"]),
+            evidence: `${fp.collectCount} fee-bearing Collect event(s)${fp.collectEventCount != null && fp.collectEventCount > fp.collectCount ? ` (of ${fp.collectEventCount} Collects; the rest only returned withdrawn principal)` : ""}`,
+            evidenceRefs: [...new Set(events.filter((e) => e.kind === "COLLECT" && (Number(e.fee0 ?? 0) > 0 || Number(e.fee1 ?? 0) > 0)).map((e) => e.tx))].slice(0, 6),
             confidence: clamp01(fp.collectCount >= 4 ? 0.75 : 0.55),
             alternative: "Collects may be incidental to withdrawals (V3 collect also returns principal)",
             uncertainty: "Cadence measured from few samples",
@@ -154,7 +154,7 @@ function mineRules(fp, events, meta) {
         rules.push({
             category: "risk",
             rule: `Keeps price in range about ${pct(fp.timeInRangePct)} of the time`,
-            evidence: `Measured against real pool Swap prices during each position's life`,
+            evidence: `Measured against ${fp.timeInRangeSamples ?? "the"} real pool swap price(s) during each position's life`,
             evidenceRefs: mints.length ? mints : txs(events, ["INCREASE"]),
             confidence: 0.7,
             alternative: "Occupancy may be luck in a quiet market rather than risk management",
@@ -210,7 +210,9 @@ function buildLimitations(fp, meta) {
     if (Object.values(meta).some((m) => !m.historyComplete))
         l.push("Some positions were opened before the observation window; their earlier history is not included.");
     if (fp.timeInRangePct == null)
-        l.push("Time-in-range not measured: no swap price data was available for the pool(s).");
+        l.push(fp.timeInRangeSamples
+            ? `Time-in-range not reported: only ${fp.timeInRangeSamples} real swap(s) in the pool(s) while the positions were open, too few to be reliable.`
+            : "Time-in-range not measured: no swap price data was available for the pool(s).");
     if (fp.repositionCount === 0)
         l.push("No range re-sets observed — no adjustment trigger can be inferred.");
     if (fp.collectCadenceDays == null)

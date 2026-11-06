@@ -28,8 +28,11 @@ export type Fingerprints = {
     medianPositionDurationHours: number | null;
     increaseCount: number;
     decreaseCount: number;
+    /** Collects that actually carried fees (a Collect can also just return withdrawn principal). */
     collectCount: number;
-    /** Median days between fee collects (null with fewer than 2 collects). */
+    /** All Collect events, fee-bearing or principal-only. */
+    collectEventCount?: number;
+    /** Median days between fee-bearing collects (null with fewer than 2). */
     collectCadenceDays: number | null;
     /** Number of withdraw→redeploy cycles (decrease/close followed by a new deposit in the same pool). */
     withdrawRedeployCount: number;
@@ -37,8 +40,13 @@ export type Fingerprints = {
     medianReentryHours: number | null;
     /** Largest peak-to-trough liquidity swing on a single position, as a fraction of its peak. */
     maxLiquiditySwingPct: number;
-    /** Share of observed swaps (during each position's life) where price was inside its range. Null without price data. */
+    /**
+     * Share of observed swaps (during each position's life) where price was inside its range.
+     * Null without price data, or with fewer than MIN_PRICE_SAMPLES swaps (too few to be reliable).
+     */
     timeInRangePct: number | null;
+    /** Real swaps the time-in-range figure is based on (0 when no price data). */
+    timeInRangeSamples?: number;
     /** Total gas paid by the wallet's position transactions, in ETH (null if receipts unavailable). */
     gasSpentEth: number | null;
     /**
@@ -60,6 +68,8 @@ export type Fingerprints = {
     /** Hours positions spent out of range while open, measured between real swaps (null without prices). */
     outOfRangeHours: number | null;
 };
+/** Fewer real swaps than this during the positions' lives → time in range is not reported (same bar as the backtest split). */
+export declare const MIN_PRICE_SAMPLES = 15;
 /** True when a range spans (near) the full tick range or is unbounded on either side. */
 export declare function isFullRangeLike(tickLower: number, tickUpper: number): boolean;
 export declare function computeFingerprints(events: V3Event[], meta?: Record<string, PositionMeta>, priceSeries?: Record<string, PriceSeries>, window?: {

@@ -332,7 +332,12 @@ export function buildCaseStudy(input: CaseStudyInput): CaseStudy {
   const noPool = positions.filter((p) => !p.pool).length;
   if (noPool) limitations.push(`${plural(noPool, "position")} could not be matched to a pool; it is excluded from range-change and price analysis.`);
   if (ruleRefs > ruleRefsFound) limitations.push(`${ruleRefs - ruleRefsFound} transaction(s) cited by the strategy are not among this investigation's events.`);
-  if (input.fingerprints && input.fingerprints.timeInRangePct == null && all.length) limitations.push("No pool price data was available, so time-in-range and response to price moves are not measured.");
+  if (input.fingerprints && input.fingerprints.timeInRangePct == null && all.length)
+    limitations.push(
+      input.fingerprints.timeInRangeSamples
+        ? `Only ${input.fingerprints.timeInRangeSamples} real swap(s) happened in the pool(s) while positions were open, too few to report time in range.`
+        : "No pool price data was available, so time-in-range and response to price moves are not measured.",
+    );
   for (const l of input.strategy?.limitations ?? []) if (!limitations.includes(l)) limitations.push(l);
 
   return {

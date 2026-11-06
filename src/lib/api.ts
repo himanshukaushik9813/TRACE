@@ -236,6 +236,8 @@ export type Fingerprints = {
   exitsAnsweredByReset?: number | null;
   exitResponseRefs?: string[];
   outOfRangeHours?: number | null;
+  collectEventCount?: number;
+  timeInRangeSamples?: number;
 };
 
 export type PriceSeriesUi = {

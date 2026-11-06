@@ -30,8 +30,11 @@ export type Fingerprints = {
   medianPositionDurationHours: number | null;
   increaseCount: number;
   decreaseCount: number;
+  /** Collects that actually carried fees (a Collect can also just return withdrawn principal). */
   collectCount: number;
-  /** Median days between fee collects (null with fewer than 2 collects). */
+  /** All Collect events, fee-bearing or principal-only. */
+  collectEventCount?: number;
+  /** Median days between fee-bearing collects (null with fewer than 2). */
   collectCadenceDays: number | null;
   /** Number of withdraw→redeploy cycles (decrease/close followed by a new deposit in the same pool). */
   withdrawRedeployCount: number;
@@ -39,8 +42,13 @@ export type Fingerprints = {
   medianReentryHours: number | null;
   /** Largest peak-to-trough liquidity swing on a single position, as a fraction of its peak. */
   maxLiquiditySwingPct: number;
-  /** Share of observed swaps (during each position's life) where price was inside its range. Null without price data. */
+  /**
+   * Share of observed swaps (during each position's life) where price was inside its range.
+   * Null without price data, or with fewer than MIN_PRICE_SAMPLES swaps (too few to be reliable).
+   */
   timeInRangePct: number | null;
+  /** Real swaps the time-in-range figure is based on (0 when no price data). */
+  timeInRangeSamples?: number;
   /** Total gas paid by the wallet's position transactions, in ETH (null if receipts unavailable). */
   gasSpentEth: number | null;
   /**
@@ -63,6 +71,8 @@ export type Fingerprints = {
   outOfRangeHours: number | null;
 };
 
+/** Fewer real swaps than this during the positions' lives → time in range is not reported (same bar as the backtest split). */
+export const MIN_PRICE_SAMPLES = 15;
 const FULL_RANGE_TICKS = 1_700_000; // ≥ ~96% of the [-887272, 887272] span
 /** |tick| at or beyond this is the edge of the usable range (MAX_TICK = 887272, minus tick-spacing rounding). */
 const EDGE_TICK = 880_000;
@@ -110,7 +120,9 @@ export function computeFingerprints(
     .map((t) => ((t.closedTs ?? t.lastActivityTs!) - t.openedTs!) / 3600)
     .filter((h) => h >= 0);
 
-  const collects = sorted.filter((e) => e.kind === "COLLECT");
+  const allCollects = sorted.filter((e) => e.kind === "COLLECT");
+  // Fee collection = collects that carried fees; principal-only collects (after a withdrawal) are not fee events.
+  const collects = allCollects.filter((e) => Number(e.fee0 ?? 0) > 0 || Number(e.fee1 ?? 0) > 0);
   const collectGaps: number[] = [];
   for (let i = 1; i < collects.length; i++) if (collects[i].timestamp && collects[i - 1].timestamp) collectGaps.push((collects[i].timestamp - collects[i - 1].timestamp) / 86_400);
 
@@ -144,7 +156,8 @@ export function computeFingerprints(
     }
   }
 
-  const timeInRangePct = computeTimeInRange(ledgers, meta, priceSeries);
+  const occupancy = computeTimeInRange(ledgers, meta, priceSeries);
+  const timeInRangePct = occupancy.samples >= MIN_PRICE_SAMPLES ? occupancy.inside / occupancy.samples : null;
   const response = computePriceResponse(ledgers, sorted, meta, priceSeries);
 
   const gasEvents = new Map<string, number>();
@@ -167,11 +180,13 @@ export function computeFingerprints(
     increaseCount: sorted.filter((e) => e.kind === "INCREASE" || e.kind === "MINT").length,
     decreaseCount: sorted.filter((e) => e.kind === "DECREASE").length,
     collectCount: collects.length,
+    collectEventCount: allCollects.length,
     collectCadenceDays: median(collectGaps),
     withdrawRedeployCount: reentry.length,
     medianReentryHours: median(reentry),
     maxLiquiditySwingPct: maxSwing,
     timeInRangePct,
+    timeInRangeSamples: occupancy.samples,
     gasSpentEth,
     priceRangeExits: response.exits,
     exitsAnsweredByAction: response.answered,
@@ -248,7 +263,7 @@ export function computePriceResponse(
   return covered ? { exits, answered, delays, byReset, resetRefs, outSeconds } : { exits: null, answered: null, delays, byReset: null, resetRefs, outSeconds: null };
 }
 
-function computeTimeInRange(ledgers: TokenLedger[], meta: Record<string, PositionMeta>, series: Record<string, PriceSeries>): number | null {
+function computeTimeInRange(ledgers: TokenLedger[], meta: Record<string, PositionMeta>, series: Record<string, PriceSeries>): { inside: number; samples: number } {
   let inside = 0;
   let total = 0;
   for (const t of ledgers) {
@@ -264,5 +279,5 @@ function computeTimeInRange(ledgers: TokenLedger[], meta: Record<string, Positio
       if (p.tick >= m.tickLower && p.tick < m.tickUpper) inside++;
     }
   }
-  return total > 0 ? inside / total : null;
+  return { inside, samples: total };
 }

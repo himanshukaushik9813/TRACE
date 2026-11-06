@@ -31,9 +31,18 @@ function dnaRows(f: Fingerprints): { label: string; value: string; derived: stri
     { label: "Average range width", value: f.avgRangeWidthPct != null ? (f.avgRangeWidthPct >= 1e6 ? "effectively unbounded" : f.avgRangeWidthPct >= 1 ? `${(1 + f.avgRangeWidthPct).toLocaleString("en-US", { maximumFractionDigits: 1 })}× price span` : `${fmt.frac(f.avgRangeWidthPct)} wide`) : f.fullRangeShare === 1 ? "Full range" : "—", derived: f.avgRangeWidthTicks != null ? `${Math.round(f.avgRangeWidthTicks)} ticks mean; ${fmt.frac(f.fullRangeShare, 0)} of positions full-range` : "no range known" },
     { label: "Range adjustment frequency", value: `${f.repositionsPerWeek.toFixed(2)} / week`, derived: `${f.repositionCount} re-sets (new NFT in the same pool after reducing the previous)` },
     { label: "Position duration (median)", value: hours(f.medianPositionDurationHours), derived: `${f.closedPositions} closed of ${f.positionCount} positions` },
-    { label: "Time in range", value: f.timeInRangePct != null ? fmt.frac(f.timeInRangePct) : "not measured", derived: f.timeInRangePct != null ? "share of real pool swaps inside each position's range" : "no swap price data for the pool(s)" },
+    {
+      label: "Time in range",
+      value: f.timeInRangePct != null ? fmt.frac(f.timeInRangePct) : "not measured",
+      derived:
+        f.timeInRangePct != null
+          ? `share of ${f.timeInRangeSamples ?? "the"} real pool swaps inside each position's range`
+          : f.timeInRangeSamples
+            ? `only ${f.timeInRangeSamples} real swap(s) while positions were open, too few to be reliable`
+            : "no swap price data for the pool(s)",
+    },
     { label: "Capital deployment changes", value: `${f.increaseCount} in · ${f.decreaseCount} out`, derived: `largest single-position liquidity swing ${fmt.frac(f.maxLiquiditySwingPct, 0)}` },
-    { label: "Fee collection", value: f.collectCadenceDays != null ? `every ${hours(f.collectCadenceDays * 24)}` : `${f.collectCount} collect(s)`, derived: `${f.collectCount} Collect events (fee portion split from returned principal)` },
+    { label: "Fee collection", value: f.collectCadenceDays != null ? `every ${hours(f.collectCadenceDays * 24)}` : `${f.collectCount} collect(s)`, derived: `${f.collectCount} fee-bearing collect(s)${f.collectEventCount != null ? ` of ${f.collectEventCount} Collect events` : ""}; principal-only collects are not counted` },
     { label: "Withdraw → redeploy", value: `${f.withdrawRedeployCount} cycle(s)`, derived: `median re-entry ${hours(f.medianReentryHours)}` },
     { label: "Response to price moves", ...priceResponse(f) },
     {
