@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Search, Boxes, BrainCircuit, FlaskConical, Terminal, FileText, Activity, Menu, X, ExternalLink, Zap, Cpu, Database, ScanFace } from "lucide-react";
 import { SEPOLIA_CHAIN_ID, explorer } from "@trace/chain-config";
 import { art } from "@/lib/assets";
 import { useIntegrations, withInv, type IntegrationStatus } from "@/lib/api";
-import { starPath } from "@/components/engine-mark";
+import { BrandMark } from "@/components/brand-mark";
 import { WalletButton, NetworkBanner } from "@/components/wallet";
 import { TourFooter } from "@/components/welcome";
 import { plainStatus } from "@/lib/status";
@@ -117,31 +117,10 @@ function ChainFooter({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
-/** The TRACE mark: a gold four-point star on an ivory tile. */
-function Mark({ size = 36 }: { size?: number }) {
-  // The mark renders twice (desktop sidebar + mobile drawer). A fixed gradient id
-  // made url(#…) resolve to the copy inside the hidden sidebar, so the drawer's
-  // star painted nothing on phones. A per-instance id keeps each copy visible.
-  const grad = `mark-g-${useId().replace(/:/g, "")}`;
-  return (
-    <span className="grid place-items-center rounded-md2 border border-gold/35 bg-ivory-50 shadow-soft shrink-0" style={{ width: size, height: size }}>
-      <svg viewBox="0 0 24 24" width={size * 0.62} height={size * 0.62} aria-hidden>
-        <defs>
-          <linearGradient id={grad} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor="#D8B46C" />
-            <stop offset="1" stopColor="#A87C37" />
-          </linearGradient>
-        </defs>
-        <path d={starPath(12, 12, 10)} fill={`url(#${grad})`} />
-      </svg>
-    </span>
-  );
-}
-
 function Brand() {
   return (
     <div className="flex items-center gap-2.5">
-      <Mark />
+      <BrandMark />
       <div>
         <div className="serif text-[1.35rem] tracking-tight text-ink leading-none">TRACE</div>
         <div className="text-[0.62rem] text-ink-600 mt-1">On-Chain Strategy Intelligence</div>

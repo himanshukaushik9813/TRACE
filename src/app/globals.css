@@ -145,3 +145,62 @@ summary::-webkit-details-marker { display: none; }
 /* A section heading after other content gets breathing room; as a card's first child it sits flush */
 .section-title { margin-top: 2.25rem; }
 .section-title:first-child { margin-top: 0; }
+
+/* ───────────────────────── Launch intro ───────────────────────── */
+/* Pre-paint cover: shown from the first byte when <head> decides an intro will
+   play (lib/intro INTRO_BOOT_SCRIPT), handed over to <LaunchIntro> on mount.
+   If the app never mounts, it removes itself after 6 s: never a stuck page. */
+#trace-intro-cover { display: none; }
+html[data-intro="full"]:not([data-intro-cover="off"]) #trace-intro-cover,
+html[data-intro="short"]:not([data-intro-cover="off"]) #trace-intro-cover {
+  display: grid;
+  place-items: center;
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: #F7F3EB;
+  animation: trace-cover-release 0.5s ease 6s forwards;
+}
+#trace-intro-cover .cover-mark { display: none; }
+html[data-intro="short"] #trace-intro-cover .cover-mark { display: flex; }
+@keyframes trace-cover-release { to { opacity: 0; visibility: hidden; pointer-events: none; } }
+
+/* The real app under the intro: a slight zoom-in as the intro crossfades away.
+   Transform only (no layout shift); removed entirely once the intro is gone. */
+html[data-intro-state] #trace-app { transform-origin: 50% 38%; }
+html[data-intro-state="playing"] #trace-app { transform: scale(0.985); }
+html[data-intro-state="leaving"] #trace-app { transform: scale(1); transition: transform 1000ms cubic-bezier(.2,.7,.2,1); }
+
+/* Wordmark light sweep (identity reveal). */
+.intro-sweep {
+  background: linear-gradient(100deg, #171714 38%, #D9C08F 48%, #B68A42 52%, #171714 62%);
+  background-size: 260% 100%;
+  background-position: 100% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: intro-sweep 1.3s cubic-bezier(.3,.6,.2,1) 0.15s forwards;
+}
+@keyframes intro-sweep { to { background-position: 0% 0; } }
+
+/* CSS-only landscape (no WebGL). */
+.intro-drift { animation: intro-drift 9s ease-in-out infinite alternate; }
+@keyframes intro-drift { from { transform: translateX(-1.5%) translateY(0); } to { transform: translateX(1.5%) translateY(-1%); } }
+.intro-float { animation: intro-float 3.2s ease-in-out infinite; }
+@keyframes intro-float { 0%, 100% { margin-top: 0; } 50% { margin-top: -10px; } }
+
+/* Exit: a single soft band of champagne light crossing the scene. */
+.intro-light-sweep {
+  background: linear-gradient(105deg, rgba(247,243,235,0) 35%, rgba(217,192,143,0.42) 48%, rgba(255,250,240,0.7) 50%, rgba(217,192,143,0.42) 52%, rgba(247,243,235,0) 65%);
+  background-size: 300% 100%;
+  background-position: 120% 0;
+  animation: intro-light-sweep 1s cubic-bezier(.4,.1,.3,1) forwards;
+}
+@keyframes intro-light-sweep { to { background-position: -40% 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .intro-drift, .intro-float { animation: none; }
+  .intro-light-sweep { display: none; }
+  .intro-sweep { animation: none; background: none; color: #171714; }
+  html[data-intro-state] #trace-app { transform: none !important; transition: none !important; }
+}

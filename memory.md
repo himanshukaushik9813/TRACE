@@ -433,3 +433,16 @@ All of these were replaced in the 2026-11-06 migration.
   - **No live verification exists.** It is waiting on the user to register at developer.world.org and paste the 3 env vars on Render. With staging, the simulator works.
   - **Ordering matters for Phase 4:** after this deploy, shipping is disabled until World ID is registered. The Phase 4 live ship therefore either goes before the push, or after registration through the full World ID flow.
   - Phase 6 waits until the integration status is verified.
+- **2026-11-07 (Cinematic launch intro + ecosystem reveal)**
+  - **Where it lives:** `src/components/launch/*`:
+    - TraceLaunchScene (R3F, lazy), with TopographicTerrain (shader contours + a gold path that draws itself) and FloatingTraceEmblem (extruded star + platform);
+    - the DOM layers TraceBrandReveal, PartnerLogoReveal and PartnerConnectionLines;
+    - DashboardTransition, the CSS fallback css-landscape, and the orchestrator launch-intro.
+    - Timing lives in `timeline.ts`.
+  - **Before first paint:** `INTRO_BOOT_SCRIPT` in `<head>` (from `lib/intro.ts`) sets `html[data-intro]` to full, short or none. The `#trace-intro-cover` element in `layout.tsx` hides itself after 6 s if the app never mounts.
+  - **Storage:** first-visit state in localStorage `trace:intro:v1`, per-session state in sessionStorage `trace:intro:session`.
+  - **QA switches:** `?intro=full|short|none`, `?introFallback=css`, `?introMotion=reduce`.
+  - **Replay:** the "Replay intro" button in the sidebar (TourFooter).
+  - **Partner heading:** "Built with ecosystem technologies". It makes no partnership claim.
+  - **Logos:** official files only, in `public/brand/partners/<key>.svg`. They are resolved in `layout.tsx` with fs. Until a file exists, a text wordmark is shown. Sources are listed in `docs/BRAND_ASSETS.md`. No logos had been added yet.
+  - The user's localhost:3000 runs an OLD `next start` build, so test on Vercel after a push, or on `npm run dev`.

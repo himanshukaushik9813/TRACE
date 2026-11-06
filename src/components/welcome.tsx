@@ -7,6 +7,7 @@
  */
 
 import { useRouter } from "next/navigation";
+import { replayIntro } from "@/lib/intro";
 import { Search, Sparkles, X } from "lucide-react";
 import { ONBOARDING_STEPS, hideOnboarding, markOnboarding, replayOnboarding, useMarkOnboarding, useOnboarding, useSessionSkip, type OnboardingStep } from "@/lib/onboarding";
 
@@ -54,6 +55,16 @@ export function TourFooter({ onNavigate }: { onNavigate?: () => void }) {
         }}
         className={`${done < total && !ob.hidden ? "mt-1.5" : ""} underline-offset-2 hover:underline hover:text-ink`}>
         Replay the tour
+      </button>
+      <span className="mx-1.5 text-ink/25" aria-hidden>·</span>
+      <button
+        onClick={() => {
+          onNavigate?.();
+          replayIntro();
+        }}
+        className="underline-offset-2 hover:underline hover:text-ink"
+      >
+        Replay intro
       </button>
     </div>
   );
