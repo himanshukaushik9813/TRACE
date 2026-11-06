@@ -2,7 +2,7 @@
 
 > Running log of what TRACE is, what has been built, and where things stand.
 > Updated after every work session so anyone (or any AI tool) can pick up where we left off.
-> **Last updated: 2026-11-06** · Latest pushed commit: `845ae01` · **Live:** web https://trace-eth.vercel.app · API https://trace-api-6ap0.onrender.com
+> **Last updated: 2026-11-06** · Latest pushed commit: `a9a562b` · **Live:** web https://trace-eth.vercel.app · API https://trace-api-6ap0.onrender.com
 
 ---
 
@@ -341,3 +341,7 @@ All of these were replaced in the 2026-11-06 migration.
   - Not run: E2E, test:live, test:fork (no network or browser in the VM).
   - The user then sent a bigger ETHGlobal "winning-level audit & upgrade" brief (phases 1–7). TEST_REPORT.md §6 holds the proposed order; waiting for the user's go-ahead and decisions (0G key, faucet, World ID 4.0 vs AgentKit).
 - **2026-11-06 23:10 IST (deployed dad5f11; queue fix)** — The user pushed; Vercel and Render both deployed dad5f11. Three fresh production investigations (c1feddd0…, 824a9197…, 9bc7b12f…) had no `priceRangeExits` in their DNA, so the jobs were processed by an older worker. The only other worker on the same Upstash queue is a local API on the Mac. Fix: a per-deployment `TRACE_QUEUE_NAME` (see Gotchas), plus a `finished` log line. Needs a push; then check the Render logs for `queue "trace-investigations-prod"` and re-run one investigation to confirm the new metric.
+- **2026-11-06 23:15 IST (a9a562b live, verified)** — Pushed by the user. Render's blueprint sync added `TRACE_QUEUE_NAME=trace-investigations-prod` after that deploy had already started, so the first instance still logged the default queue. Claude ran Manual Deploy → Restart service, and the logs now show `queue "trace-investigations-prod"`. Gotcha: a new blueprint env var needs a restart if the deploy raced the sync.
+  - Fresh production investigation `baf7b5ca-220d-4c76-8fcf-deca84fc9c21` has the new DNA fields (priceRangeExits 0, answered 0, median null; time in range 100%). This confirms the earlier missing fields came from an old worker on the shared queue.
+  - Live Strategy page (desktop): "All 6 supporting transactions" lists each with event type, NFT #230171, block and UTC time. The 0G panel shows the real failed run (HTTP 503, 1018 ms, glm-4.7, request d5665974-a42b-4685-ba6c-871556bac728, trust mode "key default"). The DNA row reads "price never left a range".
+  - At 390 px: no overflow, no duplicate ids, and the drawer logo star is visible (mark-g-<useId>).
