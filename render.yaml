@@ -1,0 +1,56 @@
+# Render Blueprint — TRACE API + worker (Express + BullMQ, single process).
+# The web app (Next.js) is deployed separately on Vercel.
+# Secrets are marked sync:false: Render asks for their values when the
+# Blueprint is created (copy them from .env.local). Never commit real values.
+services:
+  - type: web
+    name: trace-api
+    runtime: node
+    plan: free
+    region: singapore
+    branch: main
+    buildCommand: npm ci && npm run build:server
+    startCommand: node server/dist/index.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # ── Chain ──
+      - key: TRACE_CHAIN_ID
+        value: "11155111"
+      - key: SEPOLIA_RPC_URL
+        sync: false
+      - key: TRACE_OWNER_WALLET
+        sync: false
+      # ── Persistence ──
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_DIRECT
+        sync: false
+      - key: DATABASE_SSL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      # Comma-separated browser origins (set to the Vercel URL after the web deploy).
+      - key: CORS_ORIGINS
+        sync: false
+      # ── 0G inference ──
+      - key: ZERO_G_ROUTER_URL
+        sync: false
+      - key: ZERO_G_API_KEY
+        sync: false
+      # ── 0G Storage (testnet burner key) ──
+      - key: OG_STORAGE_RPC_URL
+        sync: false
+      - key: OG_STORAGE_INDEXER_URL
+        sync: false
+      - key: OG_STORAGE_PRIVATE_KEY
+        sync: false
+      - key: OG_STORAGE_ADDRESS
+        sync: false
+      # ── World ID (optional) ──
+      - key: WORLD_ACTION
+        sync: false
+      - key: WORLD_ENVIRONMENT
+        sync: false
