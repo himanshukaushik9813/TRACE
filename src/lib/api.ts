@@ -156,6 +156,8 @@ export type StrategyRule = {
   uncertainty: string;
   mapsTo?: string;
   params?: Record<string, number | string>;
+  observationWindow?: { fromBlock: number; toBlock: number; fromTs: number; toTs: number };
+  missingEvidence?: string[];
 };
 
 export type StrategyIR = {
@@ -231,6 +233,9 @@ export type Fingerprints = {
   priceRangeExits?: number | null;
   exitsAnsweredByAction?: number | null;
   medianResponseHours?: number | null;
+  exitsAnsweredByReset?: number | null;
+  exitResponseRefs?: string[];
+  outOfRangeHours?: number | null;
 };
 
 export type PriceSeriesUi = {
@@ -257,6 +262,8 @@ export type BacktestRun = {
   gasCost: number;
   impermanentLoss: number | null;
   capitalUtilization: number | null;
+  /** Slippage paid on range moves (valuation token); added 2026-11-07, absent on older results. */
+  slippageCost?: number;
 };
 
 export type BacktestResult = {

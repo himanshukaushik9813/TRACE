@@ -70,7 +70,9 @@ test("too few real swaps → insufficient_data with a reason and no numbers", ()
 test("What If defaults are byte-identical to the pre-What-If engine", async () => {
   const { readFileSync } = await import("node:fs");
   const golden = JSON.parse(readFileSync(new URL("./data/backtest-golden.json", import.meta.url), "utf8"));
-  const run = (adjust, extra = {}) => JSON.stringify(runBacktest({ ir: ir(adjust), series, basis, events: [], meta: {}, opts: { startCapital: 0.01, ...extra } }));
+  // slippageCost (Phase 3) is the one field added since the golden file; every pre-existing field must be byte-identical.
+  const strip = (bt) => ({ ...bt, runs: bt.runs.map(({ slippageCost, ...r }) => r) });
+  const run = (adjust, extra = {}) => JSON.stringify(strip(runBacktest({ ir: ir(adjust), series, basis, events: [], meta: {}, opts: { startCapital: 0.01, ...extra } })));
   assert.equal(run(true), JSON.stringify(golden.adjust));
   assert.equal(run(false), JSON.stringify(golden.hold));
   // Passing the defaults explicitly is also identical.

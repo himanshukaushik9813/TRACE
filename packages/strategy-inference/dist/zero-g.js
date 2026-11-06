@@ -22,16 +22,32 @@ export function buildEvidencePack(events, fp, window, positions = []) {
     return {
         fingerprints: fp,
         citableEvents: [...new Set(events.map((e) => e.tx))],
-        events: events.slice(0, 200).map((e) => ({ kind: e.kind, tx: e.tx, block: e.block, tokenId: e.tokenId, pool: e.pool })),
+        events: events.slice(0, 200).map((e) => ({ kind: e.kind, tx: e.tx, block: e.block, timestamp: e.timestamp, tokenId: e.tokenId, pool: e.pool })),
         positions: positions.slice(0, 50),
         window,
+    };
+}
+/** Observation window of an AI rule, from the evidence-pack events it cites (deterministic). */
+function windowOfPack(refs, pack) {
+    const set = new Set(refs.map((r) => r.toLowerCase()));
+    const ev = pack.events.filter((e) => set.has(e.tx.toLowerCase()));
+    if (!ev.length)
+        return {};
+    const ts = ev.map((e) => Number(e.timestamp ?? 0)).filter((t) => t > 0);
+    return {
+        observationWindow: {
+            fromBlock: Math.min(...ev.map((e) => Number(e.block))),
+            toBlock: Math.max(...ev.map((e) => Number(e.block))),
+            fromTs: ts.length ? Math.min(...ts) : 0,
+            toTs: ts.length ? Math.max(...ts) : 0,
+        },
     };
 }
 const SYSTEM_PROMPT = [
     "You are TRACE's strategy-inference model running behind the 0G Router.",
     "Infer the liquidity-provision strategy of an Ethereum Sepolia wallet from a DETERMINISTIC evidence pack of its Uniswap V3 activity.",
     "Return ONLY a JSON object with this exact shape:",
-    '{"family": one of ["passive_concentrated","passive_full_range","periodic_range_adjustment","active_range_management","capital_redeployment","inconclusive"],',
+    '{"family": one of ["passive_concentrated","passive_full_range","periodic_range_adjustment","price_triggered_repositioning","active_range_management","capital_redeployment","inconclusive"],',
     ' "confidence": number 0..1,',
     ' "rules": [{"category": "entry"|"adjustment"|"exit"|"risk"|"fee", "rule": string, "evidence": string, "evidenceRefs": [tx hashes], "confidence": number 0..1, "alternative": string, "uncertainty": string, "mapsTo": "trigger"|"schedule"|"allocation"|"limit"|"action"}],',
     ' "alternatives": [{"label": string, "family": string, "score": 0..100, "why": string}],',
@@ -175,6 +191,10 @@ export function gateProposal(raw, pack, ctx) {
             alternative: String(r.alternative ?? ""),
             uncertainty: String(r.uncertainty ?? ""),
             mapsTo: r.mapsTo,
+            ...windowOfPack(refs, pack),
+            missingEvidence: [
+                "Proposed by the 0G model. TRACE checked that every cited transaction is in this wallet's evidence, not that the rule follows from it.",
+            ],
         });
     }
     ctx.run.rulesRejected = rejected;

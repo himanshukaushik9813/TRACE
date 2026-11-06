@@ -7,7 +7,7 @@
  * When the evidence cannot support a hypothesis the family is "inconclusive"
  * and no rule is invented.
  */
-import { type PositionMeta, type StrategyFamily, type StrategyIR, type V3Event } from "@trace/strategy-ir";
+import { type PositionMeta, type StrategyFamily, type StrategyIR, type StrategyRule, type V3Event } from "@trace/strategy-ir";
 import { type Fingerprints } from "./fingerprints.js";
 export type EvidenceWindow = {
     fromBlock: number;
@@ -33,3 +33,5 @@ export declare function scoreFamilies(fp: Fingerprints): {
     score: number;
     why: string;
 }[];
+/** Span (block + time) of the events a rule cites. */
+export declare function ruleWindow(refs: string[], events: V3Event[]): StrategyRule["observationWindow"];

@@ -50,6 +50,15 @@ export type Fingerprints = {
     exitsAnsweredByAction: number | null;
     /** Median hours from the price leaving the range to that liquidity change (null if none). */
     medianResponseHours: number | null;
+    /**
+     * Exits answered by a range re-set: the old position was reduced and a new position with a
+     * different range was opened in the same pool, both before the price came back.
+     */
+    exitsAnsweredByReset: number | null;
+    /** The reduce + mint transactions behind those re-sets (evidence for a price-triggered rule). */
+    exitResponseRefs: string[];
+    /** Hours positions spent out of range while open, measured between real swaps (null without prices). */
+    outOfRangeHours: number | null;
 };
 /** True when a range spans (near) the full tick range or is unbounded on either side. */
 export declare function isFullRangeLike(tickLower: number, tickUpper: number): boolean;
@@ -68,4 +77,7 @@ export declare function computePriceResponse(ledgers: TokenLedger[], events: V3E
     exits: number | null;
     answered: number | null;
     delays: number[];
+    byReset: number | null;
+    resetRefs: string[];
+    outSeconds: number | null;
 };

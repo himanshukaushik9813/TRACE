@@ -28,6 +28,7 @@ export type EvidencePack = {
         kind: string;
         tx: string;
         block: number;
+        timestamp?: number;
         tokenId: number;
         pool?: string;
     }[];

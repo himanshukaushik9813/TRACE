@@ -111,6 +111,9 @@ export function computeFingerprints(events, meta = {}, priceSeries = {}, window)
         priceRangeExits: response.exits,
         exitsAnsweredByAction: response.answered,
         medianResponseHours: response.exits == null ? null : median(response.delays),
+        exitsAnsweredByReset: response.byReset,
+        exitResponseRefs: response.resetRefs,
+        outOfRangeHours: response.outSeconds == null ? null : response.outSeconds / 3600,
     };
 }
 const LIQUIDITY_ACTIONS = new Set(["MINT", "INCREASE", "DECREASE", "BURN"]);
@@ -125,6 +128,9 @@ export function computePriceResponse(ledgers, events, meta, series) {
     let covered = false;
     let exits = 0;
     let answered = 0;
+    let byReset = 0;
+    let outSeconds = 0;
+    const resetRefs = [];
     const delays = [];
     for (const t of ledgers) {
         const m = meta[String(t.tokenId)];
@@ -142,6 +148,11 @@ export function computePriceResponse(ledgers, events, meta, series) {
         const pool = m.pool.toLowerCase();
         const actions = events.filter((e) => LIQUIDITY_ACTIONS.has(e.kind) && (e.pool ?? meta[String(e.tokenId)]?.pool ?? "").toLowerCase() === pool);
         const inside = (tick) => tick >= m.tickLower && tick < m.tickUpper;
+        // Time out of range: between consecutive real swaps, while the earlier one was outside.
+        for (let i = 1; i < pts.length; i++)
+            if (!inside(pts[i - 1].tick))
+                outSeconds += Math.max(0, pts[i].timestamp - pts[i - 1].timestamp);
+        const samePool = (e) => (e.pool ?? meta[String(e.tokenId)]?.pool ?? "").toLowerCase() === pool;
         for (let i = 1; i < pts.length; i++) {
             if (!(inside(pts[i - 1].tick) && !inside(pts[i].tick)))
                 continue;
@@ -156,9 +167,20 @@ export function computePriceResponse(ledgers, events, meta, series) {
                 if (act.timestamp && exit.timestamp && act.timestamp >= exit.timestamp)
                     delays.push((act.timestamp - exit.timestamp) / 3600);
             }
+            // Re-set answer: a new position with a different range in the same pool, opened after the
+            // exit and before the price re-entered the old range, with the old position reduced first.
+            const resetLimit = back?.block ?? Number.MAX_SAFE_INTEGER;
+            const mint = events.find((e) => e.kind === "MINT" && e.tokenId !== t.tokenId && samePool(e) && e.block > exit.block && e.block <= resetLimit && (e.tickLower !== m.tickLower || e.tickUpper !== m.tickUpper));
+            const reduce = mint && events.find((e) => e.tokenId === t.tokenId && (e.kind === "DECREASE" || e.kind === "BURN") && e.block > exit.block && e.block <= mint.block);
+            if (mint && reduce) {
+                byReset++;
+                for (const tx of [reduce.tx, mint.tx])
+                    if (!resetRefs.includes(tx))
+                        resetRefs.push(tx);
+            }
         }
     }
-    return covered ? { exits, answered, delays } : { exits: null, answered: null, delays };
+    return covered ? { exits, answered, delays, byReset, resetRefs, outSeconds } : { exits: null, answered: null, delays, byReset: null, resetRefs, outSeconds: null };
 }
 function computeTimeInRange(ledgers, meta, series) {
     let inside = 0;

@@ -52,6 +52,15 @@ export type Fingerprints = {
   exitsAnsweredByAction: number | null;
   /** Median hours from the price leaving the range to that liquidity change (null if none). */
   medianResponseHours: number | null;
+  /**
+   * Exits answered by a range re-set: the old position was reduced and a new position with a
+   * different range was opened in the same pool, both before the price came back.
+   */
+  exitsAnsweredByReset: number | null;
+  /** The reduce + mint transactions behind those re-sets (evidence for a price-triggered rule). */
+  exitResponseRefs: string[];
+  /** Hours positions spent out of range while open, measured between real swaps (null without prices). */
+  outOfRangeHours: number | null;
 };
 
 const FULL_RANGE_TICKS = 1_700_000; // ≥ ~96% of the [-887272, 887272] span
@@ -167,6 +176,9 @@ export function computeFingerprints(
     priceRangeExits: response.exits,
     exitsAnsweredByAction: response.answered,
     medianResponseHours: response.exits == null ? null : median(response.delays),
+    exitsAnsweredByReset: response.byReset,
+    exitResponseRefs: response.resetRefs,
+    outOfRangeHours: response.outSeconds == null ? null : response.outSeconds / 3600,
   };
 }
 
@@ -184,10 +196,13 @@ export function computePriceResponse(
   events: V3Event[],
   meta: Record<string, PositionMeta>,
   series: Record<string, PriceSeries>,
-): { exits: number | null; answered: number | null; delays: number[] } {
+): { exits: number | null; answered: number | null; delays: number[]; byReset: number | null; resetRefs: string[]; outSeconds: number | null } {
   let covered = false;
   let exits = 0;
   let answered = 0;
+  let byReset = 0;
+  let outSeconds = 0;
+  const resetRefs: string[] = [];
   const delays: number[] = [];
   for (const t of ledgers) {
     const m = meta[String(t.tokenId)];
@@ -202,6 +217,9 @@ export function computePriceResponse(
     const pool = m.pool.toLowerCase();
     const actions = events.filter((e) => LIQUIDITY_ACTIONS.has(e.kind) && (e.pool ?? meta[String(e.tokenId)]?.pool ?? "").toLowerCase() === pool);
     const inside = (tick: number) => tick >= m.tickLower && tick < m.tickUpper;
+    // Time out of range: between consecutive real swaps, while the earlier one was outside.
+    for (let i = 1; i < pts.length; i++) if (!inside(pts[i - 1].tick)) outSeconds += Math.max(0, pts[i].timestamp - pts[i - 1].timestamp);
+    const samePool = (e: V3Event) => (e.pool ?? meta[String(e.tokenId)]?.pool ?? "").toLowerCase() === pool;
     for (let i = 1; i < pts.length; i++) {
       if (!(inside(pts[i - 1].tick) && !inside(pts[i].tick))) continue;
       exits++;
@@ -214,9 +232,20 @@ export function computePriceResponse(
         answered++;
         if (act.timestamp && exit.timestamp && act.timestamp >= exit.timestamp) delays.push((act.timestamp - exit.timestamp) / 3600);
       }
+      // Re-set answer: a new position with a different range in the same pool, opened after the
+      // exit and before the price re-entered the old range, with the old position reduced first.
+      const resetLimit = back?.block ?? Number.MAX_SAFE_INTEGER;
+      const mint = events.find(
+        (e) => e.kind === "MINT" && e.tokenId !== t.tokenId && samePool(e) && e.block > exit.block && e.block <= resetLimit && (e.tickLower !== m.tickLower || e.tickUpper !== m.tickUpper),
+      );
+      const reduce = mint && events.find((e) => e.tokenId === t.tokenId && (e.kind === "DECREASE" || e.kind === "BURN") && e.block > exit.block && e.block <= mint.block);
+      if (mint && reduce) {
+        byReset++;
+        for (const tx of [reduce.tx, mint.tx]) if (!resetRefs.includes(tx)) resetRefs.push(tx);
+      }
     }
   }
-  return covered ? { exits, answered, delays } : { exits: null, answered: null, delays };
+  return covered ? { exits, answered, delays, byReset, resetRefs, outSeconds } : { exits: null, answered: null, delays, byReset: null, resetRefs, outSeconds: null };
 }
 
 function computeTimeInRange(ledgers: TokenLedger[], meta: Record<string, PositionMeta>, series: Record<string, PriceSeries>): number | null {

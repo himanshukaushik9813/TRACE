@@ -203,6 +203,8 @@ export default function BacktestPage() {
           const observed = bt?.runs.find((r) => r.kind === "observed");
           const passive = bt?.runs.find(isPassive);
           const hold = bt?.runs.find(isHold);
+          const inferred = bt?.runs.find((r) => r.kind === "counterfactual");
+          const primary = full.strategies.find((x) => x.id === full.primaryStrategyId);
           return (
             <>
               <header className="mb-4">
@@ -229,14 +231,55 @@ export default function BacktestPage() {
                     {fmt.amt(bt.assumptions.startCapital)} {token}, sized from the wallet&apos;s real deposit. Only prices known at each moment are used.
                   </p>
 
-                  <div className="mt-5 grid md:grid-cols-3 gap-4">
+                  <div className="mt-5 grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
                     {observed && <RunCard title="This wallet" plain="The wallet's own price ranges, held when it held them." run={observed} token={token} observed />}
+                    {inferred && <RunCard title="Inferred strategy" plain="What the inferred rules would have done on the same swaps (simulated)." run={inferred} token={token} observed={false} />}
                     {passive && <RunCard title={<Term k="passiveLp">Passive LP</Term>} plain="The wallet's starting range, never touched." run={passive} token={token} observed={false} />}
                     {hold && <RunCard title={<Term k="buyHold">Buy and hold</Term>} plain="Half in each token, no liquidity provided." run={hold} token={token} observed={false} />}
                   </div>
                   <p className="text-[0.76rem] text-ink-600 mt-2.5 max-w-[80ch]">
                     More fees do not always mean a better result: when the price moves, the tokens inside a position change value too (<Term k="impermanentLoss">impermanent loss</Term>). Testnet prices are not mainnet prices; these results describe this Sepolia pool only.
                   </p>
+
+                  <Card className="mt-5">
+                    <SectionTitle eyebrow={`Value in ${token}, from the same starting capital`} title="Fee and capital breakdown" />
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-[0.8rem] min-w-[760px]">
+                        <thead className="text-left text-ink-600">
+                          <tr>
+                            {["Run", "Start", "+ Fees earned", "− Slippage", "± Price and range effect", "= End", "Net", "Gas (ETH, separate)"].map((h) => (
+                              <th key={h} className="px-3 py-2 font-normal">{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {bt.runs.map((r) => {
+                            const start = bt.assumptions.startCapital;
+                            const slip = r.slippageCost;
+                            // Residual: everything the fees and slippage do not explain (price moves, impermanent loss, time out of range).
+                            const effect = slip == null ? null : r.finalValue - start - r.feesEarned + slip;
+                            return (
+                              <tr key={r.label} className="border-t border-line">
+                                <td className="px-3 py-2 text-ink">{r.label}<div className="text-[0.7rem] text-ink-600">{r.kind === "observed" ? "observed replay" : r.kind === "counterfactual" ? "simulation" : "benchmark"}</div></td>
+                                <td className="px-3 py-2 tabular">{fmt.amt(start)}</td>
+                                <td className="px-3 py-2 tabular">{fmt.amt(r.feesEarned)}</td>
+                                <td className="px-3 py-2 tabular">{slip == null ? "not recorded" : fmt.amt(slip)}</td>
+                                <td className={`px-3 py-2 tabular ${effect == null ? "" : effect >= 0 ? "text-forest" : "text-brick"}`}>{effect == null ? "—" : `${effect >= 0 ? "+" : "−"}${fmt.amt(Math.abs(effect))}`}</td>
+                                <td className="px-3 py-2 tabular text-ink">{fmt.amt(r.finalValue)}</td>
+                                <td className={`px-3 py-2 tabular ${r.net >= 0 ? "text-forest" : "text-brick"}`}>{pct(r.net)}</td>
+                                <td className="px-3 py-2 tabular">{r.gasCost ? r.gasCost.toFixed(6) : r.kind === "observed" ? "none in test window" : "not modelled"}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="text-[0.72rem] text-ink-600 mt-3 max-w-[85ch]">
+                      End = Start + Fees − Slippage ± Price and range effect. The last column is what is left after fees and slippage: price moves, impermanent loss and time out of range.
+                      Gas is paid in ETH, so it is shown separately and not deducted. Results belong to strategy version <span className="tabular text-ink">{bt.strategyId}</span>
+                      {primary ? ` (hash ${primary.versionHash})` : ""}; a changed strategy gets a new version and a new backtest.
+                    </p>
+                  </Card>
 
                   <Card className="mt-5">
                     <SectionTitle eyebrow={`Value in ${token}; the solid line is observed, dashed lines are simulated`} title="Value over time" />

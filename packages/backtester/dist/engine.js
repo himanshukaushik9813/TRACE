@@ -74,6 +74,7 @@ function simulateLp(test, train, capitalRaw, feeTier, slippage, rangeAt) {
     let hi = 0;
     let cash = capitalRaw; // token1 raw units not deployed
     let fees = 0;
+    let slip = 0;
     let rebalances = 0;
     let inRange = 0;
     let outSec = 0;
@@ -88,6 +89,7 @@ function simulateLp(test, train, capitalRaw, feeTier, slippage, rangeAt) {
             // (Re)deploy at the last OBSERVED price (no peeking at the current swap).
             const value = L > 0 ? positionValue(L, lo, hi, prevPrice) + cash : cash;
             const cost = L > 0 ? value * slippage : 0;
+            slip += cost;
             if (L > 0)
                 rebalances++;
             const unit = positionValue(1, want.lo, want.hi, prevPrice);
@@ -134,6 +136,7 @@ function simulateLp(test, train, capitalRaw, feeTier, slippage, rangeAt) {
         outOfRangeSeconds: outSec,
         deployedPoints: deployed,
         lpValueNoFees: (L > 0 ? positionValue(L, lo, hi, last) : 0) + cash,
+        slippageCost: slip,
         holdValueOfInitial: initial ? initial.a0 * last + initial.a1 : capitalRaw,
     };
 }
@@ -227,6 +230,7 @@ export function runBacktest(input) {
             gasCost,
             impermanentLoss: sim.holdValueOfInitial > 0 ? sim.lpValueNoFees / sim.holdValueOfInitial - 1 : null,
             capitalUtilization: test.length ? sim.deployedPoints / test.length : null,
+            slippageCost: toHuman(sim.slippageCost),
         });
         valueSeries.push({ label, points: values });
     };
@@ -281,6 +285,7 @@ export function runBacktest(input) {
         gasCost: 0,
         impermanentLoss: null,
         capitalUtilization: 1,
+        slippageCost: 0,
     });
     valueSeries.push({ label: "Buy & hold (50/50)", points: holdValues });
     const result = {

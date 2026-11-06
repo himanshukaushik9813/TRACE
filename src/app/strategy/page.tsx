@@ -36,6 +36,11 @@ function dnaRows(f: Fingerprints): { label: string; value: string; derived: stri
     { label: "Fee collection", value: f.collectCadenceDays != null ? `every ${hours(f.collectCadenceDays * 24)}` : `${f.collectCount} collect(s)`, derived: `${f.collectCount} Collect events (fee portion split from returned principal)` },
     { label: "Withdraw → redeploy", value: `${f.withdrawRedeployCount} cycle(s)`, derived: `median re-entry ${hours(f.medianReentryHours)}` },
     { label: "Response to price moves", ...priceResponse(f) },
+    {
+      label: "Out-of-range time",
+      value: f.outOfRangeHours == null ? "not measured" : hours(f.outOfRangeHours),
+      derived: f.outOfRangeHours == null ? (f.outOfRangeHours === undefined ? "computed for investigations run from now on" : "no swap price data for the pool(s)") : "while positions were open, between real pool swaps",
+    },
     { label: "Gas paid", value: f.gasSpentEth != null ? `${f.gasSpentEth.toFixed(5)} ETH` : "—", derived: "sum of real receipts (gasUsed × effectiveGasPrice)" },
   ];
 }
@@ -47,7 +52,9 @@ function priceResponse(f: Fingerprints): { value: string; derived: string } {
   if (exits === 0) return { value: "price never left a range", derived: "checked against every real pool swap while each position was open" };
   return {
     value: `${f.exitsAnsweredByAction ?? 0} of ${fmt.count(exits, "range exit")} answered`,
-    derived: `a liquidity change in that pool before the price came back${f.medianResponseHours != null ? `; median ${hours(f.medianResponseHours)} after the exit` : ""}`,
+    derived: `a liquidity change in that pool before the price came back${f.medianResponseHours != null ? `; median ${hours(f.medianResponseHours)} after the exit` : ""}${
+      f.exitsAnsweredByReset != null ? `; ${f.exitsAnsweredByReset} by moving to a new range` : ""
+    }`,
   };
 }
 
@@ -163,6 +170,12 @@ function StrategyStory({ s, full, inv }: { s: StrategyRow; full: FullInvestigati
                   <span className="text-ink-600">Evidence:</span>
                   {r.evidenceRefs.slice(0, 3).map((t) => <ExplorerLink key={t} kind="tx" value={t} />)}
                 </div>
+                {r.observationWindow && (
+                  <div className="text-[0.72rem] text-ink-600 mt-1.5 tabular">
+                    Observed between blocks {r.observationWindow.fromBlock.toLocaleString("en-US")} and {r.observationWindow.toBlock.toLocaleString("en-US")}
+                    {r.observationWindow.fromTs ? ` · ${fmt.tsSec(r.observationWindow.fromTs, false)} to ${fmt.tsSec(r.observationWindow.toTs, false)}` : ""}
+                  </div>
+                )}
                 <EvidenceTrail inv={inv} refs={r.evidenceRefs} />
                 <details className="mt-2 text-[0.76rem] text-ink-600">
                   <summary className="cursor-pointer text-ink hover:text-gold w-fit">What could be wrong</summary>
@@ -170,6 +183,12 @@ function StrategyStory({ s, full, inv }: { s: StrategyRow; full: FullInvestigati
                     <div><span className="text-ink">Uncertainty:</span> {r.uncertainty}</div>
                     <div><span className="text-ink">Another reading:</span> {r.alternative}</div>
                     <div><span className="text-ink">Rule confidence:</span> {fmt.frac(r.confidence, 0)}</div>
+                    {r.missingEvidence?.length ? (
+                      <div>
+                        <span className="text-ink">Missing evidence:</span>
+                        <ul className="list-disc pl-4 mt-0.5">{r.missingEvidence.map((m) => <li key={m}>{m}</li>)}</ul>
+                      </div>
+                    ) : null}
                   </div>
                 </details>
               </Card>

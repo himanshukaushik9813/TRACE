@@ -29,6 +29,7 @@ export function familyLabel(f) {
         passive_concentrated: "Passive concentrated liquidity",
         passive_full_range: "Passive full-range liquidity",
         periodic_range_adjustment: "Periodic range adjustment",
+        price_triggered_repositioning: "Price-triggered repositioning",
         active_range_management: "Active range management",
         capital_redeployment: "Repeated capital deploy / withdraw",
         inconclusive: "Inconclusive",
@@ -58,6 +59,15 @@ export function scoreFamilies(fp) {
         family: "periodic_range_adjustment",
         score: clamp01(fp.collectCount >= 3 && fp.collectCadenceDays != null ? 0.55 : fp.collectCount >= 2 ? 0.3 : 0.05),
         why: fp.collectCadenceDays != null ? `${fp.collectCount} fee collects, median every ${cadence(fp.collectCadenceDays)}` : `${fp.collectCount} fee collect(s) — no cadence measurable`,
+    });
+    const exits = fp.priceRangeExits ?? 0;
+    const resets = fp.exitsAnsweredByReset ?? 0;
+    out.push({
+        family: "price_triggered_repositioning",
+        score: exits > 0 && resets > 0 ? clamp01(0.35 + 0.35 * (resets / exits) + (resets >= 2 ? 0.1 : 0)) : 0.03,
+        why: fp.priceRangeExits == null
+            ? "No pool price data, so range re-sets cannot be compared with price exits"
+            : `${resets} of ${exits} price exit(s) were followed by a range re-set before the price came back`,
     });
     out.push({
         family: "capital_redeployment",
@@ -97,6 +107,21 @@ function mineRules(fp, events, meta) {
             uncertainty: "The trigger (price move, schedule, discretion) is inferred from timing only",
             mapsTo: "trigger",
             params: { repositions: fp.repositionCount },
+        });
+    }
+    const resets = fp.exitsAnsweredByReset ?? 0;
+    const resetRefs = fp.exitResponseRefs ?? [];
+    if (resets > 0 && resetRefs.length) {
+        rules.push({
+            category: "adjustment",
+            rule: "Moves to a new range after the price leaves the old one",
+            evidence: `${resets} of ${fp.priceRangeExits} price exit(s) were followed by a range re-set before the price came back${fp.medianResponseHours != null ? `; median reaction ${fp.medianResponseHours.toFixed(1)}h after the exit` : ""}`,
+            evidenceRefs: resetRefs.slice(0, 12),
+            confidence: clamp01(Math.min(0.8, 0.4 + 0.1 * resets)),
+            alternative: "The re-sets may follow a schedule or discretion that happened to coincide with the exits",
+            uncertainty: `Based on ${resets} exit(s); the price is only sampled at swaps`,
+            mapsTo: "trigger",
+            params: { exits: fp.priceRangeExits ?? 0, exitsAnsweredByReset: resets },
         });
     }
     if (fp.collectCount >= 2) {
@@ -140,6 +165,46 @@ function mineRules(fp, events, meta) {
     }
     return rules;
 }
+/** Span (block + time) of the events a rule cites. */
+export function ruleWindow(refs, events) {
+    const set = new Set(refs.map((r) => r.toLowerCase()));
+    const ev = events.filter((e) => set.has(e.tx.toLowerCase()));
+    if (!ev.length)
+        return undefined;
+    const blocks = ev.map((e) => Number(e.block));
+    const ts = ev.map((e) => Number(e.timestamp)).filter((t) => t > 0);
+    return { fromBlock: Math.min(...blocks), toBlock: Math.max(...blocks), fromTs: ts.length ? Math.min(...ts) : 0, toTs: ts.length ? Math.max(...ts) : 0 };
+}
+/** What the chain cannot show for each kind of rule. Stated, never filled in. */
+function missingFor(r, fp, meta) {
+    const partial = Object.values(meta).some((m) => !m.historyComplete);
+    if (r.category === "entry")
+        return [
+            "Why this width was chosen (a UI default, a model, a manual choice) is not recorded on-chain.",
+            ...(partial ? ["Positions opened before the window have no entry event here."] : []),
+        ];
+    if (r.category === "adjustment" && r.mapsTo === "trigger" && r.params?.exitsAnsweredByReset != null)
+        return [
+            "The price is only known at swaps, so the moment the exit became visible to the wallet is approximate.",
+            "A re-set shortly after an exit can still be coincidence; the wallet's reasoning is not on-chain.",
+        ];
+    if (r.category === "adjustment")
+        return [
+            "What triggered each re-set is not recorded on-chain; only the timing is.",
+            ...(fp.priceRangeExits == null ? ["No pool prices, so the re-sets cannot be compared with price moves."] : []),
+        ];
+    if (r.category === "fee")
+        return [
+            "A Collect also returns withdrawn principal; why each collect happened is not recorded.",
+            ...(fp.collectCount < 4 ? ["Few collects, so the cadence is a rough estimate."] : []),
+        ];
+    if (r.category === "exit")
+        return ["Why liquidity was withdrawn (a stop condition, a need for funds) is not observable."];
+    return [
+        "No wallet transaction records range occupancy; it is computed from the pool's swap prices, and the cited transactions are the positions' openings.",
+        "Prices are sampled only at swaps; between swaps the price is unknown.",
+    ];
+}
 function buildLimitations(fp, meta) {
     const l = ["Testnet (Sepolia) liquidity and prices are not representative of mainnet markets."];
     if (Object.values(meta).some((m) => !m.historyComplete))
@@ -155,7 +220,10 @@ function buildLimitations(fp, meta) {
 function buildStrategyIR(input, fp) {
     const meta = input.meta ?? {};
     const families = scoreFamilies(fp);
-    const rules = mineRules(fp, input.events, meta);
+    const rules = mineRules(fp, input.events, meta).map((r) => {
+        const w = ruleWindow(r.evidenceRefs, input.events);
+        return { ...r, ...(w ? { observationWindow: w } : {}), missingEvidence: missingFor(r, fp, meta) };
+    });
     const insufficient = fp.eventCount < MIN_EVENTS || fp.positionCount === 0 || rules.length === 0 || families[0].score < 0.3;
     const top = insufficient ? { family: "inconclusive", score: 0 } : families[0];
     const evidenceRefs = [...new Set(rules.flatMap((r) => r.evidenceRefs))].slice(0, 24);

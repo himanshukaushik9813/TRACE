@@ -179,7 +179,7 @@ export type ReconstructionSummary = {
     positions: V3Position[];
     accounting: PositionAccounting[];
 };
-export type StrategyFamily = "passive_concentrated" | "passive_full_range" | "periodic_range_adjustment" | "active_range_management" | "capital_redeployment"
+export type StrategyFamily = "passive_concentrated" | "passive_full_range" | "periodic_range_adjustment" | "price_triggered_repositioning" | "active_range_management" | "capital_redeployment"
 /** Evidence is insufficient to support any hypothesis — never padded with a guess. */
  | "inconclusive";
 /**
@@ -248,6 +248,15 @@ export type StrategyRule = {
     mapsTo?: "trigger" | "schedule" | "allocation" | "limit" | "action";
     /** Machine-readable parameters observed on-chain (e.g. range width in ticks). */
     params?: Record<string, number | string>;
+    /** Span of the rule's own cited events (block + time), within the IR's evidencePeriod. */
+    observationWindow?: {
+        fromBlock: number;
+        toBlock: number;
+        fromTs: number;
+        toTs: number;
+    };
+    /** What the chain data cannot show for this rule (stated, never filled in). */
+    missingEvidence?: string[];
 };
 export type AquaCapability = "concentrated_range" | "fee_on_input" | "on_price_trigger" | "scheduled_rebalance" | "fee_collection" | "redeploy_after_exit" | "stop_loss" | "unlimited_token_approval";
 export type CompatibilityCheck = {
@@ -354,6 +363,8 @@ export type BacktestRun = {
     gasCost: number;
     impermanentLoss: number | null;
     capitalUtilization: number | null;
+    /** Slippage paid on range moves (valuation token). Counterfactual runs only; 0 for observed/benchmarks. */
+    slippageCost?: number;
 };
 export type BacktestResult = {
     strategyId: string;

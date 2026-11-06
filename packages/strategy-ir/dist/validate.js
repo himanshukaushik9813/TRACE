@@ -10,6 +10,7 @@
 const SEPOLIA = 11155111;
 const FAMILIES = [
     "passive_concentrated",
+    "price_triggered_repositioning",
     "passive_full_range",
     "periodic_range_adjustment",
     "active_range_management",
@@ -69,6 +70,13 @@ export function validateStrategyIR(ir) {
                 issues.push(at(`rules[${i}].evidenceRefs`, "minItems", "every rule must cite ≥1 transaction hash"));
             if (!isNum(o.confidence) || o.confidence < 0 || o.confidence > 1)
                 issues.push(at(`rules[${i}].confidence`, "range", "must be in [0,1]"));
+            if (o.observationWindow != null) {
+                const w = o.observationWindow;
+                if (![w.fromBlock, w.toBlock, w.fromTs, w.toTs].every(isNum) || Number(w.fromBlock) > Number(w.toBlock))
+                    issues.push(at(`rules[${i}].observationWindow`, "range", "fromBlock ≤ toBlock, all numeric"));
+            }
+            if (o.missingEvidence != null && (!Array.isArray(o.missingEvidence) || !o.missingEvidence.every(isStr)))
+                issues.push(at(`rules[${i}].missingEvidence`, "type", "must be a list of strings"));
         });
     }
     if (!Array.isArray(s.evidenceRefs) || (!inconclusive && s.evidenceRefs.length === 0))

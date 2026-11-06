@@ -16,6 +16,7 @@ export type ValidationResult = { ok: boolean; issues: ValidationIssue[] };
 const SEPOLIA = 11155111;
 const FAMILIES = [
   "passive_concentrated",
+  "price_triggered_repositioning",
   "passive_full_range",
   "periodic_range_adjustment",
   "active_range_management",
@@ -68,6 +69,13 @@ export function validateStrategyIR(ir: unknown): ValidationResult {
       if (!Array.isArray(o.evidenceRefs) || o.evidenceRefs.length === 0 || !o.evidenceRefs.every(isTx))
         issues.push(at(`rules[${i}].evidenceRefs`, "minItems", "every rule must cite ≥1 transaction hash"));
       if (!isNum(o.confidence) || o.confidence < 0 || o.confidence > 1) issues.push(at(`rules[${i}].confidence`, "range", "must be in [0,1]"));
+      if (o.observationWindow != null) {
+        const w = o.observationWindow as Record<string, unknown>;
+        if (![w.fromBlock, w.toBlock, w.fromTs, w.toTs].every(isNum) || Number(w.fromBlock) > Number(w.toBlock))
+          issues.push(at(`rules[${i}].observationWindow`, "range", "fromBlock ≤ toBlock, all numeric"));
+      }
+      if (o.missingEvidence != null && (!Array.isArray(o.missingEvidence) || !o.missingEvidence.every(isStr)))
+        issues.push(at(`rules[${i}].missingEvidence`, "type", "must be a list of strings"));
     });
   }
 
