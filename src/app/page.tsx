@@ -8,6 +8,8 @@ import { Page } from "@/components/page";
 import { EmptyState, ErrorState, Pill } from "@/components/ui";
 import { EngineMark, type EngineState } from "@/components/engine-mark";
 import { Term } from "@/components/term";
+import { WelcomeCard } from "@/components/welcome";
+import { markOnboarding, useMarkOnboarding } from "@/lib/onboarding";
 import { BestExecution, PendingPanel, PerformancePanel, PositionPanel, WalletOverview, Workflow } from "@/components/investigate";
 import { useAquaExecution } from "@/lib/aqua-flow";
 import { useSepoliaWallet } from "@/components/wallet";
@@ -34,6 +36,7 @@ export default function InvestigatePage() {
   const exec = useAquaExecution(fullData, invId);
   const suggested = useSuggestedWallets();
   const recent = useRecentInvestigations();
+  useMarkOnboarding("investigated", inv?.status === "done");
 
   const running = Boolean(inv) && !TERMINAL.includes(inv!.status);
   // Each start request gets a sequence number; only the latest one may switch
@@ -47,6 +50,7 @@ export default function InvestigatePage() {
     if (!isAddress(w)) return setSubmitErr("Enter a valid 0x… Ethereum address (40 hex characters).");
     setQuery(w);
     setSubmitting(true);
+    markOnboarding("seenIntro"); // starting a run means the welcome is no longer needed
     const mine = ++seq.current;
     try {
       // A different wallet supersedes the run on screen: the server cancels it.
@@ -86,6 +90,7 @@ export default function InvestigatePage() {
 
   return (
     <Page>
+      {!compact && <WelcomeCard onExample={() => run(EXAMPLE_WALLET)} />}
       {/* 1. What TRACE does + the wallet input (the one thing to do first) */}
       <section className="grid lg:grid-cols-[minmax(0,1fr)_300px] xl:grid-cols-[minmax(0,1fr)_360px] items-center gap-6 lg:gap-10">
         <div className="min-w-0">

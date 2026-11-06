@@ -5,6 +5,7 @@ import { InvestigationGate } from "@/components/inv-gate";
 import { PositionCard } from "@/components/positions";
 import { LiquidityView } from "@/components/liquidity-view";
 import { NextStep } from "@/components/next-step";
+import { MarkStep } from "@/components/welcome";
 import { Term } from "@/components/term";
 import { EmptyState, SectionTitle } from "@/components/ui";
 import { withInv } from "@/lib/api";
@@ -49,6 +50,7 @@ export default function PositionsPage() {
                   </p>
                 </>
               )}
+              <MarkStep step="viewedPositions" />
               <NextStep href={withInv("/strategy", inv)} title="See what strategy these positions suggest" label="Open Strategy">
                 TRACE reads the pattern in how these ranges were set and moved, and names the closest strategy with its evidence.
               </NextStep>

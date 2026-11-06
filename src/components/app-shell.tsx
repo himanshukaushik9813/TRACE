@@ -9,6 +9,7 @@ import { art } from "@/lib/assets";
 import { useIntegrations, withInv, type IntegrationStatus } from "@/lib/api";
 import { starPath } from "@/components/engine-mark";
 import { WalletButton, NetworkBanner } from "@/components/wallet";
+import { TourFooter } from "@/components/welcome";
 import { plainStatus } from "@/lib/status";
 
 /**
@@ -86,7 +87,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
-function ChainFooter() {
+function ChainFooter({ onNavigate }: { onNavigate?: () => void }) {
   const { data, isError } = useIntegrations();
   const ok = data?.chain.ok;
   const block = data?.chain.latestBlock ?? null;
@@ -110,6 +111,7 @@ function ChainFooter() {
             <ExternalLink size={13} className="text-ink-600" />
           </a>
         )}
+        <TourFooter onNavigate={onNavigate} />
       </div>
     </div>
   );
@@ -234,7 +236,7 @@ function MobileNav({ open, onClose }: { open: boolean; onClose: () => void }) {
           </button>
         </div>
         <NavLinks onNavigate={onClose} />
-        <ChainFooter />
+        <ChainFooter onNavigate={onClose} />
       </aside>
     </>
   );

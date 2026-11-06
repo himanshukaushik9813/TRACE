@@ -322,3 +322,35 @@ test("guided Execute: review, sign, a rejected approve resumes, ship; Investigat
   expect(await page.evaluate(() => localStorage.getItem("trace:lastInvestigation"))).toBeNull();
   expect(txs.map((t) => t.op)).toEqual(["approve", "ship"]);
 });
+
+test("first-visit welcome shows once: Skip hides it for the session, Don't show again for good, Replay brings it back", async ({ page }) => {
+  await page.goto("/");
+  const welcome = page.getByRole("region", { name: /See how any wallet provides liquidity/ });
+  await expect(welcome).toBeVisible();
+  await expect(welcome.getByText("Analyze")).toBeVisible();
+
+  // Skip: gone for this session, even after a reload.
+  await welcome.getByRole("button", { name: "Skip", exact: true }).click();
+  await expect(welcome).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Understand how a wallet manages liquidity." })).toBeVisible();
+  await expect(welcome).toHaveCount(0);
+
+  // A new session (fresh sessionStorage) shows it again until "Don't show again".
+  await page.evaluate(() => sessionStorage.clear());
+  await page.reload();
+  await expect(welcome).toBeVisible();
+  await welcome.getByRole("button", { name: "Don't show again" }).click();
+  await expect(welcome).toHaveCount(0);
+  await page.evaluate(() => sessionStorage.clear());
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Understand how a wallet manages liquidity." })).toBeVisible();
+  await expect(welcome).toHaveCount(0);
+  expect(JSON.parse((await page.evaluate(() => localStorage.getItem("trace:onboarding:v1"))) ?? "{}").hidden).toBe(true);
+
+  // "Replay the tour" in the sidebar starts over from the welcome card.
+  await page.getByRole("button", { name: "Replay the tour" }).first().click();
+  await expect(welcome).toBeVisible();
+  await expect(page.getByText("Getting started").first()).toBeVisible();
+  await expect(page.getByRole("progressbar", { name: "Getting started progress" }).first()).toHaveAttribute("aria-valuenow", "0");
+});

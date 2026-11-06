@@ -9,6 +9,7 @@ import { InvestigationGate } from "@/components/inv-gate";
 import { Card, EmptyState, ErrorState, ExplorerLink, Label, LoadingState, Meter, Pill, SectionTitle, Tabs } from "@/components/ui";
 import { Disclosure } from "@/components/disclosure";
 import { NextStep } from "@/components/next-step";
+import { MarkStep } from "@/components/welcome";
 import { Term } from "@/components/term";
 import { FAMILY, FAMILY_PLAIN } from "@/components/case-file";
 import { fmt } from "@/lib/format";
@@ -456,6 +457,7 @@ export default function StrategyPage() {
               ) : (
                 <VersionsPanel wallet={full.investigation.wallet} currentInv={inv} />
               )}
+              <MarkStep step="viewedStrategy" />
               <NextStep href={withInv("/backtest", inv)} title="Check how this strategy performed" label="Open Backtest">
                 See the wallet&apos;s real result next to simple alternatives, then try your own &ldquo;what if&rdquo; settings.
               </NextStep>

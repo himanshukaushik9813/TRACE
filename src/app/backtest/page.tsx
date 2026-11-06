@@ -9,6 +9,7 @@ import { LineChart, Drawdown } from "@/components/charts";
 import { Card, EmptyState, ErrorState, ExplorerLink, Label, Pill, SectionTitle } from "@/components/ui";
 import { Disclosure } from "@/components/disclosure";
 import { NextStep } from "@/components/next-step";
+import { MarkStep } from "@/components/welcome";
 import { Term } from "@/components/term";
 import { fmt } from "@/lib/format";
 import { api, withInv, type BacktestResult, type BacktestRun } from "@/lib/api";
@@ -322,6 +323,7 @@ export default function BacktestPage() {
                   </Disclosure>
                 </>
               )}
+              <MarkStep step="viewedBacktest" />
               <NextStep href={withInv("/execute", inv)} title="Run this strategy on 1inch Aqua" label="Open Execute">
                 A guided, step-by-step flow: check compatibility, review the exact transactions, then approve each one in your own wallet.
               </NextStep>
