@@ -35,8 +35,20 @@ function dnaRows(f: Fingerprints): { label: string; value: string; derived: stri
     { label: "Capital deployment changes", value: `${f.increaseCount} in · ${f.decreaseCount} out`, derived: `largest single-position liquidity swing ${fmt.frac(f.maxLiquiditySwingPct, 0)}` },
     { label: "Fee collection", value: f.collectCadenceDays != null ? `every ${hours(f.collectCadenceDays * 24)}` : `${f.collectCount} collect(s)`, derived: `${f.collectCount} Collect events (fee portion split from returned principal)` },
     { label: "Withdraw → redeploy", value: `${f.withdrawRedeployCount} cycle(s)`, derived: `median re-entry ${hours(f.medianReentryHours)}` },
+    { label: "Response to price moves", ...priceResponse(f) },
     { label: "Gas paid", value: f.gasSpentEth != null ? `${f.gasSpentEth.toFixed(5)} ETH` : "—", derived: "sum of real receipts (gasUsed × effectiveGasPrice)" },
   ];
+}
+
+/** How the wallet reacted when the real pool price left a position's range (observed, not intent). */
+function priceResponse(f: Fingerprints): { value: string; derived: string } {
+  const exits = f.priceRangeExits;
+  if (exits == null) return { value: "not measured", derived: f.priceRangeExits === undefined ? "computed for investigations run from now on" : "no swap price data for the pool(s)" };
+  if (exits === 0) return { value: "price never left a range", derived: "checked against every real pool swap while each position was open" };
+  return {
+    value: `${f.exitsAnsweredByAction ?? 0} of ${fmt.count(exits, "range exit")} answered`,
+    derived: `a liquidity change in that pool before the price came back${f.medianResponseHours != null ? `; median ${hours(f.medianResponseHours)} after the exit` : ""}`,
+  };
 }
 
 /** "Why TRACE thinks this": the same measurements, said in plain words. */
@@ -51,6 +63,12 @@ function plainReasons(f: Fingerprints): string[] {
     );
   out.push(f.repositionCount === 0 ? "It never moved its price range during the window." : `It moved its price range ${fmt.count(f.repositionCount, "time")} (about ${f.repositionsPerWeek.toFixed(1)} a week).`);
   if (f.timeInRangePct != null) out.push(`The price stayed inside its range ${fmt.frac(f.timeInRangePct, 0)} of the time${f.timeInRangePct >= 0.8 ? ", so it kept earning fees" : ", so it often earned nothing"}.`);
+  if (f.priceRangeExits != null && f.priceRangeExits > 0)
+    out.push(
+      f.exitsAnsweredByAction
+        ? `When the price left its range (${fmt.count(f.priceRangeExits, "time")}), it changed its liquidity ${fmt.count(f.exitsAnsweredByAction, "time")} before the price came back.`
+        : `The price left its range ${fmt.count(f.priceRangeExits, "time")}, and it never reacted before the price came back.`,
+    );
   if (f.collectCount > 0) out.push(`It collected its fees ${fmt.count(f.collectCount, "time")}${f.collectCadenceDays != null ? `, about every ${hours(f.collectCadenceDays * 24)}` : ""}.`);
   out.push(f.withdrawRedeployCount === 0 && f.decreaseCount === 0 ? "It never took money out to put it back in later." : `It withdrew and redeployed money ${fmt.count(f.withdrawRedeployCount, "time")}.`);
   return out;
@@ -142,8 +160,8 @@ function StrategyStory({ s, full, inv }: { s: StrategyRow; full: FullInvestigati
                 <div className="flex flex-wrap items-center gap-2 mt-2.5 text-[0.74rem]">
                   <span className="text-ink-600">Evidence:</span>
                   {r.evidenceRefs.slice(0, 3).map((t) => <ExplorerLink key={t} kind="tx" value={t} />)}
-                  {r.evidenceRefs.length > 3 && <span className="text-ink-600">+{r.evidenceRefs.length - 3} more</span>}
                 </div>
+                <EvidenceTrail inv={inv} refs={r.evidenceRefs} />
                 <details className="mt-2 text-[0.76rem] text-ink-600">
                   <summary className="cursor-pointer text-ink hover:text-gold w-fit">What could be wrong</summary>
                   <div className="mt-1 space-y-0.5">
@@ -239,6 +257,54 @@ function StrategyStory({ s, full, inv }: { s: StrategyRow; full: FullInvestigati
 }
 
 /** The AI source notice, with the exact reason when 0G was unavailable. */
+type RawEvent = { tx: string; block: number | string; timestamp: number | string; kind: string; tokenId: number | string | null };
+const EVENT_PLAIN: Record<string, string> = { MINT: "Opened position", INCREASE: "Added liquidity", DECREASE: "Removed liquidity", COLLECT: "Collected fees", BURN: "Closed position", TRANSFER: "Moved the NFT" };
+
+/**
+ * Every transaction a rule cites, with what happened in it (from the investigation's
+ * stored on-chain events). Loaded only when opened; one shared request per page.
+ */
+function EvidenceTrail({ inv, refs }: { inv: string; refs: string[] }) {
+  const [open, setOpen] = useState(false);
+  const q = useQuery({
+    queryKey: ["events", inv],
+    queryFn: () => api<{ events: RawEvent[] }>(`/investigations/${inv}/events`),
+    enabled: open,
+    staleTime: Infinity,
+  });
+  const byTx = useMemo(() => {
+    const m = new Map<string, RawEvent[]>();
+    for (const e of q.data?.events ?? []) m.set(e.tx.toLowerCase(), [...(m.get(e.tx.toLowerCase()) ?? []), e]);
+    return m;
+  }, [q.data]);
+  if (!refs.length) return null;
+  return (
+    <details className="mt-2 text-[0.76rem] text-ink-600" onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
+      <summary className="cursor-pointer text-ink hover:text-gold w-fit">All {fmt.count(refs.length, "supporting transaction")}</summary>
+      {q.isLoading ? (
+        <div className="mt-1.5">Loading the on-chain events…</div>
+      ) : q.error ? (
+        <div className="mt-1.5">Could not load the events: {(q.error as Error).message}</div>
+      ) : (
+        <ul className="mt-1.5 space-y-1">
+          {refs.map((t) => {
+            const evs = byTx.get(t.toLowerCase()) ?? [];
+            const first = evs[0];
+            return (
+              <li key={t} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <ExplorerLink kind="tx" value={t} />
+                <span className="text-ink">{evs.length ? [...new Set(evs.map((e) => EVENT_PLAIN[e.kind] ?? e.kind))].join(" + ") : "event not in this window"}</span>
+                {first?.tokenId != null && <span>NFT #{String(first.tokenId)}</span>}
+                {first && <span className="tabular">block {Number(first.block).toLocaleString("en-US")} · {fmt.tsSec(first.timestamp)}</span>}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </details>
+  );
+}
+
 function AiSource({ full }: { full: FullInvestigation }) {
   const run = full.inferenceRuns[0];
   const ok = run?.status === "succeeded";
@@ -256,6 +322,30 @@ function AiSource({ full }: { full: FullInvestigation }) {
               ? `No rule comes from a model. Reason: ${run.errorCode ?? run.status}: ${run.error ?? "no detail"}${run.requestId ? ` (router request ${run.requestId})` : ""}.`
               : "No inference run is recorded for this investigation."}
         </div>
+        {run && (
+          <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-[0.72rem] text-ink-600">
+            <dt>Status</dt>
+            <dd className="text-ink">{run.status}{run.httpStatus != null ? ` · HTTP ${run.httpStatus}` : ""}{run.latencyMs != null ? ` · ${run.latencyMs} ms` : ""}</dd>
+            <dt>Model</dt>
+            <dd className="text-ink">{run.model ?? "—"}</dd>
+            <dt>Request id</dt>
+            <dd className="text-ink break-anywhere">{run.requestId ?? "—"}</dd>
+            <dt>Trust mode</dt>
+            <dd className="text-ink">{run.trustMode ?? "key default"}</dd>
+            <dt>TEE verified</dt>
+            <dd className="text-ink">{run.teeVerified == null ? "not reported" : run.teeVerified ? "yes" : "no"}</dd>
+            <dt>Provider</dt>
+            <dd className="text-ink break-anywhere">{run.providerAddress ?? "—"}</dd>
+            <dt>Run at</dt>
+            <dd className="text-ink">{fmt.ts(Date.parse(run.createdAt))}</dd>
+          </dl>
+        )}
+        {!ok && (
+          <p className="text-[0.72rem] text-ink-600 mt-2 leading-snug">
+            What this costs: without 0G, every rule comes from TRACE&apos;s fixed scoring of five known strategy families. With 0G, the model can propose rules outside those
+            templates (each must still cite this wallet&apos;s real transactions to pass the evidence gate), and the router can attest the run in a TEE.
+          </p>
+        )}
       </div>
     </div>
   );

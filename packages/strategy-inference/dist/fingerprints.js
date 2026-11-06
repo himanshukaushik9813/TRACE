@@ -73,6 +73,7 @@ export function computeFingerprints(events, meta = {}, priceSeries = {}, window)
         }
     }
     const timeInRangePct = computeTimeInRange(ledgers, meta, priceSeries);
+    const response = computePriceResponse(ledgers, sorted, meta, priceSeries);
     const gasEvents = new Map();
     for (const e of sorted)
         if (e.gasUsed && e.effectiveGasPrice)
@@ -100,7 +101,57 @@ export function computeFingerprints(events, meta = {}, priceSeries = {}, window)
         maxLiquiditySwingPct: maxSwing,
         timeInRangePct,
         gasSpentEth,
+        priceRangeExits: response.exits,
+        exitsAnsweredByAction: response.answered,
+        medianResponseHours: response.exits == null ? null : median(response.delays),
     };
+}
+const LIQUIDITY_ACTIONS = new Set(["MINT", "INCREASE", "DECREASE", "BURN"]);
+/**
+ * Walk each position's life over the pool's real swap prices. A range exit is an
+ * in-range → out-of-range transition. It counts as answered when the wallet changes
+ * liquidity in the same pool (any of its positions) after the exit and before the
+ * price returns to the range or the position closes. Observed facts only: this
+ * says nothing about why the wallet acted.
+ */
+export function computePriceResponse(ledgers, events, meta, series) {
+    let covered = false;
+    let exits = 0;
+    let answered = 0;
+    const delays = [];
+    for (const t of ledgers) {
+        const m = meta[String(t.tokenId)];
+        if (!m?.pool)
+            continue;
+        const s = series[m.pool];
+        if (!s || s.points.length === 0)
+            continue;
+        const start = t.openedBlock ?? 0;
+        const end = t.closedBlock ?? Number.MAX_SAFE_INTEGER;
+        const pts = s.points.filter((p) => p.block >= start && p.block <= end);
+        if (!pts.length)
+            continue;
+        covered = true;
+        const pool = m.pool.toLowerCase();
+        const actions = events.filter((e) => LIQUIDITY_ACTIONS.has(e.kind) && (e.pool ?? meta[String(e.tokenId)]?.pool ?? "").toLowerCase() === pool);
+        const inside = (tick) => tick >= m.tickLower && tick < m.tickUpper;
+        for (let i = 1; i < pts.length; i++) {
+            if (!(inside(pts[i - 1].tick) && !inside(pts[i].tick)))
+                continue;
+            exits++;
+            const exit = pts[i];
+            // The price is back in range at the first later point inside it (or never in the window).
+            const back = pts.slice(i + 1).find((p) => inside(p.tick));
+            const limitBlock = Math.min(back?.block ?? Number.MAX_SAFE_INTEGER, end);
+            const act = actions.find((e) => e.block > exit.block && e.block <= limitBlock);
+            if (act) {
+                answered++;
+                if (act.timestamp && exit.timestamp && act.timestamp >= exit.timestamp)
+                    delays.push((act.timestamp - exit.timestamp) / 3600);
+            }
+        }
+    }
+    return covered ? { exits, answered, delays } : { exits: null, answered: null, delays };
 }
 function computeTimeInRange(ledgers, meta, series) {
     let inside = 0;

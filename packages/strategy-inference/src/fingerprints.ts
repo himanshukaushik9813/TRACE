@@ -43,6 +43,15 @@ export type Fingerprints = {
   timeInRangePct: number | null;
   /** Total gas paid by the wallet's position transactions, in ETH (null if receipts unavailable). */
   gasSpentEth: number | null;
+  /**
+   * Response to price movement: how often the real pool price (Swap events) left an
+   * open position's range. Null when no price series covers the wallet's positions.
+   */
+  priceRangeExits: number | null;
+  /** Of those exits, how many were followed by a liquidity change by the wallet in that pool before the price came back. */
+  exitsAnsweredByAction: number | null;
+  /** Median hours from the price leaving the range to that liquidity change (null if none). */
+  medianResponseHours: number | null;
 };
 
 const FULL_RANGE_TICKS = 1_700_000; // ≥ ~96% of the [-887272, 887272] span
@@ -119,6 +128,7 @@ export function computeFingerprints(
   }
 
   const timeInRangePct = computeTimeInRange(ledgers, meta, priceSeries);
+  const response = computePriceResponse(ledgers, sorted, meta, priceSeries);
 
   const gasEvents = new Map<string, number>();
   for (const e of sorted) if (e.gasUsed && e.effectiveGasPrice) gasEvents.set(e.tx, (Number(e.gasUsed) * Number(e.effectiveGasPrice)) / 1e18);
@@ -146,7 +156,59 @@ export function computeFingerprints(
     maxLiquiditySwingPct: maxSwing,
     timeInRangePct,
     gasSpentEth,
+    priceRangeExits: response.exits,
+    exitsAnsweredByAction: response.answered,
+    medianResponseHours: response.exits == null ? null : median(response.delays),
   };
+}
+
+const LIQUIDITY_ACTIONS = new Set(["MINT", "INCREASE", "DECREASE", "BURN"]);
+
+/**
+ * Walk each position's life over the pool's real swap prices. A range exit is an
+ * in-range → out-of-range transition. It counts as answered when the wallet changes
+ * liquidity in the same pool (any of its positions) after the exit and before the
+ * price returns to the range or the position closes. Observed facts only: this
+ * says nothing about why the wallet acted.
+ */
+export function computePriceResponse(
+  ledgers: TokenLedger[],
+  events: V3Event[],
+  meta: Record<string, PositionMeta>,
+  series: Record<string, PriceSeries>,
+): { exits: number | null; answered: number | null; delays: number[] } {
+  let covered = false;
+  let exits = 0;
+  let answered = 0;
+  const delays: number[] = [];
+  for (const t of ledgers) {
+    const m = meta[String(t.tokenId)];
+    if (!m?.pool) continue;
+    const s = series[m.pool];
+    if (!s || s.points.length === 0) continue;
+    const start = t.openedBlock ?? 0;
+    const end = t.closedBlock ?? Number.MAX_SAFE_INTEGER;
+    const pts = s.points.filter((p) => p.block >= start && p.block <= end);
+    if (!pts.length) continue;
+    covered = true;
+    const pool = m.pool.toLowerCase();
+    const actions = events.filter((e) => LIQUIDITY_ACTIONS.has(e.kind) && (e.pool ?? meta[String(e.tokenId)]?.pool ?? "").toLowerCase() === pool);
+    const inside = (tick: number) => tick >= m.tickLower && tick < m.tickUpper;
+    for (let i = 1; i < pts.length; i++) {
+      if (!(inside(pts[i - 1].tick) && !inside(pts[i].tick))) continue;
+      exits++;
+      const exit = pts[i];
+      // The price is back in range at the first later point inside it (or never in the window).
+      const back = pts.slice(i + 1).find((p) => inside(p.tick));
+      const limitBlock = Math.min(back?.block ?? Number.MAX_SAFE_INTEGER, end);
+      const act = actions.find((e) => e.block > exit.block && e.block <= limitBlock);
+      if (act) {
+        answered++;
+        if (act.timestamp && exit.timestamp && act.timestamp >= exit.timestamp) delays.push((act.timestamp - exit.timestamp) / 3600);
+      }
+    }
+  }
+  return covered ? { exits, answered, delays } : { exits: null, answered: null, delays };
 }
 
 function computeTimeInRange(ledgers: TokenLedger[], meta: Record<string, PositionMeta>, series: Record<string, PriceSeries>): number | null {

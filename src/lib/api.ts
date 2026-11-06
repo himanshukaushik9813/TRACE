@@ -227,6 +227,10 @@ export type Fingerprints = {
   maxLiquiditySwingPct: number;
   timeInRangePct: number | null;
   gasSpentEth: number | null;
+  /** Response to price movement (added 2026-11-06; absent on older investigations). */
+  priceRangeExits?: number | null;
+  exitsAnsweredByAction?: number | null;
+  medianResponseHours?: number | null;
 };
 
 export type PriceSeriesUi = {
