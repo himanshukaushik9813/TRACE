@@ -385,7 +385,34 @@ export type FullInvestigation = {
   storage: StorageArtifact[];
 };
 
-export type AuthorizationRow = { id: string; planId: string; wallet: string; action: string; validated: boolean; worldStatus: string; expiresAt: string; live: boolean; createdAt: string };
+export type AuthorizationRow = {
+  id: string;
+  planId: string;
+  wallet: string;
+  action: string;
+  validated: boolean;
+  /** World ID outcome: verified · rejected · expired · replayed · required · unavailable · not_required (older rows: not_configured · failed · skipped). */
+  worldStatus: string;
+  strategyId?: string;
+  strategyVersionHash?: string;
+  planHash?: string;
+  /** True when a World ID nullifier (anonymous human reference) is stored with this authorization. */
+  humanBound?: boolean;
+  notes?: string[];
+  expiresAt: string;
+  live: boolean;
+  createdAt: string;
+};
+
+/** The World ID request the server issues with each challenge (see POST /plans/:id/challenge). */
+export type WorldRequest = {
+  app_id: `app_${string}`;
+  action: string;
+  environment: "staging" | "production";
+  signal: string;
+  rp_context: { rp_id: string; nonce: string; created_at: number; expires_at: number; signature: string };
+  token: string;
+};
 
 export type TxRow = {
   id: string;

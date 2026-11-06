@@ -90,7 +90,20 @@ export async function integrationSnapshot(cfg, db, queueBackend, force = false) 
     out.push(signed > 0
         ? r("eip712", "Wallet authorization (EIP-712, server-verified)", "VERIFIED TESTNET", `${signed} wallet signature(s) verified by the server: signer, chain, expiry, single-use challenge, strategy version + plan hash.`)
         : r("eip712", "Wallet authorization (EIP-712, server-verified)", "IMPLEMENTED BUT NOT VERIFIED", "Verified per request: signature, signer, chain, expiry, single-use challenge, strategy version + plan hash. No wallet has signed yet."));
-    out.push(r("world_id", "World ID v4 (staging) human proof", worldConfigured(cfg.world) ? "IMPLEMENTED BUT NOT VERIFIED" : "BLOCKED BY EXTERNAL DEPENDENCY", worldConfigured(cfg.world) ? `configured (${cfg.world.environment}); staging — not production identity verification` : "WORLD_RP_ID / WORLD_RP_SIGNING_KEY not configured"));
+    {
+        const verified = await db
+            .query(`select count(*)::int n from authorizations where validated and world_status = 'verified'`)
+            .then((x) => x[0]?.n ?? 0)
+            .catch(() => 0);
+        const configured = worldConfigured(cfg.world);
+        out.push(r("world_id", `World ID 4.0 human authorization (${cfg.world.environment})`, !configured ? "BLOCKED BY EXTERNAL DEPENDENCY" : verified > 0 ? "VERIFIED TESTNET" : "IMPLEMENTED BUT NOT VERIFIED", !configured
+            ? cfg.world.enforce
+                ? `Not registered: protected execution (aqua:ship) is disabled until WORLD_APP_ID, WORLD_RP_ID and WORLD_RP_SIGNING_KEY are set (developer.world.org, World ID 4.0).`
+                : "Not registered, and WORLD_ID_ENFORCE=false: ship is allowed WITHOUT a verified human."
+            : verified > 0
+                ? `${verified} authorization(s) verified by World's API (${cfg.world.environment}${cfg.world.environment === "staging" ? ", World ID simulator, not a real person" : ""}).`
+                : `Configured (${cfg.world.environment}); no proof verified yet.`));
+    }
     // Persistence.
     let dbDetail = "unreachable";
     let dbOk = false;

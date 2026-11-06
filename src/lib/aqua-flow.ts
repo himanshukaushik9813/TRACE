@@ -12,8 +12,10 @@
  * sent again, so a transaction confirmed during the reload is recorded instead
  * of duplicated.
  *
- * Two explicit user approvals, never automatic:
- *   verify()  → (check + compile if no plan yet) → EIP-712 signature, verified by the server
+ * Explicit user approvals, never automatic:
+ *   verify()  → (check + compile if no plan yet) → World ID human verification bound to
+ *               this exact plan (protected actions) → EIP-712 wallet signature → the server
+ *               validates both independently. Human verification ≠ wallet signing.
  *   execute() → exact-amount approvals → ship, each confirmed by its receipt
  * A failure stops at that stage; calling the same action again resumes it
  * without repeating stages that already succeeded.
@@ -23,7 +25,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePublicClient, useSendTransaction, useSignTypedData } from "wagmi";
 import { SEPOLIA_CHAIN_ID } from "@trace/chain-config";
-import { API_URL, ApiError, api, type AuthorizationRow, type Compatibility, type ExecutionPlan, type FullInvestigation, type TxRow } from "@/lib/api";
+import { API_URL, ApiError, api, type AuthorizationRow, type Compatibility, type ExecutionPlan, type FullInvestigation, type TxRow, type WorldRequest } from "@/lib/api";
 
 /* ------------------------------------------------------------------ */
 /*  Snapshot of the current plan, read from the server payload         */
@@ -74,7 +76,7 @@ export function snapshot(full: FullInvestigation | null | undefined): ExecSnapsh
 
 export type Busy =
   | null
-  | { stage: "verify"; what: "check" | "compile" | "challenge" | "wallet" | "server" }
+  | { stage: "verify"; what: "check" | "compile" | "challenge" | "human" | "wallet" | "server" }
   | { stage: "execute"; what: "wallet" | "record" | "confirm"; op: "approve" | "ship" };
 
 export type StageError = { stage: "verify" | "execute"; message: string } | null;
@@ -83,7 +85,23 @@ type PlanResponse = { planId: string; plan: ExecutionPlan; compatibility: Compat
 type Challenge = {
   typedData: { domain: { name: string; version: string; chainId: number }; types: Record<string, { name: string; type: string }[]>; primaryType: string; message: Record<string, string> };
   claims: Record<string, unknown>;
+  world: WorldRequest | null;
+  worldStatus: "required" | "unavailable" | "optional" | "not_required";
+  worldRequirements?: string;
 };
+
+/** Human (World ID) verification state shown in the UI — separate from the wallet signature. */
+export type HumanState =
+  | { status: "idle" }
+  | { status: "in_progress"; request: WorldRequest }
+  | { status: "checking" }
+  | { status: "verified" }
+  | { status: "rejected"; detail: string }
+  | { status: "expired"; detail: string }
+  | { status: "cancelled" }
+  | { status: "unavailable"; detail: string };
+
+const IDKIT_EXPIRED = new Set(["rp_signature_expired", "timestamp_too_old", "invalid_timestamp"]);
 type Intent = { planId: string; op: "approve" | "ship"; stepIndex: number; fromBlock: number; nonce: number; at: number };
 type Recovery = null | { state: "checking" } | { state: "pending"; detail: string };
 
@@ -121,6 +139,25 @@ export function useAquaExecution(full: FullInvestigation | null, invId: string |
   const [error, setError] = useState<StageError>(null);
   const [recovery, setRecovery] = useState<Recovery>(null);
   const lock = useRef(false); // one wallet action at a time (double clicks, two buttons)
+  const [human, setHuman] = useState<HumanState>({ status: "idle" });
+  const humanWait = useRef<{ resolve: (r: Record<string, unknown>) => void; reject: (e: Error) => void } | null>(null);
+
+  /** IDKit widget callbacks (rendered by the page while human.status === "in_progress"). */
+  const humanSucceeded = useCallback((result: Record<string, unknown>) => {
+    humanWait.current?.resolve(result);
+    humanWait.current = null;
+  }, []);
+  const humanFailed = useCallback((code: string) => {
+    const st: HumanState =
+      code === "user_rejected" || code === "closed"
+        ? { status: "cancelled" }
+        : IDKIT_EXPIRED.has(code)
+          ? { status: "expired", detail: code }
+          : { status: "rejected", detail: code };
+    setHuman(st);
+    humanWait.current?.reject(new Error(st.status === "cancelled" ? "World ID verification was cancelled, so nothing was authorized." : `World ID verification ${st.status} (${code}). Nothing was authorized.`));
+    humanWait.current = null;
+  }, []);
 
   const snap = snapshot(full);
   const refresh = useCallback(() => qc.invalidateQueries({ queryKey: ["full", invId] }), [qc, invId]);
@@ -209,6 +246,22 @@ export function useAquaExecution(full: FullInvestigation | null, invId: string |
         }
         setBusy({ stage: "verify", what: "challenge" });
         const ch = await api<Challenge>(`/plans/${pid}/challenge`, { method: "POST", body: { wallet: args.maker, action: "aqua:ship" } });
+        // 1) Human verification (World ID), bound by its signal to this exact plan, strategy version, action and challenge.
+        let world: { result: Record<string, unknown>; request: { nonce: string; expires_at: number; token: string } } | undefined;
+        if (ch.worldStatus === "unavailable") {
+          setHuman({ status: "unavailable", detail: ch.worldRequirements ?? "World ID is not registered on this server." });
+          throw new Error("Shipping needs World ID human verification, which is not set up on this TRACE server yet, so execution stays disabled.");
+        }
+        if (ch.worldStatus === "required" && ch.world) {
+          setBusy({ stage: "verify", what: "human" });
+          setHuman({ status: "in_progress", request: ch.world });
+          const result = await new Promise<Record<string, unknown>>((resolve, reject) => {
+            humanWait.current = { resolve, reject };
+          });
+          world = { result, request: { nonce: ch.world.rp_context.nonce, expires_at: ch.world.rp_context.expires_at, token: ch.world.token } };
+          setHuman({ status: "checking" });
+        }
+        // 2) Wallet signature (EIP-712): proves control of the wallet. Not identity.
         const m = ch.typedData.message;
         setBusy({ stage: "verify", what: "wallet" });
         const signature = await signTypedData({
@@ -222,12 +275,25 @@ export function useAquaExecution(full: FullInvestigation | null, invId: string |
         const r = await fetch(`${API_URL}/authorizations`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ planId: pid, claims: ch.claims, signature }),
+          body: JSON.stringify({ planId: pid, claims: ch.claims, signature, world }),
         });
-        const body = (await r.json()) as { validated?: boolean; error?: string; verification?: { notes?: string[] } };
+        const body = (await r.json()) as { validated?: boolean; error?: string; verification?: { notes?: string[]; worldId?: string } };
         await refresh();
+        const wid = body.verification?.worldId;
+        if (world) {
+          const notes = body.verification?.notes?.join("; ") || "";
+          setHuman(
+            wid === "verified"
+              ? { status: "verified" }
+              : wid === "expired"
+                ? { status: "expired", detail: notes }
+                : { status: "rejected", detail: wid === "replayed" ? "this proof was already used" : notes || "rejected by the server" },
+          );
+        }
         if (!body.validated) throw new Error(body.error ?? `The server rejected the authorization: ${body.verification?.notes?.join("; ") || "verification failed"}`);
       } catch (e) {
+        humanWait.current = null;
+        setHuman((h) => (h.status === "in_progress" || h.status === "checking" ? { status: "idle" } : h));
         setError({ stage: "verify", message: walletErr(e) });
       } finally {
         setBusy(null);
@@ -295,7 +361,7 @@ export function useAquaExecution(full: FullInvestigation | null, invId: string |
     }
   }, [publicClient, refresh, sendTransaction, snap]);
 
-  return { snap, busy, error, recovery, verify, execute, clearError: () => setError(null) };
+  return { snap, busy, error, recovery, verify, execute, human, humanSucceeded, humanFailed, clearError: () => setError(null) };
 }
 
 export type AquaExecution = ReturnType<typeof useAquaExecution>;

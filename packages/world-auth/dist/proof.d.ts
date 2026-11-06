@@ -7,14 +7,11 @@
  *    expiry. The server recovers the signer and checks every binding plus
  *    challenge freshness (consumed atomically in the DB → replay protection).
  *
- * 2) World ID v4 (optional layer, staging). When WORLD_RP_ID /
- *    WORLD_RP_SIGNING_KEY are configured, the IDKit proof's `signal` is the
- *    keccak256 of the same EIP-712 claims, so the human proof is bound to the
- *    same strategy version + plan + challenge. The backend signs the RP
- *    request, forwards the proof to World's verify API and checks the
- *    signal hash and nullifier uniqueness. It is labelled "World ID staging —
- *    not production identity verification". Without credentials the layer
- *    reports `not_configured`; it never pretends to have verified anything.
+ * 2) World ID 4.0 human verification (required for protected actions such as
+ *    aqua:ship). The IDKit proof's `signal` is keccak256 of the same claims, so
+ *    the human proof is bound to the same strategy version + plan + action +
+ *    challenge + expiry. See verifyWorldProof below. Without a World ID
+ *    registration, protected actions are refused (never silently allowed).
  *
  * A frontend-only button is never treated as authorization.
  */
@@ -128,23 +125,56 @@ export type WorldConfig = {
     signingKey?: string;
     action: string;
     environment: "staging" | "production";
+    /** Require a verified human for protected actions (default true). */
+    enforce?: boolean;
 };
+/** Actions that move value on the user's behalf and therefore need a verified human. */
+export declare const PROTECTED_ACTIONS: Set<string>;
 export declare const worldConfigured: (w: WorldConfig) => boolean;
-/** Backend RP signature for the IDKit request (never computed in the browser). */
-export declare function worldRpRequest(w: WorldConfig): Promise<{
-    sig: string;
-    nonce: string;
-    createdAt: number;
-    expiresAt: number;
-    appId: string | undefined;
-    rpId: string | undefined;
+export declare const worldRequired: (w: WorldConfig, action: string) => boolean;
+/** Exactly what an operator must register to enable protected execution. */
+export declare const WORLD_REQUIREMENTS = "Register an app at developer.world.org with World ID 4.0 enabled, then set WORLD_APP_ID (app_\u2026), WORLD_RP_ID (rp_\u2026) and WORLD_RP_SIGNING_KEY (secret) on the API server; WORLD_ENVIRONMENT=staging uses the World ID simulator, production needs a real World App.";
+export type WorldRequest = {
+    app_id: string;
     action: string;
     environment: "staging" | "production";
-}>;
-/** Forward an IDKit result to World's v4 verify API and check the bound signal. */
-export declare function verifyWorldProof(w: WorldConfig, idkitResult: Record<string, unknown>, expectedSignal: string): Promise<{
-    ok: boolean;
+    signal: Hex;
+    rp_context: {
+        rp_id: string;
+        nonce: string;
+        created_at: number;
+        expires_at: number;
+        signature: string;
+    };
+    /** Seals (challenge, nonce, expiry) so the server can tell which request a proof answers. */
+    token: Hex;
+};
+/** Server-keyed seal over a World ID request; the signing key never leaves the server. */
+export declare function worldRequestToken(w: WorldConfig, challenge: string, nonce: string, expiresAt: number): Hex;
+/** Backend RP signature + the signal for one authorization challenge (never computed in the browser). */
+export declare function worldRpRequest(w: WorldConfig, claims: AuthorizationClaims, ttlSeconds?: number): Promise<WorldRequest>;
+export type WorldProofSubmission = {
+    /** The IDKit result, exactly as IDKit returned it. */
+    result: Record<string, unknown>;
+    /** Echo of the request the server issued for this challenge. */
+    request: {
+        nonce: string;
+        expires_at: number;
+        token: string;
+    };
+};
+export type WorldVerdict = {
+    status: "verified" | "rejected" | "expired";
     nullifier: string | null;
     detail: string;
-}>;
+};
+/**
+ * Validate a World ID proof for one authorization. Local checks first (request seal,
+ * expiry, environment, action, nonce, signal binding), then World's verify API with the
+ * proof forwarded unchanged. Never returns "verified" without World's success response.
+ */
+export declare function verifyWorldProof(w: WorldConfig, sub: WorldProofSubmission | null | undefined, claims: AuthorizationClaims, opts?: {
+    now?: number;
+    fetchImpl?: typeof fetch;
+}): Promise<WorldVerdict>;
 export type { AuthorizationClaims, AuthorizationVerification };

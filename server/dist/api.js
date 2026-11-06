@@ -31,7 +31,7 @@ import { pad, toEventSelector } from "viem";
 import { AQUA, SEPOLIA_CHAIN_ID, isAddress } from "@trace/chain-config";
 import { createTraceClient, scrubSecrets } from "@trace/chain-data";
 import { assessCompatibility, aquaClient, compilePlan } from "@trace/aqua-adapter";
-import { buildTypedData, newChallenge, verifyAuthorization, verifyWorldProof, worldConfigured, worldRpRequest, worldSignal } from "@trace/world-auth";
+import { WORLD_REQUIREMENTS, buildTypedData, newChallenge, verifyAuthorization, verifyWorldProof, worldConfigured, worldRequired, worldRpRequest, } from "@trace/world-auth";
 import { archive } from "@trace/zero-g-storage";
 import { runBacktest } from "@trace/backtester";
 import { buildCaseStudy } from "@trace/strategy-inference";
@@ -245,6 +245,9 @@ export function createApi(deps) {
         const [authorizations, transactions] = planIds.length
             ? await Promise.all([
                 db.query(`select id, plan_id as "planId", wallet, action, validated, world_status as "worldStatus",
+                    claims_json->>'strategyId' as "strategyId", claims_json->>'strategyVersionHash' as "strategyVersionHash",
+                    claims_json->>'planHash' as "planHash", (world_nullifier is not null) as "humanBound",
+                    verification_json->'notes' as notes,
                     expires_at as "expiresAt", (expires_at > now()) as live, created_at as "createdAt"
                from authorizations where plan_id = any($1::uuid[]) order by created_at desc`, [planIds]),
                 db.query(`select * from transactions where plan_id = any($1::uuid[]) order by created_at desc`, [planIds]),
@@ -559,8 +562,19 @@ export function createApi(deps) {
             challenge,
             expiresAt: Math.floor(Date.now() / 1000) + AUTH_TTL_SECONDS,
         };
-        const world = worldConfigured(cfg.world) ? { ...(await worldRpRequest(cfg.world)), signal: worldSignal(claims) } : null;
-        res.json(json({ claims, typedData: buildTypedData(claims), world, worldStatus: world ? "required" : "not_configured" }));
+        const required = worldRequired(cfg.world, action);
+        const configured = worldConfigured(cfg.world);
+        const world = configured ? await worldRpRequest(cfg.world, claims, AUTH_TTL_SECONDS) : null;
+        res.json(json({
+            claims,
+            typedData: buildTypedData(claims),
+            world,
+            // required: a verified human must authorize this action · unavailable: protected, but World ID is not
+            // registered here, so the action stays disabled · optional / not_required: not a protected action.
+            worldStatus: required ? (configured ? "required" : "unavailable") : configured ? "optional" : "not_required",
+            worldRequirements: required && !configured ? WORLD_REQUIREMENTS : undefined,
+            identityNote: "World ID proves a unique human approved this exact plan; the wallet signature separately proves control of the wallet.",
+        }));
     }));
     app.post("/authorizations", limiter(30, 60_000), h(async (req, res) => {
         const { planId, claims, signature, world } = req.body ?? {};
@@ -577,25 +591,47 @@ export function createApi(deps) {
         const pre = await verifyAuthorization({ claims: c, signature: signature, expected, challengeFresh: true });
         const fresh = pre.validated ? await db.consumeChallenge(c.challenge, p.id, c.wallet, c.action) : false;
         const result = pre.validated ? await verifyAuthorization({ claims: c, signature: signature, expected, challengeFresh: fresh }) : pre;
-        let worldStatus = worldConfigured(cfg.world) ? "failed" : "not_configured";
+        // Human verification (World ID 4.0) — independent of the wallet signature above.
+        let worldStatus = "not_required";
         let nullifier = null;
-        if (worldConfigured(cfg.world) && result.validated) {
+        const required = worldRequired(cfg.world, c.action);
+        if (required && !worldConfigured(cfg.world)) {
+            worldStatus = "unavailable";
+            result.validated = false;
+            result.verification.notes.push(`protected action "${c.action}" needs World ID human verification, which is not registered on this server. ${WORLD_REQUIREMENTS}`);
+        }
+        else if (required || (world && worldConfigured(cfg.world))) {
             if (!world) {
+                worldStatus = "required";
                 result.validated = false;
-                result.verification.notes.push("World ID proof required by server configuration but not provided");
+                result.verification.notes.push("World ID verification is required for this action and was not completed (no proof, or the user cancelled)");
+            }
+            else if (!result.validated && required) {
+                // The proof is not sent to World when the authorization already failed (replay, changed plan, wrong signer…).
+                worldStatus = result.verification.challengeFresh ? "rejected" : "replayed";
+                result.verification.notes.push("World ID proof not accepted: the authorization failed its other checks");
             }
             else {
-                const w = await verifyWorldProof(cfg.world, world, worldSignal(c));
-                nullifier = w.nullifier;
-                if (w.ok && nullifier && (await db.recordNullifier(nullifier, cfg.world.action)))
-                    worldStatus = "verified";
+                const v = await verifyWorldProof(cfg.world, world, c, { fetchImpl: deps.worldFetch });
+                worldStatus = v.status;
+                if (v.status === "verified") {
+                    nullifier = v.nullifier;
+                    const nonce = String(world.request.nonce);
+                    if (!(await db.recordNullifier(nullifier, `${cfg.world.action}#${nonce}`))) {
+                        worldStatus = "replayed";
+                        result.validated = false;
+                        result.verification.notes.push("this World ID proof was already used");
+                    }
+                }
                 else {
-                    result.validated = false;
-                    result.verification.notes.push(w.ok ? "World ID nullifier already used for this action" : w.detail);
+                    if (required)
+                        result.validated = false;
+                    result.verification.notes.push(`World ID: ${v.detail}`);
                 }
             }
         }
         result.verification.worldId = worldStatus;
+        result.verification.worldNullifier = nullifier;
         const authorizationId = await db.insertAuthorization({
             planId: p.id,
             wallet: c.wallet,
@@ -657,6 +693,9 @@ export function createApi(deps) {
             return bad(res, `plan has no "${op}" step`, 422);
         if (!auth.live && op === "ship")
             return bad(res, "authorization expired — sign a new one", 403);
+        // Second gate for protected actions: the authorization must carry a World-verified human.
+        if (worldRequired(cfg.world, auth.action) && auth.worldStatus !== "verified")
+            return bad(res, `"${auth.action}" is a protected action: it needs an authorization verified by World ID (this one is "${auth.worldStatus}")`, 403);
         // Idempotency: re-posting the same hash is a no-op re-check; a second live ship
         // (or more approvals than the plan has) for the same plan is refused.
         const prior = await db.query(`select tx_hash, op, status from transactions where plan_id = $1`, [p.id]);

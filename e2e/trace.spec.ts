@@ -258,8 +258,11 @@ test("guided Execute: review, sign, a rejected approve resumes, ship; Investigat
     plans.push({ id: "p1", maker, planHash: "0xplan", createdAt: now(), plan });
     return r.fulfill({ json: { planId: "p1", compatibility: compat, simulation: { [`approve:${token}`]: { ok: true }, [`ship:${registry}`]: { ok: true } }, plan } });
   });
+  // This test covers the wallet flow against a server that does NOT enforce World ID
+  // (WORLD_ID_ENFORCE=false), so the integration status is mocked to say so.
+  await mockWorldStatus(page, "Not registered, and WORLD_ID_ENFORCE=false: ship is allowed WITHOUT a verified human.");
   await page.route("**/plans/*/challenge", (r) =>
-    r.fulfill({ json: { typedData: { domain: { name: "TRACE", version: "1", chainId: 11155111 }, types: { Authorization: [{ name: "wallet", type: "address" }, { name: "chainId", type: "uint256" }, { name: "expiresAt", type: "uint256" }] }, primaryType: "Authorization", message: { wallet: maker, chainId: "11155111", expiresAt: "9999999999" } }, claims: {} } }),
+    r.fulfill({ json: { worldStatus: "not_required", world: null, typedData: { domain: { name: "TRACE", version: "1", chainId: 11155111 }, types: { Authorization: [{ name: "wallet", type: "address" }, { name: "chainId", type: "uint256" }, { name: "expiresAt", type: "uint256" }] }, primaryType: "Authorization", message: { wallet: maker, chainId: "11155111", expiresAt: "9999999999" } }, claims: {} } }),
   );
   await page.route("**/authorizations", (r) => {
     auths.push({ id: "a1", planId: "p1", wallet: maker, action: "aqua:ship", validated: true, worldStatus: "not_configured", expiresAt: new Date(Date.now() + 600_000).toISOString(), live: true, createdAt: now() });
@@ -370,4 +373,24 @@ test("case study: real investigation → timeline event detail and Evidence Expl
   // Every evidence row links its transaction to Sepolia Etherscan.
   const txLinks = page.locator('table a[href*="sepolia.etherscan.io/tx/0x"]');
   expect(await txLinks.count()).toBeGreaterThan(0);
+});
+
+
+/** Override only the world_id entry of the real /integrations response. */
+async function mockWorldStatus(page: import("@playwright/test").Page, detail: string) {
+  await page.route("**/integrations", async (r) => {
+    const res = await r.fetch();
+    const body = await res.json();
+    body.integrations = body.integrations.map((i: { key: string }) => (i.key === "world_id" ? { ...i, status: "BLOCKED BY EXTERNAL DEPENDENCY", detail } : i));
+    return r.fulfill({ response: res, json: body });
+  });
+}
+
+test("World ID enforced but not registered: protected execution stays disabled and says exactly what is missing", async ({ page, request }) => {
+  const recent = await (await request.get(`${API}/investigations/recent?limit=30`)).json();
+  const done = recent.investigations.find((x: { status: string }) => x.status === "done");
+  test.skip(!done, "needs a completed investigation");
+  await mockWorldStatus(page, "Not registered: protected execution (aqua:ship) is disabled until WORLD_APP_ID, WORLD_RP_ID and WORLD_RP_SIGNING_KEY are set (developer.world.org, World ID 4.0).");
+  await page.goto(`/execute?inv=${done.id}`);
+  await expect(page.getByText(/protected action: it needs/).first()).toBeVisible({ timeout: 30_000 });
 });

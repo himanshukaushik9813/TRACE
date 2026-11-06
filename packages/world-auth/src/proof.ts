@@ -7,14 +7,11 @@
  *    expiry. The server recovers the signer and checks every binding plus
  *    challenge freshness (consumed atomically in the DB → replay protection).
  *
- * 2) World ID v4 (optional layer, staging). When WORLD_RP_ID /
- *    WORLD_RP_SIGNING_KEY are configured, the IDKit proof's `signal` is the
- *    keccak256 of the same EIP-712 claims, so the human proof is bound to the
- *    same strategy version + plan + challenge. The backend signs the RP
- *    request, forwards the proof to World's verify API and checks the
- *    signal hash and nullifier uniqueness. It is labelled "World ID staging —
- *    not production identity verification". Without credentials the layer
- *    reports `not_configured`; it never pretends to have verified anything.
+ * 2) World ID 4.0 human verification (required for protected actions such as
+ *    aqua:ship). The IDKit proof's `signal` is keccak256 of the same claims, so
+ *    the human proof is bound to the same strategy version + plan + action +
+ *    challenge + expiry. See verifyWorldProof below. Without a World ID
+ *    registration, protected actions are refused (never silently allowed).
  *
  * A frontend-only button is never treated as authorization.
  */
@@ -119,8 +116,23 @@ export async function verifyAuthorization(inp: VerifyInput): Promise<{ validated
 }
 
 /* ------------------------------------------------------------------ */
-/*  World ID v4 (optional, staging)                                    */
+/*  World ID 4.0 — human authorization of a protected action            */
 /* ------------------------------------------------------------------ */
+/*
+ * Official flow (docs.world.org/world-id/idkit/integrate):
+ *   backend signs an RP request (signRequest, @worldcoin/idkit-core/signing) →
+ *   browser runs IDKit with rp_context + the signal → World App returns a proof →
+ *   backend forwards the proof UNCHANGED to POST developer.world.org/api/v4/verify/{rp_id},
+ *   checks environment, and stores the nullifier.
+ *
+ * TRACE binds each request to one authorization:
+ *   - signal  = keccak256(the exact EIP-712 claims: wallet, chain, strategy id,
+ *               strategy version hash, plan hash, action, challenge, expiry),
+ *   - request = the RP nonce/expiry issued for that challenge, sealed with a server-keyed
+ *               token so a proof from any other request (or after expiry) is refused,
+ *   - replay  = challenge consumed atomically + (nullifier, action#nonce) recorded once.
+ * Identity verification is never inferred from the wallet signature, and vice versa.
+ */
 
 export type WorldConfig = {
   appId?: string;
@@ -128,43 +140,112 @@ export type WorldConfig = {
   signingKey?: string;
   action: string;
   environment: "staging" | "production";
+  /** Require a verified human for protected actions (default true). */
+  enforce?: boolean;
 };
 
-export const worldConfigured = (w: WorldConfig) => Boolean(w.rpId && w.signingKey);
+/** Actions that move value on the user's behalf and therefore need a verified human. */
+export const PROTECTED_ACTIONS = new Set(["aqua:ship"]);
 
-/** Backend RP signature for the IDKit request (never computed in the browser). */
-export async function worldRpRequest(w: WorldConfig) {
-  if (!worldConfigured(w)) throw new Error("World ID not configured (WORLD_RP_ID, WORLD_RP_SIGNING_KEY)");
-  const { signRequest } = await import("@worldcoin/idkit-core/signing");
-  const sig = signRequest({ signingKeyHex: w.signingKey!, action: w.action, ttl: 600 });
-  return { appId: w.appId, rpId: w.rpId, action: w.action, environment: w.environment, ...sig };
+export const worldConfigured = (w: WorldConfig) => Boolean(w.appId && w.rpId && w.signingKey);
+export const worldRequired = (w: WorldConfig, action: string) => (w.enforce ?? true) && PROTECTED_ACTIONS.has(action);
+
+/** Exactly what an operator must register to enable protected execution. */
+export const WORLD_REQUIREMENTS =
+  "Register an app at developer.world.org with World ID 4.0 enabled, then set WORLD_APP_ID (app_…), WORLD_RP_ID (rp_…) and WORLD_RP_SIGNING_KEY (secret) on the API server; WORLD_ENVIRONMENT=staging uses the World ID simulator, production needs a real World App.";
+
+export type WorldRequest = {
+  app_id: string;
+  action: string;
+  environment: "staging" | "production";
+  signal: Hex;
+  rp_context: { rp_id: string; nonce: string; created_at: number; expires_at: number; signature: string };
+  /** Seals (challenge, nonce, expiry) so the server can tell which request a proof answers. */
+  token: Hex;
+};
+
+/** Server-keyed seal over a World ID request; the signing key never leaves the server. */
+export function worldRequestToken(w: WorldConfig, challenge: string, nonce: string, expiresAt: number): Hex {
+  return keccak256(
+    encodeAbiParameters(
+      [{ type: "string" }, { type: "string" }, { type: "bytes32" }, { type: "string" }, { type: "uint64" }, { type: "string" }],
+      ["trace-world-request-v1", w.signingKey ?? "", challenge as Hex, nonce, BigInt(expiresAt), w.action],
+    ),
+  );
 }
 
-/** Forward an IDKit result to World's v4 verify API and check the bound signal. */
+/** Backend RP signature + the signal for one authorization challenge (never computed in the browser). */
+export async function worldRpRequest(w: WorldConfig, claims: AuthorizationClaims, ttlSeconds = 600): Promise<WorldRequest> {
+  if (!worldConfigured(w)) throw new Error("World ID not configured (WORLD_APP_ID, WORLD_RP_ID, WORLD_RP_SIGNING_KEY)");
+  const { signRequest } = await import("@worldcoin/idkit-core/signing");
+  const sig = signRequest({ signingKeyHex: w.signingKey!, action: w.action, ttl: ttlSeconds });
+  return {
+    app_id: w.appId!,
+    action: w.action,
+    environment: w.environment,
+    signal: worldSignal(claims),
+    rp_context: { rp_id: w.rpId!, nonce: sig.nonce, created_at: sig.createdAt, expires_at: sig.expiresAt, signature: sig.sig },
+    token: worldRequestToken(w, claims.challenge, sig.nonce, sig.expiresAt),
+  };
+}
+
+export type WorldProofSubmission = {
+  /** The IDKit result, exactly as IDKit returned it. */
+  result: Record<string, unknown>;
+  /** Echo of the request the server issued for this challenge. */
+  request: { nonce: string; expires_at: number; token: string };
+};
+
+export type WorldVerdict = { status: "verified" | "rejected" | "expired"; nullifier: string | null; detail: string };
+
+/**
+ * Validate a World ID proof for one authorization. Local checks first (request seal,
+ * expiry, environment, action, nonce, signal binding), then World's verify API with the
+ * proof forwarded unchanged. Never returns "verified" without World's success response.
+ */
 export async function verifyWorldProof(
   w: WorldConfig,
-  idkitResult: Record<string, unknown>,
-  expectedSignal: string,
-): Promise<{ ok: boolean; nullifier: string | null; detail: string }> {
-  if (!worldConfigured(w)) return { ok: false, nullifier: null, detail: "World ID not configured" };
+  sub: WorldProofSubmission | null | undefined,
+  claims: AuthorizationClaims,
+  opts: { now?: number; fetchImpl?: typeof fetch } = {},
+): Promise<WorldVerdict> {
+  const now = opts.now ?? Math.floor(Date.now() / 1000);
+  const reject = (detail: string): WorldVerdict => ({ status: "rejected", nullifier: null, detail });
+  if (!worldConfigured(w)) return reject("World ID is not configured on this server");
+  if (!sub || typeof sub !== "object" || !sub.result || !sub.request) return reject("no World ID proof was provided (verification not completed or cancelled)");
+  const { result, request } = sub;
+  if (worldRequestToken(w, claims.challenge, String(request.nonce), Number(request.expires_at)) !== request.token)
+    return reject("proof does not answer a World ID request this server issued for this authorization");
+  if (now > Number(request.expires_at)) return { status: "expired", nullifier: null, detail: "the World ID request expired before the proof was submitted" };
+  if (result.nonce !== request.nonce) return reject("proof was generated for a different World ID request (nonce mismatch)");
+  if (result.session_id && !result.action) return reject("a session proof cannot authorize an action");
+  if (result.action !== undefined && result.action !== w.action) return reject(`proof is for action "${String(result.action)}", not "${w.action}"`);
+  if (result.environment !== w.environment) return reject(`proof environment "${String(result.environment)}" does not match this server (${w.environment})`);
+  const responses = (result.responses as { signal_hash?: string; nullifier?: string }[] | undefined) ?? [];
+  if (!Array.isArray(responses) || responses.length === 0) return reject("IDKit result has no credential responses");
   const { hashSignal } = await import("@worldcoin/idkit-core/hashing");
-  const expectedHash = hashSignal(expectedSignal).toLowerCase();
-  const responses = (idkitResult.responses as { signal_hash?: string; nullifier?: string }[] | undefined) ?? [];
-  if (!responses.length) return { ok: false, nullifier: null, detail: "IDKit result has no responses" };
+  const expectedHash = hashSignal(worldSignal(claims)).toLowerCase();
   if (!responses.every((r) => (r.signal_hash ?? "").toLowerCase() === expectedHash))
-    return { ok: false, nullifier: null, detail: "proof signal does not match the bound authorization claims" };
-  if (w.environment === "production" && idkitResult.environment !== "production")
-    return { ok: false, nullifier: null, detail: "non-production proof rejected in production mode" };
+    return reject("proof is bound to different claims (signal mismatch: strategy version, plan hash, action, challenge or expiry changed)");
 
-  const res = await fetch(`https://developer.world.org/api/v4/verify/${w.rpId}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(idkitResult),
-    signal: AbortSignal.timeout(20_000),
-  });
-  const body = (await res.json().catch(() => ({}))) as { success?: boolean; nullifier?: string; detail?: string; code?: string };
-  if (!res.ok || !body.success) return { ok: false, nullifier: null, detail: `World verify failed (${res.status}): ${body.detail ?? body.code ?? "unknown"}` };
-  return { ok: true, nullifier: body.nullifier ?? responses[0].nullifier ?? null, detail: `verified (${w.environment})` };
+  const f = opts.fetchImpl ?? fetch;
+  let res: Response;
+  try {
+    res = await f(`https://developer.world.org/api/v4/verify/${w.rpId}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(result),
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch (err) {
+    return reject(`World verify API unreachable: ${(err as Error).message}`);
+  }
+  const body = (await res.json().catch(() => ({}))) as { success?: boolean; nullifier?: string; environment?: string; detail?: string; code?: string };
+  if (!res.ok || body.success !== true) return reject(`World verify API rejected the proof (${res.status}${body.code ? ` ${body.code}` : ""}${body.detail ? `: ${body.detail}` : ""})`);
+  if (body.environment !== undefined && body.environment !== w.environment) return reject(`World verified the proof in "${body.environment}", not ${w.environment}`);
+  const nullifier = (body.nullifier ?? responses[0].nullifier ?? "").toLowerCase();
+  if (!/^0x[0-9a-f]+$/.test(nullifier)) return reject("World verify API returned no nullifier");
+  return { status: "verified", nullifier, detail: `verified by World (${w.environment})` };
 }
 
 export type { AuthorizationClaims, AuthorizationVerification };

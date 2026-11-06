@@ -404,3 +404,32 @@ All of these were replaced in the 2026-11-06 migration.
   - **Gotchas:**
     - SwapVM `sqrt(P*1e18)` in the SDK docs means P is already 1e18-scaled. Use `Price.toSqrt` or `sqrt(P)·1e18`.
     - A router quote needs no KycNFT. Swaps do.
+- **2026-11-07 (Phase 5: World ID human authorization)**
+  - **Product research:**
+    - There is no official product called "World ID Agent Pass".
+    - AgentKit is for agent wallets (AgentBook, x402), so it does not fit a human authorizing one plan.
+    - We used World ID 4.0 IDKit instead, per docs.world.org/world-id/idkit/integrate.
+  - **Protected action:** `aqua:ship` needs a verified human. `aqua:dock` does not.
+  - **Without registration:**
+    - When WORLD_APP_ID, WORLD_RP_ID and WORLD_RP_SIGNING_KEY are missing, protected execution is **disabled**.
+    - `WORLD_ID_ENFORCE=false` is an explicit opt-out, and the UI says so.
+  - **Challenge:** it returns `world`, containing app_id, action, environment, signal and the RP context signed by the server, plus a request token that seals the challenge, nonce and expiry together.
+  - **Signal:** keccak256 of the claims (wallet, chain, strategy id, version hash, plan hash, action, challenge, expiry).
+  - **Verification:** `verifyWorldProof` runs these checks:
+    - the seal, expiry, nonce, action and environment;
+    - no session proofs;
+    - signal_hash;
+    - World's v4 verify API, with the proof forwarded unchanged;
+    - the environment and nullifier World returns.
+  - **Replay protection:** the challenge is consumed, and (nullifier, action#nonce) is recorded once.
+  - **Second gate:** `/transactions` refuses an aqua:ship authorization unless `worldStatus` is verified.
+  - **Frontend:**
+    - `src/components/world-id.tsx` wraps IDKitRequestWidget with orbLegacy({ signal }) and is loaded dynamically with ssr:false.
+    - The `aqua-flow` verify() waits for the widget through a promise bridge, then asks for the wallet signature.
+    - Step 6 shows the two checks separately, the HumanPill states, and what the authorization is bound to.
+  - **Test hooks:** `ApiDeps.worldFetch` exists for tests only and replaces World's verify API with a test double.
+  - **Tests:** 110/110 pass. The new files are `test/world.test.mjs` and the Phase 5 block in `test/api.test.mjs`.
+  - **Docs:** `docs/PHASE_5_WORLD_ID.md`.
+  - **No live verification exists.** It is waiting on the user to register at developer.world.org and paste the 3 env vars on Render. With staging, the simulator works.
+  - **Ordering matters for Phase 4:** after this deploy, shipping is disabled until World ID is registered. The Phase 4 live ship therefore either goes before the push, or after registration through the full World ID flow.
+  - Phase 6 waits until the integration status is verified.

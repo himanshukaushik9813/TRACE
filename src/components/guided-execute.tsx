@@ -32,7 +32,11 @@ import { pickPosition } from "@/components/investigate";
 import { rangeLabel } from "@/components/positions";
 import { fmt } from "@/lib/format";
 import { API_URL, api, useIntegrations, withInv, type Compatibility, type ExecutionPlan, type FullInvestigation, type StrategyState, type TxRow } from "@/lib/api";
-import { useAquaExecution, walletErr } from "@/lib/aqua-flow";
+import { useAquaExecution, walletErr, type HumanState } from "@/lib/aqua-flow";
+import dynamic from "next/dynamic";
+
+// IDKit touches window/document: load it in the browser only.
+const WorldIdVerify = dynamic(() => import("@/components/world-id"), { ssr: false });
 
 type State = "done" | "current" | "upcoming" | "blocked";
 type PlanResponse = { planId: string; plan: ExecutionPlan; compatibility: Compatibility; simulation: Record<string, { ok: boolean; error?: string }> };
@@ -114,6 +118,9 @@ export function GuidedExecute({ full, invId }: { full: FullInvestigation; invId:
   const integ = useIntegrations();
   const aqua = integ.data?.integrations.find((i) => i.key === "aqua");
   const world = integ.data?.integrations.find((i) => i.key === "world_id");
+  // Protected execution is disabled when the server reports World ID unregistered while enforcing it.
+  const worldDisabled = world?.status === "BLOCKED BY EXTERNAL DEPENDENCY" && /disabled/.test(world.detail ?? "");
+  const worldRequiredHere = Boolean(world) && world?.status !== "BLOCKED BY EXTERNAL DEPENDENCY";
   const aquaBlocked = aqua?.status === "BLOCKED BY EXTERNAL DEPENDENCY" || aqua?.status === "NOT IMPLEMENTED";
 
   const primary = full.strategies.find((s) => s.id === full.primaryStrategyId) ?? null;
@@ -470,27 +477,66 @@ export function GuidedExecute({ full, invId }: { full: FullInvestigation; invId:
           state={states[5]}
           summary={
             signed
-              ? <>Your <Term k="authorization">authorization</Term> was verified by the server.{expiresAt && !shipped ? ` Valid until ${expiresAt.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}.` : ""}</>
+              ? <>Authorized{snap.auth?.worldStatus === "verified" ? " by a World ID–verified human and" : " by"} your wallet signature, bound to this plan and strategy version.{expiresAt && !shipped ? ` Valid until ${expiresAt.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}.` : ""}</>
               : snap.expired
-                ? "Your earlier signature expired (they last 10 minutes). Sign again to continue."
-                : <>One signature, no gas. It ties your wallet, this exact plan and this strategy version together, so nothing else can be executed in your name. <Term k="worldId">World ID</Term>: {world?.status === "VERIFIED TESTNET" ? "available" : `not configured on this server (${world?.detail ?? "no credentials"})`}.</>
+                ? "Your earlier authorization expired (they last 10 minutes). Authorize again to continue."
+                : worldDisabled
+                  ? <>Shipping is a protected action: it needs <Term k="worldId">World ID</Term> human verification, which is not set up on this server yet, so it is disabled.</>
+                  : <>Two separate checks, no gas: <Term k="worldId">World ID</Term> proves a unique human approves this exact plan, then your wallet signs the <Term k="authorization">authorization</Term>.</>
           }
         >
           {!signed && (
             <>
-              <div className="flex flex-wrap items-center gap-3">
+              <ol className="grid sm:grid-cols-2 gap-2.5 max-w-[760px]">
+                <li className="rounded-md2 border border-line bg-ivory-50 px-3.5 py-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[0.86rem] text-ink font-medium">1. Prove you are human</span>
+                    <HumanPill state={exec.human} disabled={worldDisabled} />
+                  </div>
+                  <p className="text-[0.74rem] text-ink-600 mt-1">
+                    Identity check with World ID (scan with World App{world?.detail?.includes("staging") ? " or the World ID simulator on staging" : ""}). It is not a transaction and reveals nothing about you; TRACE stores only an anonymous reference.
+                  </p>
+                </li>
+                <li className="rounded-md2 border border-line bg-ivory-50 px-3.5 py-3">
+                  <div className="text-[0.86rem] text-ink font-medium">2. Sign with your wallet</div>
+                  <p className="text-[0.74rem] text-ink-600 mt-1">An EIP-712 message (free) proving you control {w.address ? fmt.addr(w.address) : "the wallet"}. It is not an identity check and moves no tokens.</p>
+                </li>
+              </ol>
+              {plan && (
+                <p className="mt-2 text-[0.74rem] text-ink-600 break-all max-w-[78ch]">
+                  Both are bound to strategy {primary?.irId ?? "—"} version <span className="tabular">{primary?.versionHash ?? "—"}</span>, plan <span className="tabular">{plan.planHash.slice(0, 18)}…</span>, action <span className="tabular">aqua:ship</span>, a single-use challenge and a 10-minute expiry. Changing any of them invalidates the authorization.
+                </p>
+              )}
+              <div className="mt-3 flex flex-wrap items-center gap-3">
                 <button
                   className={BTN}
                   onClick={() => w.address && primary && p && exec.verify({ strategyId: primary.id, maker: w.address, tokenId: p.tokenId })}
-                  disabled={Boolean(walletBlock) || working || !havePlan || !reviewed || stopped}
+                  disabled={Boolean(walletBlock) || working || !havePlan || !reviewed || stopped || worldDisabled}
                 >
                   {busy?.stage === "verify" && <Loader2 size={15} className="animate-spin" />}
-                  {busy?.stage === "verify" ? "Waiting for your signature…" : error?.stage === "verify" ? "Try signing again" : "Sign authorization"}
+                  {busy?.stage === "verify"
+                    ? busy.what === "human"
+                      ? "Waiting for World ID…"
+                      : busy.what === "wallet"
+                        ? "Waiting for your signature…"
+                        : "Checking…"
+                    : error?.stage === "verify"
+                      ? "Try again"
+                      : worldRequiredHere
+                        ? "Verify with World ID and sign"
+                        : "Sign authorization"}
                 </button>
-                <span className="text-[0.74rem] text-ink-600">{walletBlock ?? (!havePlan ? "Prepare the transactions first." : !reviewed ? "Tick “I have reviewed these transactions” first." : "Your wallet will show the exact message.")}</span>
+                <span className="text-[0.74rem] text-ink-600">{walletBlock ?? (!havePlan ? "Prepare the transactions first." : !reviewed ? "Tick “I have reviewed these transactions” first." : worldDisabled ? "Disabled until World ID is registered." : "Nothing is sent until step 7.")}</span>
               </div>
+              {worldDisabled && <Alert>{exec.human.status === "unavailable" ? exec.human.detail : world?.detail}</Alert>}
               {error?.stage === "verify" && <Alert>{error.message}</Alert>}
+              {exec.human.status === "in_progress" && <WorldIdVerify request={exec.human.request} onSuccess={exec.humanSucceeded} onError={exec.humanFailed} />}
             </>
+          )}
+          {signed && snap.auth && (
+            <p className="text-[0.74rem] text-ink-600 break-all">
+              Human verification: <span className={snap.auth.worldStatus === "verified" ? "text-forest" : "text-ink"}>{HUMAN_LABEL[snap.auth.worldStatus] ?? snap.auth.worldStatus}</span> · bound to version {snap.auth.strategyVersionHash ?? "—"} · plan {snap.auth.planHash?.slice(0, 18) ?? "—"}…
+            </p>
           )}
         </Step>
 
@@ -547,6 +593,40 @@ export function GuidedExecute({ full, invId }: { full: FullInvestigation; invId:
       </Disclosure>
     </div>
   );
+}
+
+const HUMAN_LABEL: Record<string, string> = {
+  verified: "Verified (World ID)",
+  rejected: "Rejected",
+  expired: "Expired",
+  replayed: "Rejected (proof already used)",
+  required: "Verification required",
+  unavailable: "Unavailable on this server",
+  not_required: "Not required for this action",
+  not_configured: "Not configured (before World ID was required)",
+  failed: "Failed",
+  skipped: "Skipped",
+};
+
+/** Human verification status, shown apart from the wallet signature. */
+function HumanPill({ state, disabled }: { state: HumanState; disabled: boolean }) {
+  if (disabled || state.status === "unavailable") return <Pill tone="brick">Unavailable</Pill>;
+  switch (state.status) {
+    case "in_progress":
+      return <Pill tone="gold"><Loader2 size={12} className="animate-spin" /> Verification in progress</Pill>;
+    case "checking":
+      return <Pill tone="gold"><Loader2 size={12} className="animate-spin" /> Checking with World</Pill>;
+    case "verified":
+      return <Pill tone="forest"><Check size={12} /> Verified</Pill>;
+    case "rejected":
+      return <span title={state.detail}><Pill tone="brick">Rejected</Pill></span>;
+    case "expired":
+      return <span title={state.detail}><Pill tone="brick">Expired</Pill></span>;
+    case "cancelled":
+      return <Pill tone="brick">Cancelled</Pill>;
+    default:
+      return <Pill tone="gold">Verification required</Pill>;
+  }
 }
 
 function Receipt({ tx, approvals }: { tx: TxRow; approvals: TxRow[] }) {

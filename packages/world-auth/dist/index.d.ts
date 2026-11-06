@@ -1,1 +1,1 @@
-export { AUTH_DOMAIN, AUTH_TYPES, buildTypedData, newChallenge, worldSignal, verifyAuthorization, worldConfigured, worldRpRequest, verifyWorldProof, type VerifyInput, type WorldConfig, } from "./proof.js";
+export { AUTH_DOMAIN, AUTH_TYPES, buildTypedData, newChallenge, worldSignal, verifyAuthorization, worldConfigured, worldRequired, worldRpRequest, worldRequestToken, verifyWorldProof, PROTECTED_ACTIONS, WORLD_REQUIREMENTS, type VerifyInput, type WorldConfig, type WorldRequest, type WorldProofSubmission, type WorldVerdict, } from "./proof.js";

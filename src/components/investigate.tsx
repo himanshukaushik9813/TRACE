@@ -113,7 +113,8 @@ const NEXT_TEXT = [
   "Nothing further: the strategy is live on 1inch Aqua (Sepolia).",
 ];
 
-const VERIFY_BUSY = { check: "Checking Aqua compatibility live", compile: "Compiling and simulating the plan", challenge: "Preparing the authorization", wallet: "Confirm the signature in MetaMask", server: "The server is verifying your signature" } as const;
+const VERIFY_BUSY = { check: "Checking Aqua compatibility live", compile: "Compiling and simulating the plan", challenge: "Preparing the authorization",
+  human: "Verify you are human with World ID", wallet: "Confirm the signature in MetaMask", server: "The server is verifying your signature" } as const;
 
 function stagesFor(inv: Investigation | undefined, full: FullInvestigation | null | undefined, exec: AquaExecution | null, aquaBlocked: boolean): Stage[] {
   const idx = inv ? ORDER.indexOf(inv.status as (typeof ORDER)[number]) : -1;

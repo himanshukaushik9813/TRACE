@@ -425,7 +425,17 @@ export type AuthorizationVerification = {
   challengeFresh: boolean;
   strategyVersionMatches: boolean;
   planHashMatches: boolean;
-  worldId: "verified" | "not_configured" | "failed" | "skipped";
+  /**
+   * Human verification outcome (World ID 4.0), separate from the wallet signature.
+   * verified · rejected (invalid proof / wrong signal, action, environment or request) ·
+   * expired (World ID request past its expiry) · replayed (proof already used) ·
+   * required (protected action, no proof given, e.g. cancelled) · unavailable (protected
+   * action but World ID is not registered on this server) · not_required (action not protected).
+   * "not_configured" | "failed" | "skipped" are kept for authorizations recorded before Phase 5.
+   */
+  worldId: "verified" | "rejected" | "expired" | "replayed" | "required" | "unavailable" | "not_required" | "not_configured" | "failed" | "skipped";
+  /** Anonymous, action-scoped World ID nullifier: the identity reference of the verified human. */
+  worldNullifier?: string | null;
   notes: string[];
 };
 

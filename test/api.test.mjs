@@ -3,10 +3,38 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+import { hashSignal } from "@worldcoin/idkit-core/hashing";
 import { createApi } from "../server/dist/api.js";
 
 const account = privateKeyToAccount(generatePrivateKey());
 const stranger = privateKeyToAccount(generatePrivateKey());
+
+/*
+ * World ID in these tests: the server is given TEST-ONLY credentials (a locally
+ * generated RP signing key) and a TEST DOUBLE in place of World's verify API
+ * (developer.world.org). The double accepts a proof only if it is marked valid
+ * and has not been seen before — like the real API — so the tests exercise TRACE's
+ * own checks around it. Nothing here is a real World ID verification.
+ */
+const WORLD_TEST = { appId: "app_test_trace", rpId: "rp_test_trace", signingKey: generatePrivateKey(), action: "trace-authorize-execution", environment: "staging", enforce: true };
+const worldApiCalls = [];
+const worldFetch = async (url, init) => {
+  const body = JSON.parse(init.body);
+  worldApiCalls.push({ url, body });
+  const r = body.responses?.[0] ?? {};
+  if (r.proof !== "test-double-valid-proof") return new Response(JSON.stringify({ success: false, code: "invalid_proof", detail: "proof verification failed" }), { status: 400 });
+  return new Response(JSON.stringify({ success: true, nullifier: r.nullifier, environment: body.environment }), { status: 200 });
+};
+/** Build an IDKit-shaped result answering the server's World request (test double, not a real proof). */
+export const idkitResultFor = (world, over = {}) => ({
+  protocol_version: "4.0",
+  nonce: world.rp_context.nonce,
+  action: world.action,
+  environment: world.environment,
+  responses: [{ identifier: "proof_of_human", signal_hash: hashSignal(world.signal), proof: "test-double-valid-proof", nullifier: `0x${"ab".repeat(31)}${Math.floor(Math.random() * 256).toString(16).padStart(2, "0")}`, issuer_schema_id: 1 }],
+  ...over,
+});
+const submissionFor = (world, over) => ({ result: idkitResultFor(world, over), request: { nonce: world.rp_context.nonce, expires_at: world.rp_context.expires_at, token: world.token } });
 
 function fakeDb() {
   const db = {};
@@ -39,10 +67,17 @@ function fakeDb() {
     },
     insertAuthorization: async (a) => {
       const id = `auth-${auths.size + 1}`;
-      auths.set(id, { id, planId: a.planId, wallet: a.wallet, action: a.action, validated: a.validated, live: true });
+      auths.set(id, { id, planId: a.planId, wallet: a.wallet, action: a.action, validated: a.validated, worldStatus: a.worldStatus, worldNullifier: a.worldNullifier, live: true });
       return id;
     },
     getAuthorization: async (id) => auths.get(id) ?? null,
+    nullifiers: new Set(),
+    recordNullifier: async (n, action) => {
+      const k = `${n}|${action}`;
+      if (db.nullifiers.has(k)) return false;
+      db.nullifiers.add(k);
+      return true;
+    },
     touchWallet: async () => {},
     upsertTransaction: async () => {
       // Simulates the second of two concurrent ship posts hitting migration 0003's index.
@@ -57,7 +92,7 @@ const cfg = {
   sepoliaFallbackRpcUrls: [],
   zeroG: {},
   storage: {},
-  world: { action: "trace-authorize-execution", environment: "staging" },
+  world: WORLD_TEST,
   corsOrigins: ["http://localhost:3000"],
 };
 
@@ -67,7 +102,7 @@ let db;
 const queue = { backend: "in-memory", add: async () => {} };
 before(async () => {
   db = fakeDb();
-  const app = createApi({ db, queue, cfg });
+  const app = createApi({ db, queue, cfg, worldFetch });
   await new Promise((r) => (server = app.listen(0, r)));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -93,21 +128,21 @@ test("a challenge cannot be issued to a wallet other than the plan's maker", asy
   assert.equal(r.status, 403);
 });
 
-test("full authorization flow: sign → verified; replay → rejected; execution gated by scope", async () => {
+const signTd = (acct, td) => acct.signTypedData({ domain: td.domain, types: td.types, primaryType: "Authorization", message: { ...td.message, chainId: BigInt(td.message.chainId), expiresAt: BigInt(td.message.expiresAt) } });
+
+test("full authorization flow: World ID verified + wallet signed → validated; replay → rejected; execution gated by scope", async () => {
   const ch = await (await post("/plans/plan-1/challenge", { wallet: account.address, action: "aqua:ship" })).json();
-  const td = ch.typedData;
-  const signature = await account.signTypedData({
-    domain: td.domain,
-    types: td.types,
-    primaryType: "Authorization",
-    message: { ...td.message, chainId: BigInt(td.message.chainId), expiresAt: BigInt(td.message.expiresAt) },
-  });
-  const ok = await post("/authorizations", { planId: "plan-1", claims: ch.claims, signature });
+  assert.equal(ch.worldStatus, "required");
+  const signature = await signTd(account, ch.typedData);
+  const ok = await post("/authorizations", { planId: "plan-1", claims: ch.claims, signature, world: submissionFor(ch.world) });
   const okBody = await ok.json();
   assert.equal(ok.status, 200, JSON.stringify(okBody));
   assert.equal(okBody.validated, true);
 
-  const replay = await post("/authorizations", { planId: "plan-1", claims: ch.claims, signature });
+  assert.equal(okBody.verification.worldId, "verified");
+  assert.match(okBody.verification.worldNullifier, /^0x[0-9a-f]+$/);
+
+  const replay = await post("/authorizations", { planId: "plan-1", claims: ch.claims, signature, world: submissionFor(ch.world) });
   assert.equal(replay.status, 403);
   assert.equal((await replay.json()).verification.challengeFresh, false);
 
@@ -131,9 +166,8 @@ test("no execution step is accepted without a validated authorization", async ()
 
 const signAuthorization = async () => {
   const ch = await (await post("/plans/plan-1/challenge", { wallet: account.address, action: "aqua:ship" })).json();
-  const td = ch.typedData;
-  const signature = await account.signTypedData({ domain: td.domain, types: td.types, primaryType: "Authorization", message: { ...td.message, chainId: BigInt(td.message.chainId), expiresAt: BigInt(td.message.expiresAt) } });
-  return (await (await post("/authorizations", { planId: "plan-1", claims: ch.claims, signature })).json()).authorizationId;
+  const signature = await signTd(account, ch.typedData);
+  return (await (await post("/authorizations", { planId: "plan-1", claims: ch.claims, signature, world: submissionFor(ch.world) })).json()).authorizationId;
 };
 
 test("a concurrent duplicate ship hitting the one-live-ship index is a 409, not a 500", async () => {
@@ -221,4 +255,132 @@ test("plan state and reconcile only read: unknown plans are 404, malformed recon
   assert.equal((await post("/plans/plan-1/reconcile", { op: "ship", fromBlock: "x", nonce: 1 })).status, 400);
   assert.equal((await post("/plans/plan-1/reconcile", { op: "swap", fromBlock: 1, nonce: 1 })).status, 400);
   assert.equal((await post("/plans/nope/reconcile", { op: "ship", fromBlock: 1, nonce: 1 })).status, 404);
+});
+
+
+/* ------------------------- Phase 5: World ID ------------------------- */
+
+const challenge = async (action = "aqua:ship", wallet = account.address) => (await post("/plans/plan-1/challenge", { wallet, action })).json();
+
+test("World ID: the challenge binds the proof request to the exact claims (signal) and to this challenge (signed RP request)", async () => {
+  const ch = await challenge();
+  assert.equal(ch.worldStatus, "required");
+  assert.equal(ch.world.app_id, WORLD_TEST.appId);
+  assert.equal(ch.world.rp_context.rp_id, WORLD_TEST.rpId);
+  assert.match(ch.world.rp_context.signature, /^0x[0-9a-f]+$/i);
+  assert.ok(ch.world.rp_context.expires_at > ch.world.rp_context.created_at);
+  for (const k of ["wallet", "strategyVersionHash", "planHash", "action", "challenge", "expiresAt"]) assert.ok(ch.claims[k] != null, k);
+  assert.equal(ch.claims.strategyVersionHash, "fnv1a:abcd…ef");
+  assert.equal(ch.claims.planHash, "planhash0123456789");
+  const other = await challenge();
+  assert.notEqual(other.world.signal, ch.world.signal, "each challenge gets its own signal");
+  assert.notEqual(other.world.rp_context.nonce, ch.world.rp_context.nonce);
+});
+
+test("World ID: an invalid proof is rejected and nothing is authorized", async () => {
+  const ch = await challenge();
+  const r = await post("/authorizations", { planId: "plan-1", claims: ch.claims, signature: await signTd(account, ch.typedData), world: submissionFor(ch.world, { responses: [{ ...idkitResultFor(ch.world).responses[0], proof: "forged" }] }) });
+  const b = await r.json();
+  assert.equal(r.status, 403);
+  assert.equal(b.validated, false);
+  assert.equal(b.verification.worldId, "rejected");
+  assert.ok(b.verification.notes.some((n) => /World verify API rejected/.test(n)));
+});
+
+test("World ID: a cancelled verification (no proof) leaves the protected action unauthorized", async () => {
+  const ch = await challenge();
+  const r = await post("/authorizations", { planId: "plan-1", claims: ch.claims, signature: await signTd(account, ch.typedData) });
+  const b = await r.json();
+  assert.equal(r.status, 403);
+  assert.equal(b.verification.worldId, "required");
+});
+
+test("World ID: a proof generated for another authorization (other plan/challenge) is rejected", async () => {
+  const a = await challenge();
+  const b = await challenge();
+  // Proof answers request A, submitted with authorization B.
+  const r = await post("/authorizations", { planId: "plan-1", claims: b.claims, signature: await signTd(account, b.typedData), world: submissionFor(a.world) });
+  const body = await r.json();
+  assert.equal(r.status, 403);
+  assert.equal(body.verification.worldId, "rejected");
+});
+
+test("World ID: a changed plan hash or strategy version is rejected even with a valid human proof", async () => {
+  for (const field of ["planHash", "strategyVersionHash"]) {
+    const ch = await challenge();
+    const claims = { ...ch.claims, [field]: `${ch.claims[field]}-changed` };
+    const td = { ...ch.typedData, message: { ...ch.typedData.message, [field]: claims[field] } };
+    const r = await post("/authorizations", { planId: "plan-1", claims, signature: await signTd(account, td), world: submissionFor(ch.world) });
+    const b = await r.json();
+    assert.equal(r.status, 403, field);
+    assert.equal(field === "planHash" ? b.verification.planHashMatches : b.verification.strategyVersionMatches, false);
+    assert.notEqual(b.verification.worldId, "verified");
+  }
+});
+
+test("World ID: a replayed proof is rejected", async () => {
+  const ch = await challenge();
+  const sub = submissionFor(ch.world);
+  const signature = await signTd(account, ch.typedData);
+  assert.equal((await post("/authorizations", { planId: "plan-1", claims: ch.claims, signature, world: sub })).status, 200);
+  const again = await post("/authorizations", { planId: "plan-1", claims: ch.claims, signature, world: sub });
+  const b = await again.json();
+  assert.equal(again.status, 403);
+  assert.equal(b.verification.worldId, "replayed");
+});
+
+test("World ID: the wallet signature alone never counts as human verification, and the ship gate checks it again", async () => {
+  // Unverified (no proof) → no validated authorization → /transactions refuses the ship.
+  const ch = await challenge();
+  const r = await (await post("/authorizations", { planId: "plan-1", claims: ch.claims, signature: await signTd(account, ch.typedData) })).json();
+  const ship = await post("/transactions", { authorizationId: r.authorizationId, op: "ship", txHash: `0x${"66".repeat(32)}` });
+  assert.equal(ship.status, 403);
+  // Even a validated row without a World-verified human is refused at the ship gate.
+  db.forceAuth = { id: "auth-forged", planId: "plan-1", wallet: account.address, action: "aqua:ship", validated: true, worldStatus: "not_required", live: true };
+  const realGet = db.getAuthorization;
+  db.getAuthorization = async (id) => (id === "auth-forged" ? db.forceAuth : realGet(id));
+  try {
+    const g = await post("/transactions", { authorizationId: "auth-forged", op: "ship", txHash: `0x${"67".repeat(32)}` });
+    assert.equal(g.status, 403);
+    assert.match((await g.json()).error, /protected action/);
+  } finally {
+    db.getAuthorization = realGet;
+  }
+});
+
+test("World ID: dock (removing a strategy) is not a protected action and needs only the wallet signature", async () => {
+  const ch = await challenge("aqua:dock");
+  assert.equal(ch.worldStatus, "optional");
+  const r = await post("/authorizations", { planId: "plan-1", claims: ch.claims, signature: await signTd(account, ch.typedData) });
+  const b = await r.json();
+  assert.equal(r.status, 200, JSON.stringify(b));
+  assert.equal(b.verification.worldId, "not_required");
+});
+
+test("World ID not registered: protected execution is disabled and the exact requirements are reported", async () => {
+  const app2 = createApi({ db: fakeDb(), queue, cfg: { ...cfg, world: { action: "trace-authorize-execution", environment: "staging", enforce: true } } });
+  const srv = await new Promise((res) => { const s2 = app2.listen(0, () => res(s2)); });
+  const b2 = `http://127.0.0.1:${srv.address().port}`;
+  try {
+    const ch = await (await fetch(`${b2}/plans/plan-1/challenge`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ wallet: account.address, action: "aqua:ship" }) })).json();
+    assert.equal(ch.worldStatus, "unavailable");
+    assert.equal(ch.world, null);
+    assert.match(ch.worldRequirements, /WORLD_APP_ID.*WORLD_RP_ID.*WORLD_RP_SIGNING_KEY/);
+    const r = await fetch(`${b2}/authorizations`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ planId: "plan-1", claims: ch.claims, signature: await signTd(account, ch.typedData) }) });
+    const b = await r.json();
+    assert.equal(r.status, 403);
+    assert.equal(b.verification.worldId, "unavailable");
+  } finally {
+    srv.close();
+  }
+});
+
+test("World verify API receives the IDKit result unchanged", async () => {
+  const ch = await challenge();
+  const sub = submissionFor(ch.world);
+  const before = worldApiCalls.length;
+  await post("/authorizations", { planId: "plan-1", claims: ch.claims, signature: await signTd(account, ch.typedData), world: sub });
+  const call = worldApiCalls[before];
+  assert.equal(call.url, `https://developer.world.org/api/v4/verify/${WORLD_TEST.rpId}`);
+  assert.deepEqual(call.body, sub.result);
 });
