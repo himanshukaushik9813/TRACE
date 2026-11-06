@@ -299,6 +299,12 @@ All of these were replaced in the 2026-11-06 migration.
     - Fixed B13: terrain edge labels ran off the canvas at 390.
     - Screenshots of every page at 1440/390 are in `docs/screenshots/`.
     - `docs/AUDIT.md` is final, with sections 1–11.
-  - Not pushed yet. When the user asks, push with `git push https://github.com/himanshukaushik9813/TRACE.git main`.
+  - Push status: see the next entry.
   - Screenshot gotcha: the app scrolls inside `<main>` in a `h-[100dvh] overflow-hidden` shell. To get full-page shots, inject CSS that unclips both; see `docs/AUDIT.md` §9.
   - Pre-existing `npm audit`: `next` is critical and needs Next 16, a major upgrade; left alone deliberately.
+
+- **2026-11-06 21:20 IST (deploy + push request)** — The user asked to deploy, commit, push and update this file. The work ran from Claude's VM on the Mac, which shares the folder but not the Mac's processes, network or credentials.
+  - **Deploy:** nothing to rebuild. `.next/BUILD_ID` (07:43 UTC) is newer than every file in `src/` and `packages/*/src`, and `server/dist/index.js` (07:08 UTC) is newer than every file in `server/src`. The only commit after the builds (efe85cc) touched memory.md only. So the production builds already match HEAD. There is no hosting config (no `.vercel`, `vercel.json`, Netlify, Fly or Dockerfile); "deploy" here means the local `next start -p 3000` plus `node --env-file=.env.local server/dist/index.js` on :4000. The VM cannot restart processes on the Mac, so if either server is not already running the latest build, restart it on the Mac.
+  - VM limits (gotchas): the VM's `node_modules` has only `@next/swc-darwin-arm64`, so `next build` cannot run from the Linux VM. The VM proxy returns 403 for github.com, and `add_repo` failed because no GitHub account is linked to Claude, so **pushing has to be done from the Mac's own terminal**.
+  - Committed this memory.md update on main (no Claude trailer, per the authorship rule). **Still not pushed:** main is 13 commits ahead of origin (b32ef5f…23b3001, the redesign phases, plus the memory commits). Push from the Mac with `git push https://github.com/himanshukaushik9813/TRACE.git main`, then update this line.
+  - `.q.mjs`, `.shot.mjs` and `.verify-test.mjs` are still untracked scratch scripts and were deliberately left out of the commit.
