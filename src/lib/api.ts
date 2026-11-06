@@ -309,8 +309,14 @@ export type FullInvestigation = {
   backtest: { result: BacktestResult; status: string; createdAt: string } | null;
   compatibility: { id: string; maker: string | null; verdict: string; report: Compatibility; createdAt: string } | null;
   plans: { id: string; maker: string; planHash: string; plan: ExecutionPlan; createdAt: string }[];
+  /** EIP-712 (+ optional World ID) authorizations for those plans, newest first. Optional: older API builds omit it. */
+  authorizations?: AuthorizationRow[];
+  /** TRACE-recorded Sepolia transactions for those plans, newest first. */
+  transactions?: TxRow[];
   storage: StorageArtifact[];
 };
+
+export type AuthorizationRow = { id: string; planId: string; wallet: string; action: string; validated: boolean; worldStatus: string; createdAt: string };
 
 export type TxRow = {
   id: string;
@@ -357,12 +363,22 @@ export function useInvestigationStatus(id: string | null) {
   });
 }
 
+/** Execution is still open: a plan exists but nothing has shipped successfully yet. */
+const executionOpen = (f: FullInvestigation) =>
+  f.plans.length > 0 && !(f.transactions ?? []).some((t) => t.op === "ship" && t.status === "success");
+
 export function useFullInvestigation(id: string | null) {
   return useQuery({
     queryKey: ["full", id],
     queryFn: () => api<FullInvestigation>(`/investigations/${id}/full`),
     enabled: Boolean(id),
-    refetchInterval: (q) => (q.state.data && TERMINAL.includes(q.state.data.investigation.status) ? false : 4_000),
+    // Poll while the pipeline runs; afterwards keep watching (slowly) only while an
+    // execution plan is open, so a signature or ship made on Execute shows up here.
+    refetchInterval: (q) => {
+      const d = q.state.data;
+      if (!d || !TERMINAL.includes(d.investigation.status)) return 4_000;
+      return executionOpen(d) ? 10_000 : false;
+    },
   });
 }
 

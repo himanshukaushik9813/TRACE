@@ -5,10 +5,11 @@ module.exports = {
     extend: {
       colors: {
         // Primary backgrounds
+        // Minimal light theme: canvas, white cards, warm secondary surface
         ivory: {
-          DEFAULT: '#F3EBDD',
-          50: '#FAF7F0', // paper white
-          100: '#F3EBDD',
+          DEFAULT: '#F7F3EB', // main background
+          50: '#FFFFFF', // card surface
+          100: '#F3EBDD', // secondary surface
           200: '#E9E0D0', // warm stone
           300: '#DDD2BC',
         },
@@ -33,14 +34,15 @@ module.exports = {
         // Text
         ink: {
           DEFAULT: '#171714',
-          600: '#696356', // secondary dark
+          600: '#77736A', // secondary text
         },
+        line: '#E9E2D6', // hairline borders
         cream: {
           DEFAULT: '#F3EBDD', // light on dark
           muted: '#B7B0A2', // muted light
         },
         // Semantic
-        forest: '#344C3A',
+        forest: '#278653', // success green
         amber: '#B07D2E', // antique amber warning
         brick: '#9A4B3A', // restrained brick red error
         graphite: '#252520',
@@ -52,12 +54,14 @@ module.exports = {
       boxShadow: {
         soft: '0 1px 2px rgba(23,23,20,0.04), 0 8px 24px -12px rgba(23,23,20,0.12)',
         card: '0 1px 0 rgba(23,23,20,0.03), 0 10px 30px -18px rgba(23,23,20,0.25)',
-        glow: '0 0 0 1px rgba(182,138,66,0.15), 0 18px 50px -20px rgba(182,138,66,0.35)',
+        glow: '0 1px 2px rgba(120,86,30,0.18), 0 6px 16px -8px rgba(182,138,66,0.55)',
+        lift: '0 1px 2px rgba(23,23,20,0.03), 0 12px 32px -20px rgba(80,62,30,0.22)',
       },
       borderRadius: {
         md2: '10px',
         lg2: '14px',
         panel: '16px',
+        card: '14px',
       },
       letterSpacing: {
         wide2: '0.14em',

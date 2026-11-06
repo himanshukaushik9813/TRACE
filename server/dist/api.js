@@ -201,7 +201,17 @@ export function createApi(deps) {
         const plans = primary
             ? await db.query(`select id, maker, plan_hash as "planHash", plan_json as plan, created_at as "createdAt" from execution_plans where strategy_id = $1 order by created_at desc limit 5`, [primary.id])
             : [];
-        res.json(json({ investigation: inv, strategies, primaryStrategyId: primary?.id ?? null, inferenceRuns: runs, dna: dna[0] ?? null, positions, backtest, compatibility, plans, storage }));
+        // Human authorization + execution evidence for this investigation's plans, so the
+        // Investigate workflow can show Verify/Execute from what actually happened.
+        const planIds = plans.map((p) => p.id);
+        const [authorizations, transactions] = planIds.length
+            ? await Promise.all([
+                db.query(`select id, plan_id as "planId", wallet, action, validated, world_status as "worldStatus", created_at as "createdAt"
+               from authorizations where plan_id = any($1::uuid[]) order by created_at desc`, [planIds]),
+                db.query(`select * from transactions where plan_id = any($1::uuid[]) order by created_at desc`, [planIds]),
+            ])
+            : [[], []];
+        res.json(json({ investigation: inv, strategies, primaryStrategyId: primary?.id ?? null, inferenceRuns: runs, dna: dna[0] ?? null, positions, backtest, compatibility, plans, authorizations, transactions, storage }));
     }));
     app.get("/investigations/:id/events", h(async (req, res) => {
         const tokenId = typeof req.query.tokenId === "string" && /^\d+$/.test(req.query.tokenId) ? req.query.tokenId : undefined;

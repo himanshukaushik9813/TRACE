@@ -87,8 +87,8 @@ export default function PositionPage() {
             </Card>
           )}
 
-          <Card dark className="mt-5">
-            <SectionTitle onDark eyebrow="Real pool Swap prices during the window" title="Range occupancy" />
+          <Card className="mt-5">
+            <SectionTitle eyebrow="Real pool Swap prices during the window" title="Range occupancy" />
             {detail.data.priceSeries && detail.data.priceSeries.points.length >= 2 ? (
               (() => {
                 const s = detail.data.priceSeries!;
@@ -100,17 +100,17 @@ export default function PositionPage() {
                 return lo != null && hi != null && p.tickUpper - p.tickLower < 1_700_000 && p.tickUpper < 887_000 && p.tickLower > -887_000 ? (
                   <>
                     <RangeBand price={prices} lo={lo} hi={hi} events={evs} />
-                    <div className="text-[0.7rem] text-cream-muted mt-2">
+                    <div className="text-[0.7rem] text-ink-600 mt-2">
                       {s.points.length} swap prices ({s.symbol1} per {s.symbol0}), blocks {s.fromBlock.toLocaleString("en-US")}–{s.toBlock.toLocaleString("en-US")}
                       {s.truncated ? " (sampled)" : ""}. Timestamps between sampled blocks are interpolated.
                     </div>
                   </>
                 ) : (
-                  <div className="text-cream-muted text-[0.85rem]">This range is unbounded on at least one side, so the price is always inside it. {s.points.length} real swaps observed in the window.</div>
+                  <div className="text-ink-600 text-[0.85rem]">This range is unbounded on at least one side, so the price is always inside it. {s.points.length} real swaps observed in the window.</div>
                 );
               })()
             ) : (
-              <div className="text-cream-muted text-[0.85rem]">No swap price history available for this pool in the window — occupancy is not shown rather than estimated.</div>
+              <div className="text-ink-600 text-[0.85rem]">No swap price history available for this pool in the window — occupancy is not shown rather than estimated.</div>
             )}
           </Card>
 

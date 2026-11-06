@@ -55,12 +55,12 @@ export function LineChart({
   series,
   labels = [],
   height = 240,
-  onDark = true,
+  onDark = false,
   showArea = true,
   legend = true,
   yFmt = sig,
 }: {
-  series: { name: string; data: number[]; color: string; area?: boolean; dashed?: boolean }[];
+  series: { name: string; data: number[]; color: string; area?: boolean; dashed?: boolean; width?: number }[];
   labels?: string[];
   height?: number;
   onDark?: boolean;
@@ -85,8 +85,8 @@ export function LineChart({
   const yFor = (v: number) => padT + (1 - (v - min) / range) * plotH;
 
   const grid = [0, 0.25, 0.5, 0.75, 1].map((g) => min + g * range);
-  const gridColor = onDark ? "rgba(243,235,221,0.08)" : "rgba(23,23,20,0.08)";
-  const axisColor = onDark ? "rgba(183,176,162,0.55)" : "rgba(105,99,86,0.7)";
+  const gridColor = onDark ? "rgba(243,235,221,0.08)" : "rgba(23,23,20,0.06)";
+  const axisColor = onDark ? "rgba(183,176,162,0.55)" : "#77736A";
   const n0 = series[0]?.data.length ?? 0;
 
   return (
@@ -95,7 +95,7 @@ export function LineChart({
         <defs>
           {series.map((s, i) => (
             <linearGradient key={i} id={`g-${id}-${i}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={s.color} stopOpacity="0.34" />
+              <stop offset="0%" stopColor={s.color} stopOpacity={onDark ? 0.34 : 0.16} />
               <stop offset="100%" stopColor={s.color} stopOpacity="0" />
             </linearGradient>
           ))}
@@ -128,7 +128,7 @@ export function LineChart({
                 d={line}
                 fill="none"
                 stroke={s.color}
-                strokeWidth={s.dashed ? 1.6 : 2.2}
+                strokeWidth={s.width ?? (s.dashed ? 1.6 : 2.2)}
                 strokeDasharray={s.dashed ? "5 5" : undefined}
                 strokeLinejoin="round"
                 strokeLinecap="round"
@@ -180,7 +180,7 @@ export function Sparkline({
 /**
  * Liquidity range occupancy: a price path with the LP's [lower, upper] band
  * shaded, in-range vs out-of-range periods tinted, and lifecycle event
- * markers. Rendered on a dark surface.
+ * markers. Rendered on a light card.
  */
 export function RangeBand({
   price,
@@ -226,8 +226,8 @@ export function RangeBand({
           const v = min + g * range;
           return (
             <g key={i}>
-              <line x1={padL} x2={W - 12} y1={y(v)} y2={y(v)} stroke="rgba(243,235,221,0.08)" />
-              <text x={padL - 8} y={y(v) + 3} textAnchor="end" fontSize="10" fill="rgba(183,176,162,0.55)" className="tabular">
+              <line x1={padL} x2={W - 12} y1={y(v)} y2={y(v)} stroke="rgba(23,23,20,0.06)" />
+              <text x={padL - 8} y={y(v) + 3} textAnchor="end" fontSize="10" fill="#77736A" className="tabular">
                 {sig(v)}
               </text>
             </g>
@@ -237,10 +237,10 @@ export function RangeBand({
         <rect x={padL} y={y(hi)} width={plotW} height={Math.max(0, y(lo) - y(hi))} fill="url(#band)" />
         <line x1={padL} x2={W - 12} y1={y(hi)} y2={y(hi)} stroke="rgba(120,134,107,0.6)" strokeDasharray="4 4" />
         <line x1={padL} x2={W - 12} y1={y(lo)} y2={y(lo)} stroke="rgba(120,134,107,0.6)" strokeDasharray="4 4" />
-        <text x={W - 12} y={y(hi) - 5} textAnchor="end" fontSize="9" fill="#9AA88C" className="tabular">
+        <text x={W - 12} y={y(hi) - 5} textAnchor="end" fontSize="9" fill="#5E6B52" className="tabular">
           upper {sig(hi)}
         </text>
-        <text x={W - 12} y={y(lo) + 12} textAnchor="end" fontSize="9" fill="#9AA88C" className="tabular">
+        <text x={W - 12} y={y(lo) + 12} textAnchor="end" fontSize="9" fill="#5E6B52" className="tabular">
           lower {sig(lo)}
         </text>
 
@@ -249,7 +249,7 @@ export function RangeBand({
           const x0 = x(k, n),
             x1 = x(k + 1, n);
           const seg = `M ${x0},${H - padB} L ${x0},${y(price[k])} L ${x1},${y(price[k + 1])} L ${x1},${H - padB} Z`;
-          return <path key={k} d={seg} fill="rgba(52,76,58,0.35)" />;
+          return <path key={k} d={seg} fill="rgba(39,134,83,0.12)" />;
         })}
 
         <path d={path} fill="none" stroke="#B68A42" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
@@ -257,16 +257,16 @@ export function RangeBand({
         {events.map((e, i) => (
           <g key={i}>
             <line x1={x(e.i, n)} x2={x(e.i, n)} y1={padT} y2={H - padB} stroke="rgba(182,138,66,0.35)" strokeDasharray="2 3" />
-            <circle cx={x(e.i, n)} cy={y(price[e.i])} r={3} fill="#B68A42" stroke="#171714" strokeWidth={1} />
+            <circle cx={x(e.i, n)} cy={y(price[e.i])} r={3} fill="#B68A42" stroke="#FFFFFF" strokeWidth={1.2} />
           </g>
         ))}
       </svg>
-      <div className="flex flex-wrap gap-4 mt-2 text-[0.7rem] text-cream-muted">
+      <div className="flex flex-wrap gap-4 mt-2 text-[0.7rem] text-ink-600">
         <span className="inline-flex items-center gap-1.5">
           <span className="h-2 w-3 rounded-sm" style={{ background: "rgba(120,134,107,0.4)" }} /> In-range band
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2 w-3 rounded-sm" style={{ background: "rgba(52,76,58,0.6)" }} /> In-range period
+          <span className="h-2 w-3 rounded-sm" style={{ background: "rgba(39,134,83,0.3)" }} /> In-range period
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span className="h-0.5 w-3" style={{ background: "#B68A42" }} /> Price
@@ -283,7 +283,6 @@ export function Drawdown({ data, height = 120 }: { data: number[]; height?: numb
       height={height}
       legend={false}
       showArea
-      onDark
       yFmt={(v) => v.toFixed(0) + "%"}
       series={[{ name: "Drawdown", data: data.map((v) => v * 100), color: "#9A4B3A", area: true }]}
     />

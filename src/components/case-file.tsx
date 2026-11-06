@@ -4,16 +4,15 @@
  * The case file: the whole TRACE story for one wallet in a single band —
  * evidence → inferred strategy → backtest → Aqua — each step a verdict read
  * from the real investigation payload and a link to the screen that proves it.
- * Shown large on Investigate and compact above every investigation screen.
+ * Shown as a compact band above every investigation screen.
  */
 
 import Link from "next/link";
-import { ArrowUpRight } from "lucide-react";
 import { ExplorerLink } from "@/components/ui";
 import { fmt } from "@/lib/format";
 import { withInv, type FullInvestigation } from "@/lib/api";
 
-const FAMILY: Record<string, string> = {
+export const FAMILY: Record<string, string> = {
   passive_concentrated: "Passive concentrated liquidity",
   passive_full_range: "Passive full-range liquidity",
   periodic_range_adjustment: "Periodic range adjustment",
@@ -83,78 +82,33 @@ function steps(full: FullInvestigation, invId: string): Step[] {
   ];
 }
 
-const DOT: Record<Tone, string> = { good: "bg-sage", warn: "bg-amber", muted: "bg-ink/25" };
-const DOT_DARK: Record<Tone, string> = { good: "bg-sage-300", warn: "bg-amber", muted: "bg-cream/40" };
-
-export function CaseFile({ full, invId, compact = false }: { full: FullInvestigation; invId: string; compact?: boolean }) {
+const DOT: Record<Tone, string> = { good: "bg-forest", warn: "bg-amber", muted: "bg-ink/25" };
+export function CaseFile({ full, invId }: { full: FullInvestigation; invId: string; compact?: boolean }) {
   const inv = full.investigation;
   const list = steps(full, invId);
-
-  if (compact) {
-    return (
-      <div className="mb-6 rounded-panel border border-ink/10 bg-ivory-50 overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-2.5 border-b border-ink/8 text-[0.78rem] bg-ivory">
-          <span className="text-ink-600 min-w-0 break-anywhere">
-            Case file for <ExplorerLink kind="address" value={inv.wallet} className="text-ink font-medium" />
-          </span>
-          <span className="text-ink-600 tabular">
-            Sepolia blocks {inv.fromBlock?.toLocaleString("en-US")}–{inv.toBlock?.toLocaleString("en-US")}
-          </span>
-        </div>
-        <ol className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-ink/8">
-          {list.map((s) => (
-            <li key={s.key} className="min-w-0 bg-ivory-50">
-              <Link href={s.href} className="block px-4 py-3 hover:bg-ink/[0.03] focus-visible:bg-ink/[0.03] h-full">
-                <span className="flex items-center gap-1.5 text-[0.72rem] text-ink-600">
-                  <span className={`h-1.5 w-1.5 rounded-full ${DOT[s.tone]}`} />
-                  {s.title}
-                </span>
-                <span className="block text-[0.86rem] text-ink font-medium mt-0.5 break-anywhere">{s.verdict}</span>
-              </Link>
-            </li>
-          ))}
-        </ol>
-      </div>
-    );
-  }
-
   return (
-    <section className="mt-6 rounded-panel bg-charcoal-900 text-cream overflow-hidden border border-ink/10">
-      <div className="px-5 md:px-7 pt-6 pb-5 flex flex-wrap items-end justify-between gap-4 border-b border-cream/10">
-        <div className="min-w-0">
-          <div className="text-[0.78rem] text-cream-muted">Case file</div>
-          <h2 className="serif text-2xl md:text-[1.9rem] leading-tight mt-1 break-anywhere">
-            <ExplorerLink kind="address" value={inv.wallet} className="text-cream decoration-gold/50">
-              {fmt.addr(inv.wallet)}
-            </ExplorerLink>
-          </h2>
-        </div>
-        <div className="text-[0.76rem] text-cream-muted md:text-right tabular">
-          {fmt.tsSec(inv.fromTs, false)} → {fmt.tsSec(inv.toTs, false)}
-          <br />
+    <div className="mb-6 rounded-card border border-line bg-ivory-50 overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-2.5 border-b border-line text-[0.78rem] bg-ivory">
+        <span className="text-ink-600 min-w-0 break-anywhere">
+          Case file for <ExplorerLink kind="address" value={inv.wallet} className="text-ink font-medium" />
+        </span>
+        <span className="text-ink-600 tabular">
           Sepolia blocks {inv.fromBlock?.toLocaleString("en-US")}–{inv.toBlock?.toLocaleString("en-US")}
-        </div>
+        </span>
       </div>
-      <ol className="grid md:grid-cols-4 gap-px bg-cream/10">
-        {list.map((s, i) => (
-          <li key={s.key} className="case-step min-w-0 bg-charcoal-900">
-            <Link href={s.href} className="group flex h-full flex-col px-5 md:px-6 py-5 hover:bg-cream/[0.04] focus-visible:bg-cream/[0.04]">
-              <span className="flex items-center justify-between text-[0.76rem] text-cream-muted">
-                <span className="flex items-center gap-2">
-                  <span className="tabular text-gold-300">{i + 1}</span>
-                  {s.title}
-                </span>
-                <ArrowUpRight size={14} className="opacity-40 group-hover:opacity-100 transition-opacity" />
+      <ol className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-line">
+        {list.map((s) => (
+          <li key={s.key} className="min-w-0 bg-ivory-50">
+            <Link href={s.href} className="block px-4 py-3 hover:bg-ivory focus-visible:bg-ivory h-full">
+              <span className="flex items-center gap-1.5 text-[0.72rem] text-ink-600">
+                <span className={`h-1.5 w-1.5 rounded-full ${DOT[s.tone]}`} />
+                {s.title}
               </span>
-              <span className="serif text-[1.25rem] leading-snug mt-3 text-cream break-anywhere">{s.verdict}</span>
-              <span className="mt-2 text-[0.76rem] leading-relaxed text-cream-muted break-anywhere">
-                <span className={`inline-block h-1.5 w-1.5 rounded-full mr-1.5 align-middle ${DOT_DARK[s.tone]}`} />
-                {s.detail}
-              </span>
+              <span className="block text-[0.86rem] text-ink font-medium mt-0.5 break-anywhere">{s.verdict}</span>
             </Link>
           </li>
         ))}
       </ol>
-    </section>
+    </div>
   );
 }

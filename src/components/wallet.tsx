@@ -128,7 +128,7 @@ export function WalletButton() {
   const { mutate: disconnect } = useDisconnect();
   const [err, setErr] = useState<string | null>(null);
 
-  if (!mounted) return <div className="h-9 w-[132px] rounded-md2 border border-ink/10 bg-ivory-50" />;
+  if (!mounted) return <div className="h-9 w-[132px] rounded-md2 border border-line bg-ivory-50" />;
 
   if (!w.connected) {
     // Prefer MetaMask's own EIP-6963 provider over the generic window.ethereum
@@ -154,9 +154,9 @@ export function WalletButton() {
             }
           }}
           disabled={isPending}
-          className="inline-flex items-center gap-2 rounded-md2 bg-ink text-ivory-50 px-3 h-9 text-[0.8rem] font-medium hover:bg-graphite disabled:opacity-50"
+          className="inline-flex items-center gap-2 rounded-md2 border border-line bg-ivory-50 text-ink px-3 h-9 text-[0.8rem] font-medium shadow-soft hover:border-gold/45 disabled:opacity-50"
         >
-          <Wallet size={15} className="text-gold-300" />
+          <Wallet size={15} className="text-gold" />
           {isPending ? "Confirm in wallet…" : "Connect wallet"}
         </button>
         {(err || error) && <span className="text-[0.62rem] text-brick mt-0.5 max-w-[220px] text-right">{err ?? error?.message}</span>}
@@ -168,15 +168,15 @@ export function WalletButton() {
     <div className="flex items-center gap-1.5">
       <div
         className={`inline-flex items-center gap-2 rounded-md2 border px-2.5 h-9 text-[0.76rem] ${
-          w.onSepolia ? "border-sage/40 bg-sage/8 text-ink" : "border-brick/40 bg-brick/8 text-brick"
+          w.onSepolia ? "border-line bg-ivory-50 text-ink shadow-soft" : "border-brick/40 bg-brick/8 text-brick"
         }`}
         title={w.address ?? ""}
       >
-        <span className={`h-2 w-2 rounded-full ${w.onSepolia ? "bg-sage" : "bg-brick"}`} />
+        <span className={`h-2 w-2 rounded-full ${w.onSepolia ? "bg-forest" : "bg-brick"}`} />
         <span className="tabular font-medium">{fmt.addr(w.address ?? "")}</span>
         <span className="hidden lg:inline text-ink-600">· {w.onSepolia ? "Sepolia" : `chain ${w.chainId}`}</span>
       </div>
-      <button onClick={() => disconnect()} aria-label="Disconnect wallet" className="grid place-items-center h-9 w-9 rounded-md2 border border-ink/10 bg-ivory-50 hover:bg-ink/5">
+      <button onClick={() => disconnect()} aria-label="Disconnect wallet" title="Disconnect wallet" className="grid place-items-center h-9 w-9 rounded-md2 border border-line bg-ivory-50 hover:bg-ivory-100">
         <LogOut size={15} className="text-ink-600" />
       </button>
     </div>

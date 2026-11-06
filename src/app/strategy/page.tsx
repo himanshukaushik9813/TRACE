@@ -43,15 +43,15 @@ function StrategyView({ s, full }: { s: StrategyRow; full: FullInvestigation }) 
   return (
     <>
       <div className="grid lg:grid-cols-[1.1fr_1fr] gap-5 mt-4">
-        <Card dark>
-          <Label onDark>{s.role === "ai_hypothesis" ? "0G-proposed hypothesis (evidence-gated)" : "Evidence-only analysis (no AI)"}</Label>
-          <h2 className="serif text-2xl text-cream mt-2">{FAMILY[ir.family] ?? ir.family}</h2>
+        <Card>
+          <Label>{s.role === "ai_hypothesis" ? "0G-proposed hypothesis (evidence-gated)" : "Evidence-only analysis (no AI)"}</Label>
+          <h2 className="serif text-2xl text-ink mt-2">{FAMILY[ir.family] ?? ir.family}</h2>
           <div className="mt-4 grid grid-cols-2 gap-4">
-            <Stat onDark label="Confidence" value={fmt.frac(ir.confidence, 0)} sub="fit to evidence — not a probability" />
-            <Stat onDark label="Rules" value={ir.rules.length} sub={`${ir.evidenceRefs.length} cited transactions`} />
+            <Stat label="Confidence" value={fmt.frac(ir.confidence, 0)} sub="fit to evidence — not a probability" />
+            <Stat label="Rules" value={ir.rules.length} sub={`${ir.evidenceRefs.length} cited transactions`} />
           </div>
-          <p className="text-[0.72rem] text-cream-muted mt-3">{ir.confidenceNote}</p>
-          <div className="mt-4 text-[0.7rem] text-cream-muted space-y-1 break-all">
+          <p className="text-[0.72rem] text-ink-600 mt-3">{ir.confidenceNote}</p>
+          <div className="mt-4 text-[0.7rem] text-ink-600 space-y-1 break-all">
             <div>Version {ir.id}{ir.parentId ? ` (derived from ${ir.parentId})` : ""}</div>
             <div>Version hash {s.versionHash}</div>
             <div>Evidence blocks {ir.evidencePeriod.fromBlock.toLocaleString("en-US")}–{ir.evidencePeriod.toBlock.toLocaleString("en-US")} · {ir.sourceProtocol} · chain {ir.chainId}</div>

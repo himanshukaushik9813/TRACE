@@ -105,3 +105,108 @@ test("a completed investigation renders real data on every screen", async ({ pag
   await page.getByRole("button", { name: /on-chain (compatibility )?checks/ }).click();
   await expect(page.getByText("Aqua registry deployed on Sepolia")).toBeVisible({ timeout: 120_000 });
 });
+
+/**
+ * The Investigate workflow ticks a step only from real evidence. A real
+ * completed investigation (no plan signed yet) must show Analyze + Understand
+ * complete and Verify/Execute open. To exercise the completion moment without
+ * spending testnet funds, the second half fulfils /full with that same real
+ * payload plus a test-only validated authorization and confirmed ship tx.
+ */
+test("workflow ticks only completed steps, and all four tick together after a confirmed ship", async ({ page, request }) => {
+  const recent = await (await request.get(`${API}/investigations/recent?limit=30`)).json();
+  let id: string | null = null;
+  let real: Record<string, unknown> | null = null;
+  for (const r of recent.investigations.filter((x: { status: string }) => x.status === "done")) {
+    const f = await (await request.get(`${API}/investigations/${r.id}/full`)).json();
+    const primary = f.strategies.find((s: { id: string }) => s.id === f.primaryStrategyId);
+    if (primary && primary.family !== "inconclusive" && f.plans.length === 0) {
+      id = r.id;
+      real = f;
+      break;
+    }
+  }
+  test.skip(!id, "needs a completed investigation with an executable strategy");
+
+  await page.goto(`/?inv=${id}`);
+  const flow = page.getByRole("list", { name: /Investigation workflow/ });
+  await expect(flow).toHaveAttribute("aria-label", /2 of 4 steps complete/, { timeout: 30_000 });
+  await expect(flow.getByText("Analyze, complete")).toBeAttached();
+  await expect(flow.getByText("Understand, complete")).toBeAttached();
+  await expect(page.getByText("All four steps complete")).toHaveCount(0);
+
+  const maker = "0x1111111111111111111111111111111111111111";
+  const planId = "00000000-0000-4000-8000-000000000001";
+  const now = new Date().toISOString();
+  await page.route(`**/investigations/${id}/full`, (route) =>
+    route.fulfill({
+      json: {
+        ...real,
+        plans: [{ id: planId, maker, planHash: "0xplan", createdAt: now, plan: { maker, params: { priceLow: 0, priceHigh: 0 }, steps: [], notCompiled: [] } }],
+        authorizations: [{ id: "a1", planId, wallet: maker, action: "aqua:ship", validated: true, worldStatus: "not_configured", createdAt: now }],
+        transactions: [{ id: "t1", op: "ship", tx_hash: `0x${"ab".repeat(32)}`, status: "success", plan_id: planId, created_at: now }],
+      },
+    }),
+  );
+  await page.reload();
+  await expect(flow).toHaveAttribute("aria-label", /4 of 4 steps complete/, { timeout: 30_000 });
+  await expect(page.getByText("All four steps complete")).toBeVisible();
+  await expect(page.getByRole("link", { name: /View ship transaction/ })).toBeVisible();
+});
+
+/**
+ * One-click execution from Best Execution walks check → compile → sign → approve.
+ * The API is mocked for this test (no plan or authorization is written to the
+ * real database) and the test wallet signs the EIP-712 challenge, then rejects
+ * the approve transaction: the flow must mark Verify's step done, stop at
+ * approve with a clear message, and offer to continue from that step.
+ */
+test("Best Execution runs the Aqua flow inline and resumes after a rejected approve", async ({ page, request }) => {
+  const recent = await (await request.get(`${API}/investigations/recent?limit=30`)).json();
+  let id: string | null = null;
+  let real: Record<string, unknown> | null = null;
+  for (const r of recent.investigations.filter((x: { status: string }) => x.status === "done")) {
+    const f = await (await request.get(`${API}/investigations/${r.id}/full`)).json();
+    const primary = f.strategies.find((s: { id: string }) => s.id === f.primaryStrategyId);
+    if (primary && primary.family !== "inconclusive" && f.plans.length === 0 && f.investigation.summary?.positions?.length) {
+      id = r.id;
+      real = f;
+      break;
+    }
+  }
+  test.skip(!id, "needs a completed investigation with an executable strategy");
+
+  const maker = "0x2222222222222222222222222222222222222222";
+  await injectWallet(page, maker, "0xaa36a7");
+  await page.addInitScript(() => {
+    const eth = (window as unknown as { ethereum: { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> } }).ethereum;
+    const base = eth.request;
+    eth.request = async (a) => {
+      if (a.method === "eth_signTypedData_v4") return `0x${"11".repeat(65)}`;
+      if (a.method === "eth_sendTransaction" || a.method === "eth_estimateGas")
+        throw Object.assign(new Error("User rejected the request."), { code: 4001 });
+      return base(a);
+    };
+  });
+  const compat = { strategyId: "s", verdict: "PARTIAL", rules: [], capabilities: [], checks: [], unsupportedNotes: [], assessedAt: 0 };
+  const step = (op: string) => ({ op, description: op, to: "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14", data: "0x", value: "0" });
+  await page.route("**/strategies/*/compatibility", (r) => r.fulfill({ json: { reportId: "r", compatibility: compat } }));
+  await page.route("**/strategies/*/plan", (r) =>
+    r.fulfill({ json: { planId: "p1", compatibility: compat, simulation: { "approve:x": { ok: true }, "ship:y": { ok: true } }, plan: { maker, params: { priceLow: 1, priceHigh: 2 }, steps: [step("approve"), step("ship")], notCompiled: [] } } }),
+  );
+  await page.route("**/plans/*/challenge", (r) =>
+    r.fulfill({ json: { typedData: { domain: { name: "TRACE", version: "1", chainId: 11155111 }, types: { Authorization: [{ name: "wallet", type: "address" }, { name: "chainId", type: "uint256" }, { name: "expiresAt", type: "uint256" }] }, primaryType: "Authorization", message: { wallet: maker, chainId: "11155111", expiresAt: "9999999999" } }, claims: {} } }),
+  );
+  await page.route("**/authorizations", (r) => r.fulfill({ json: { authorizationId: "a1", validated: true, signer: maker, verification: { notes: [] } } }));
+  await page.route(`**/investigations/${id}/full`, (r) => r.fulfill({ json: real }));
+
+  await page.goto(`/?inv=${id}`);
+  await page.getByRole("button", { name: /Connect wallet/ }).click();
+  const token = page.getByLabel(/to commit/).first();
+  await token.fill("0.01");
+  await page.getByRole("button", { name: "Execute with 1inch Aqua" }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "You rejected the request in your wallet" })).toBeVisible({ timeout: 30_000 });
+  const progress = page.getByRole("list", { name: "Execution progress" });
+  await expect(progress).toContainText("Sign authorization");
+  await expect(page.getByRole("button", { name: "Continue execution" })).toBeEnabled();
+});

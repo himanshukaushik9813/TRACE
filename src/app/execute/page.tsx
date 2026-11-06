@@ -249,14 +249,14 @@ function ExecuteFlow({ full }: { full: FullInvestigation }) {
     <>
       <ol className="grid grid-cols-2 lg:grid-cols-4 gap-px rounded-panel overflow-hidden border border-ink/10 bg-ink/10" aria-label="Execution progress">
         {rail.map((r, i) => (
-          <li key={r.title} className={`min-w-0 p-4 ${i === current ? "bg-charcoal-900 text-cream" : "bg-ivory-50"}`} aria-current={i === current ? "step" : undefined}>
-            <div className={`flex items-center gap-2 text-[0.8rem] ${i === current ? "text-gold-300" : r.done ? "text-forest" : "text-ink-600"}`}>
-              <span className={`grid h-5 w-5 place-items-center rounded-full text-[0.68rem] font-semibold tabular ${r.done ? "bg-forest text-ivory-50" : i === current ? "bg-gold text-charcoal-900" : "border border-ink/20"}`}>
+          <li key={r.title} className={`min-w-0 p-4 ${i === current ? "bg-gold/8 text-ink" : "bg-ivory-50"}`} aria-current={i === current ? "step" : undefined}>
+            <div className={`flex items-center gap-2 text-[0.8rem] ${i === current ? "text-gold" : r.done ? "text-forest" : "text-ink-600"}`}>
+              <span className={`grid h-5 w-5 place-items-center rounded-full text-[0.68rem] font-semibold tabular ${r.done ? "bg-forest text-white" : i === current ? "bg-gold text-white" : "border border-ink/20"}`}>
                 {r.done ? <Check size={11} /> : i + 1}
               </span>
               {r.title}
             </div>
-            <p className={`mt-1.5 text-[0.76rem] leading-snug ${i === current ? "text-cream-muted" : "text-ink-600"}`}>{r.detail}</p>
+            <p className={`mt-1.5 text-[0.76rem] leading-snug ${i === current ? "text-ink-600" : "text-ink-600"}`}>{r.detail}</p>
           </li>
         ))}
       </ol>
@@ -301,29 +301,29 @@ function ExecuteFlow({ full }: { full: FullInvestigation }) {
 
       {plan && (
         <>
-          <Card dark className="mt-5">
+          <Card className="mt-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <Label onDark>Deterministic SwapVM order (official 1inch SDK)</Label>
-                <div className="text-cream text-[0.86rem] mt-2 tabular break-all">Plan hash {plan.plan.planHash}</div>
-                <div className="text-cream-muted text-[0.74rem] mt-1 break-all">Aqua strategy hash {plan.plan.strategyHash}</div>
-                <div className="text-cream-muted text-[0.74rem] mt-1">
+                <Label>Deterministic SwapVM order (official 1inch SDK)</Label>
+                <div className="text-ink text-[0.86rem] mt-2 tabular break-all">Plan hash {plan.plan.planHash}</div>
+                <div className="text-ink-600 text-[0.74rem] mt-1 break-all">Aqua strategy hash {plan.plan.strategyHash}</div>
+                <div className="text-ink-600 text-[0.74rem] mt-1">
                   Price range {plan.plan.params.priceHigh ? `${fmt.amt(plan.plan.params.priceLow, 8)} – ${fmt.amt(plan.plan.params.priceHigh, 8)}` : "full range"} · fee {plan.plan.params.feeBps} bps · order {(plan.plan.order.length - 2) / 2} bytes
                 </div>
-                <div className="text-cream-muted text-[0.74rem] mt-1">
-                  Registry <ExplorerLink kind="address" value={AQUA.registry.address} className="text-cream-muted" /> · router <ExplorerLink kind="address" value={AQUA.swapVmRouter.address} className="text-cream-muted" />
+                <div className="text-ink-600 text-[0.74rem] mt-1">
+                  Registry <ExplorerLink kind="address" value={AQUA.registry.address} className="text-ink-600" /> · router <ExplorerLink kind="address" value={AQUA.swapVmRouter.address} className="text-ink-600" />
                 </div>
               </div>
-              <div className="text-[0.72rem] text-cream-muted space-y-1">
+              <div className="text-[0.72rem] text-ink-600 space-y-1">
                 {Object.entries(plan.simulation).map(([k, v]) => (
-                  <div key={k} className={v.ok ? "text-sage-300" : "text-gold-300"}>
+                  <div key={k} className={v.ok ? "text-forest" : "text-gold"}>
                     simulate {k.split(":")[0]}: {v.ok ? "ok" : v.error}
                   </div>
                 ))}
               </div>
             </div>
             {plan.plan.notCompiled.length > 0 && (
-              <ul className="mt-3 text-[0.72rem] text-gold-300 list-disc pl-4">
+              <ul className="mt-3 text-[0.72rem] text-gold list-disc pl-4">
                 {plan.plan.notCompiled.map((n) => <li key={n}>Not compiled: {n}</li>)}
               </ul>
             )}

@@ -2,10 +2,12 @@ import type { ReactNode } from "react";
 import { AlertTriangle, ExternalLink, Inbox, Loader2, X } from "lucide-react";
 import { explorer } from "@trace/chain-config";
 
-/** Card surface — light ivory or dark charcoal. */
+/**
+ * Card surface. The app is light-theme only: `dark` is kept for call-site
+ * compatibility but renders the same white card.
+ */
 export function Card({
   children,
-  dark = false,
   className = "",
   pad = true,
 }: {
@@ -14,31 +16,18 @@ export function Card({
   className?: string;
   pad?: boolean;
 }) {
-  const bg = dark
-    ? "bg-charcoal-900 hairline-dark"
-    : "bg-ivory-50 hairline";
-  const bd = dark ? "border border-cream/10" : "border border-ink/10";
-  return (
-    <div
-      className={`${bg} ${bd} rounded-panel shadow-card ${pad ? "p-5" : ""} ${className}`}
-    >
-      {children}
-    </div>
-  );
+  return <div className={`bg-ivory-50 border border-line rounded-card shadow-lift ${pad ? "p-5" : ""} ${className}`}>{children}</div>;
 }
 
 /** Quiet sentence-case field label. */
-export function Label({ children, onDark }: { children: ReactNode; onDark?: boolean }) {
-  return (
-    <div className={`label ${onDark ? "text-cream-muted" : ""}`}>{children}</div>
-  );
+export function Label({ children }: { children: ReactNode; onDark?: boolean }) {
+  return <div className="label">{children}</div>;
 }
 
 /** Section title with a hairline rule. */
 export function SectionTitle({
   eyebrow,
   title,
-  onDark,
   action,
 }: {
   eyebrow?: string;
@@ -49,14 +38,8 @@ export function SectionTitle({
   return (
     <div className="section-title flex flex-wrap items-end justify-between gap-x-4 gap-y-2 mb-4">
       <div>
-        {eyebrow && <Label onDark={onDark}>{eyebrow}</Label>}
-        <h2
-          className={`serif text-xl md:text-2xl leading-tight mt-1 ${
-            onDark ? "text-cream" : "text-ink"
-          }`}
-        >
-          {title}
-        </h2>
+        {eyebrow && <Label>{eyebrow}</Label>}
+        <h2 className="serif text-xl md:text-2xl leading-tight mt-1 text-ink">{title}</h2>
       </div>
       {action}
     </div>
@@ -92,15 +75,13 @@ export function Pill({
  * Data-source badge. TRACE has no demo mode: every figure comes from a live
  * Sepolia read through the API, and this badge says so (with the block).
  */
-export function SourceBadge({ onDark, block, label }: { onDark?: boolean; block?: number | null; label?: string }) {
+export function SourceBadge({ block, label }: { onDark?: boolean; block?: number | null; label?: string }) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[0.7rem] font-medium border whitespace-nowrap ${
-        onDark ? "border-sage/40 bg-sage/10 text-sage-300" : "border-sage/40 bg-sage/10 text-sage-600"
-      }`}
+      className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[0.7rem] font-medium border whitespace-nowrap border-forest/25 bg-forest/8 text-forest"
       title="Read live from Ethereum Sepolia through the TRACE API"
     >
-      <span className={`h-1.5 w-1.5 rounded-full ${onDark ? "bg-sage-300" : "bg-sage"}`} />
+      <span className="h-1.5 w-1.5 rounded-full bg-forest" />
       {label ?? "Live on Sepolia"}
       {block ? `, block ${block.toLocaleString("en-US")}` : ""}
     </span>
@@ -147,9 +128,9 @@ export function ExplorerLink({
   );
 }
 
-export function LoadingState({ label = "Loading…", onDark }: { label?: string; onDark?: boolean }) {
+export function LoadingState({ label = "Loading…" }: { label?: string; onDark?: boolean }) {
   return (
-    <div className={`flex items-center gap-2 text-[0.85rem] py-6 ${onDark ? "text-cream-muted" : "text-ink-600"}`}>
+    <div className="flex items-center gap-2 text-[0.85rem] py-6 text-ink-600">
       <Loader2 size={16} className="animate-spin text-gold" /> {label}
     </div>
   );
@@ -157,7 +138,7 @@ export function LoadingState({ label = "Loading…", onDark }: { label?: string;
 
 export function EmptyState({ title, children, icon }: { title: string; children?: ReactNode; icon?: ReactNode }) {
   return (
-    <div className="rounded-panel border border-dashed border-ink/15 bg-ivory-50/60 p-6 flex gap-4 items-start min-w-0">
+    <div className="rounded-card border border-dashed border-ink/15 bg-ivory-50 p-6 flex gap-4 items-start min-w-0">
       <div className="h-9 w-9 grid place-items-center rounded-md2 bg-ink/5 text-ink-600 shrink-0">{icon ?? <Inbox size={17} />}</div>
       <div className="min-w-0">
         <div className="text-ink font-medium">{title}</div>
@@ -169,7 +150,7 @@ export function EmptyState({ title, children, icon }: { title: string; children?
 
 export function ErrorState({ title = "Something went wrong", message }: { title?: string; message: string }) {
   return (
-    <div className="rounded-panel border border-brick/30 bg-brick/8 p-4 flex gap-3 items-start" role="alert">
+    <div className="rounded-card border border-brick/30 bg-brick/5 p-4 flex gap-3 items-start" role="alert">
       <AlertTriangle size={17} className="text-brick shrink-0 mt-0.5" />
       <div className="min-w-0">
         <div className="text-brick font-medium text-[0.9rem]">{title}</div>
@@ -184,7 +165,6 @@ export function Stat({
   label,
   value,
   sub,
-  onDark,
   align = "left",
 }: {
   label: string;
@@ -195,9 +175,9 @@ export function Stat({
 }) {
   return (
     <div className={`flex flex-col min-w-0 ${align === "right" ? "items-end text-right" : ""}`}>
-      <Label onDark={onDark}>{label}</Label>
-      <div className={`stat-value text-lg md:text-xl font-semibold mt-1 break-anywhere ${onDark ? "text-cream" : "text-ink"}`}>{value}</div>
-      {sub && <div className={`text-[0.74rem] mt-0.5 break-anywhere ${onDark ? "text-cream-muted" : "text-ink-600"}`}>{sub}</div>}
+      <Label>{label}</Label>
+      <div className="stat-value text-lg md:text-xl font-semibold mt-1 break-anywhere text-ink">{value}</div>
+      {sub && <div className="text-[0.74rem] mt-0.5 break-anywhere text-ink-600">{sub}</div>}
     </div>
   );
 }
@@ -219,10 +199,10 @@ export function Button({
   const base =
     "inline-flex items-center justify-center gap-2 rounded-md2 px-4 py-2 text-sm font-medium transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed";
   const variants: Record<string, string> = {
-    primary: "bg-charcoal text-cream hover:bg-graphite shadow-soft",
-    dark: "bg-ink text-ivory-50 hover:bg-graphite",
-    gold: "bg-gold text-charcoal-900 hover:bg-gold-300 shadow-glow",
-    ghost: "border border-ink/15 text-ink hover:bg-ink/5",
+    primary: "bg-ivory-50 border border-gold/45 text-ink hover:bg-ivory-100 shadow-soft",
+    dark: "bg-ivory-50 border border-gold/45 text-ink hover:bg-ivory-100 shadow-soft",
+    gold: "bg-gold text-white hover:bg-[#A67C38] shadow-glow",
+    ghost: "border border-line text-ink hover:bg-ink/5",
   };
   return (
     <button onClick={onClick} disabled={disabled} className={`${base} ${variants[variant]} ${className}`}>
@@ -246,7 +226,7 @@ export function Drawer({
   return (
     <>
       <div
-        className={`fixed inset-0 z-40 bg-charcoal-900/40 transition-opacity ${
+        className={`fixed inset-0 z-40 bg-ink/20 transition-opacity ${
           open ? "opacity-100" : "opacity-0 pointer-events-none"
         }`}
         onClick={onClose}
@@ -271,11 +251,11 @@ export function Drawer({
 }
 
 /** Progress bar for a behavioural DNA dimension. */
-export function Meter({ value, onDark }: { value: number; onDark?: boolean }) {
+export function Meter({ value }: { value: number; onDark?: boolean }) {
   return (
-    <div className={`h-1.5 w-full rounded-full overflow-hidden ${onDark ? "bg-cream/12" : "bg-ink/10"}`}>
+    <div className="h-1.5 w-full rounded-full overflow-hidden bg-ink/8">
       <div
-        className="h-full rounded-full bg-gradient-to-r from-gold to-gold-300"
+        className="h-full rounded-full bg-gold"
         style={{ width: `${value}%` }}
       />
     </div>
@@ -287,7 +267,6 @@ export function Tabs<T extends string>({
   tabs,
   value,
   onChange,
-  onDark,
   className = "",
 }: {
   tabs: { id: T; label: string }[];
@@ -298,22 +277,14 @@ export function Tabs<T extends string>({
 }) {
   return (
     <div
-      className={`inline-flex p-0.5 rounded-md2 border ${className} ${
-        onDark ? "border-cream/12 bg-charcoal-900" : "border-ink/10 bg-ivory"
-      }`}
+      className={`inline-flex p-0.5 rounded-md2 border border-line bg-ivory-100 ${className}`}
     >
       {tabs.map((t) => (
         <button
           key={t.id}
           onClick={() => onChange(t.id)}
           className={`px-3 py-1.5 rounded-md text-[0.82rem] font-medium transition-all ${
-            value === t.id
-              ? onDark
-                ? "bg-cream text-ink shadow-soft"
-                : "bg-ink text-ivory-50 shadow-soft"
-              : onDark
-                ? "text-cream-muted hover:text-cream"
-                : "text-ink-600 hover:text-ink"
+            value === t.id ? "bg-ivory-50 text-ink shadow-soft" : "text-ink-600 hover:text-ink"
           }`}
         >
           {t.label}

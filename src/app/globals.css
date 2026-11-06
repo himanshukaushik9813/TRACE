@@ -6,8 +6,12 @@
 :root {
   color-scheme: light;
   /* Palette (spec 2.1) */
+  --canvas: #f7f3eb;
+  --card: #ffffff;
   --ivory: #f3ebdd;
-  --ivory-50: #faf7f0;
+  --ivory-50: #ffffff;
+  --line: #e9e2d6;
+  --success: #278653;
   --stone: #e9e0d0;
   --charcoal: #171714;
   --charcoal-900: #11110f;
@@ -18,10 +22,10 @@
   --sage: #78866b;
   --sage-600: #344c3a;
   --ink: #171714;
-  --ink-600: #696356;
+  --ink-600: #77736a;
   --cream: #f3ebdd;
   --cream-muted: #b7b0a2;
-  --forest: #344c3a;
+  --forest: #278653;
   --amber: #b07d2e;
   --brick: #9a4b3a;
 }
@@ -33,7 +37,7 @@ html {
 
 body {
   margin: 0;
-  background: var(--ivory);
+  background: var(--canvas);
   color: var(--ink);
   font-family: var(--font-sans), Inter, "Geist", system-ui, -apple-system,
     "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -46,11 +50,13 @@ h1, h2, h3, .serif {
     Georgia, serif;
   font-weight: 600;
   letter-spacing: -0.01em;
+  /* Playfair defaults to old-style figures, which make "0x" read as "ox" */
+  font-variant-numeric: lining-nums;
 }
 
 /* Tabular numerals for financial data */
 .tnum, .tabular, th, td, .stat-value {
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: lining-nums tabular-nums;
   font-feature-settings: "tnum";
 }
 
@@ -61,7 +67,6 @@ h1, h2, h3, .serif {
   letter-spacing: 0;
   color: var(--ink-600);
 }
-.on-dark .label { color: var(--cream-muted); }
 
 /* Subtle paper grain on light surfaces */
 .paper::before {
@@ -77,7 +82,7 @@ h1, h2, h3, .serif {
 .hairline { border-color: rgba(23, 23, 20, 0.1); }
 .hairline-dark { border-color: rgba(243, 235, 221, 0.14); }
 
-/* Thin scrollbar in dark panels */
+/* Thin warm scrollbar */
 .dark-scroll { scrollbar-width: thin; scrollbar-color: rgba(182,138,66,0.4) transparent; }
 .dark-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
 .dark-scroll::-webkit-scrollbar-thumb { background: rgba(182,138,66,0.35); border-radius: 8px; }
@@ -108,12 +113,34 @@ h1, h2, h3, .serif {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
 
-/* One orchestrated moment: the case file reveals left-to-right when a case opens */
+/* One orchestrated moment: the findings reveal once when an investigation completes */
 @keyframes case-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .case-step { opacity: 0; animation: case-in 420ms ease-out forwards; }
 .case-step:nth-child(2) { animation-delay: 90ms; }
 .case-step:nth-child(3) { animation-delay: 180ms; }
 .case-step:nth-child(4) { animation-delay: 270ms; }
+
+/* Execution engine: the seam glows only while TRACE is working */
+@keyframes engine-breathe { 0%,100% { opacity: 0.55; } 50% { opacity: 1; } }
+.engine-live { animation: engine-breathe 2.2s ease-in-out infinite; }
+
+/* Workflow: a step's icon turns over in 3D to a green tick when the step completes */
+.flip { perspective: 520px; }
+.flip-inner { position: absolute; inset: 0; transform-style: preserve-3d; transition: transform 760ms cubic-bezier(0.2, 0.75, 0.25, 1.2); }
+.flip-inner.is-flipped { transform: rotateY(180deg); }
+.flip-face { position: absolute; inset: 0; display: grid; place-items: center; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.flip-back { transform: rotateY(180deg); }
+@keyframes tick-ring { 0% { transform: scale(0.7); opacity: 0.55; } 100% { transform: scale(1.9); opacity: 0; } }
+.tick-ring { position: absolute; inset: 0; border-radius: 9999px; border: 2px solid var(--success); opacity: 0; pointer-events: none; animation: tick-ring 900ms ease-out both; }
+/* When every step is done, the four ticks pulse together once, then the completion note swings in */
+@keyframes together { 0%, 100% { transform: scale(1); } 45% { transform: scale(1.16); } }
+.all-done .flip { animation: together 640ms cubic-bezier(0.3, 0.7, 0.3, 1) 1100ms both; }
+@keyframes complete-in { from { opacity: 0; transform: perspective(700px) rotateX(-32deg) translateY(-8px); } to { opacity: 1; transform: none; } }
+.complete-in { transform-origin: top center; animation: complete-in 640ms cubic-bezier(0.2, 0.8, 0.2, 1) 1250ms both; }
+
+/* Native <details> disclosure without the default marker */
+summary { list-style: none; cursor: pointer; }
+summary::-webkit-details-marker { display: none; }
 
 /* A section heading after other content gets breathing room; as a card's first child it sits flush */
 .section-title { margin-top: 2.25rem; }

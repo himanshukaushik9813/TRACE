@@ -57,13 +57,13 @@ export default function BacktestPage() {
                     </div>
                   </Card>
 
-                  <Card dark className="mt-5">
-                    <SectionTitle onDark eyebrow={`Value in ${bt.assumptions.valuationToken} (start ${fmt.amt(bt.assumptions.startCapital)})`} title="Equity paths" />
+                  <Card className="mt-5">
+                    <SectionTitle eyebrow={`Value in ${bt.assumptions.valuationToken} (start ${fmt.amt(bt.assumptions.startCapital)})`} title="Equity paths" />
                     <LineChart series={bt.series.values.map((v, i) => ({ name: v.label, data: v.points, color: COLORS[i % COLORS.length], area: i === 0 }))} />
                   </Card>
 
-                  <Card dark className="mt-5">
-                    <SectionTitle onDark eyebrow={`${bt.pair} — real swap prices (token1 per token0)`} title="Pool price" />
+                  <Card className="mt-5">
+                    <SectionTitle eyebrow={`${bt.pair} — real swap prices (token1 per token0)`} title="Pool price" />
                     <LineChart legend={false} series={[{ name: "Price", data: bt.series.prices, color: "#B68A42", area: true }]} />
                   </Card>
 
@@ -97,8 +97,8 @@ export default function BacktestPage() {
                   </Card>
 
                   {bt.series.values[0] && (
-                    <Card dark className="mt-5">
-                      <SectionTitle onDark eyebrow={bt.series.values[0].label} title="Drawdown" />
+                    <Card className="mt-5">
+                      <SectionTitle eyebrow={bt.series.values[0].label} title="Drawdown" />
                       <Drawdown
                         data={(() => {
                           let peak = -Infinity;

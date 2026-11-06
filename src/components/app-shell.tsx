@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { Search, Boxes, BrainCircuit, FlaskConical, Terminal, FileText, Activity, Bookmark, Circle, Globe, Menu, X } from "lucide-react";
-import { SEPOLIA_CHAIN_ID } from "@trace/chain-config";
+import { Search, Boxes, BrainCircuit, FlaskConical, Terminal, FileText, Activity, Bookmark, Menu, X, ExternalLink, Zap, Cpu, Database, ScanFace } from "lucide-react";
+import { SEPOLIA_CHAIN_ID, explorer } from "@trace/chain-config";
 import { art } from "@/lib/assets";
-import { useIntegrations, withInv } from "@/lib/api";
+import { useIntegrations, withInv, type IntegrationStatus } from "@/lib/api";
+import { starPath } from "@/components/engine-mark";
 import { WalletButton, NetworkBanner } from "@/components/wallet";
 
 const NAV = [
@@ -17,7 +18,7 @@ const NAV = [
   { href: "/execute", label: "Execute · Aqua", icon: Terminal },
   { href: "/reports", label: "Reports", icon: FileText },
   { href: "/activity", label: "Activity", icon: Activity },
-  { href: "/saved", label: "Strategy versions", icon: Bookmark },
+  { href: "/saved", label: "Strategy Versions", icon: Bookmark },
 ];
 
 /**
@@ -63,13 +64,14 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
             key={item.href}
             href={withInv(item.href, inv)}
             onClick={onNavigate}
-            className={`group flex items-center gap-3 rounded-md2 px-3 py-2.5 transition-all ${
-              active ? "bg-ink text-ivory-50 shadow-soft" : "text-ink-600 hover:bg-ink/5 hover:text-ink"
+            aria-current={active ? "page" : undefined}
+            className={`group flex items-center gap-3 rounded-md2 px-3 py-2.5 transition-colors ${
+              active ? "bg-gold text-white shadow-glow" : "text-ink hover:bg-ivory-100"
             }`}
           >
-            <Icon size={17} strokeWidth={1.6} className={active ? "text-gold-300" : "text-ink-600"} />
+            <Icon size={17} strokeWidth={1.6} className={active ? "text-white" : "text-ink-600 group-hover:text-ink"} />
             <span className="text-[0.9rem] font-medium flex-1">{item.label}</span>
-            {active && <span className="h-1.5 w-1.5 rounded-full bg-gold-300" />}
+            {active && <span className="h-1.5 w-1.5 rounded-full bg-white/90" />}
           </Link>
         );
       })}
@@ -80,32 +82,56 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
 function ChainFooter() {
   const { data, isError } = useIntegrations();
   const ok = data?.chain.ok;
+  const block = data?.chain.latestBlock ?? null;
   return (
-    <div className="relative mt-4 border-t border-ink/10 overflow-hidden">
-      <img src={art.lg.mountain} alt="" aria-hidden className="w-full h-28 object-cover object-center opacity-70 mix-blend-multiply" loading="lazy" />
-      <div className="absolute inset-0 bg-gradient-to-t from-ivory via-ivory/40 to-transparent" />
-      <div className="relative px-5 py-3 bg-ivory/70 backdrop-blur-sm">
-        <div className="flex items-center gap-2">
-          <Circle size={7} className={ok ? "text-sage-600 animate-pulseSoft" : "text-brick"} />
-          <span className="text-[0.7rem] font-medium text-ink-600">
-            {isError ? "API unreachable" : ok ? `Sepolia at block ${data?.chain.latestBlock?.toLocaleString("en-US")}` : data ? "Sepolia RPC error" : "Checking Sepolia…"}
-          </span>
+    <div className="relative mt-4">
+      <img src={art.lg.mountain} alt="" aria-hidden className="w-full h-24 object-cover object-top opacity-35 mix-blend-multiply pointer-events-none" style={{ maskImage: "linear-gradient(to bottom, transparent, #000 45%)", WebkitMaskImage: "linear-gradient(to bottom, transparent, #000 45%)" }} loading="lazy" />
+      <div className="px-4 pb-5 -mt-6 relative space-y-2">
+        <div className="inline-flex items-center gap-2 rounded-full border border-line bg-ivory-50 px-3 py-1.5 text-[0.76rem] font-medium text-ink">
+          <span className={`h-2 w-2 rounded-full ${isError || (data && !ok) ? "bg-brick" : ok ? "bg-forest" : "bg-ink/25"}`} />
+          {isError ? "API unreachable" : data && !ok ? "Sepolia RPC error" : "Sepolia Testnet"}
         </div>
-        <div className="text-[0.7rem] text-ink-600/80 mt-1">Built for ETHGlobal Mumbai 2026</div>
+        {block != null && (
+          <a
+            href={explorer.block(block)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-between rounded-md2 border border-line bg-ivory-50 px-3 py-2 text-[0.78rem] text-ink tabular hover:border-gold/40"
+            title="Latest Sepolia block read by the TRACE API"
+          >
+            Block {block.toLocaleString("en-US")}
+            <ExternalLink size={13} className="text-ink-600" />
+          </a>
+        )}
       </div>
     </div>
+  );
+}
+
+/** The TRACE mark: a gold four-point star on an ivory tile. */
+function Mark({ size = 36 }: { size?: number }) {
+  return (
+    <span className="grid place-items-center rounded-md2 border border-gold/35 bg-ivory-50 shadow-soft shrink-0" style={{ width: size, height: size }}>
+      <svg viewBox="0 0 24 24" width={size * 0.62} height={size * 0.62} aria-hidden>
+        <defs>
+          <linearGradient id="mark-g" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#D8B46C" />
+            <stop offset="1" stopColor="#A87C37" />
+          </linearGradient>
+        </defs>
+        <path d={starPath(12, 12, 10)} fill="url(#mark-g)" />
+      </svg>
+    </span>
   );
 }
 
 function Brand() {
   return (
     <div className="flex items-center gap-2.5">
-      <div className="h-8 w-8 rounded-md2 bg-charcoal-900 grid place-items-center overflow-hidden">
-        <img src={art.ethEmblem} alt="TRACE emblem" className="h-7 w-7 object-contain" />
-      </div>
+      <Mark />
       <div>
-        <div className="serif text-xl tracking-tight text-ink leading-none">TRACE</div>
-        <div className="label mt-1.5 !text-[0.55rem]">On-Chain Strategy Intelligence</div>
+        <div className="serif text-[1.35rem] tracking-tight text-ink leading-none">TRACE</div>
+        <div className="text-[0.62rem] text-ink-600 mt-1">On-Chain Strategy Intelligence</div>
       </div>
     </div>
   );
@@ -113,7 +139,7 @@ function Brand() {
 
 function Sidebar() {
   return (
-    <aside className="hidden lg:flex w-[264px] shrink-0 h-full flex-col bg-ivory hairline border-r border-ink/10 paper relative">
+    <aside className="hidden lg:flex w-[248px] shrink-0 h-full flex-col bg-ivory border-r border-line relative">
       <div className="px-5 pt-6 pb-4">
         <Brand />
       </div>
@@ -123,28 +149,38 @@ function Sidebar() {
   );
 }
 
-const DOT: Record<string, string> = {
+/** Only a verified integration gets the green dot; anything else is shown as what it is. */
+const DOT: Record<IntegrationStatus, string> = {
   "VERIFIED LIVE": "bg-forest",
-  "VERIFIED TESTNET": "bg-sage",
+  "VERIFIED TESTNET": "bg-forest",
   "IMPLEMENTED BUT NOT VERIFIED": "bg-amber",
   "BLOCKED BY EXTERNAL DEPENDENCY": "bg-brick",
+  "NOT IMPLEMENTED": "bg-ink/25",
 };
 
-function IntegrationDots() {
+const INTEGRATIONS = [
+  { key: "aqua", label: "1inch Aqua", icon: Zap },
+  { key: "zerog_inference", label: "0G Inference", icon: Cpu },
+  { key: "zerog_storage", label: "0G Storage", icon: Database },
+  { key: "world_id", label: "World ID", icon: ScanFace },
+];
+
+function IntegrationStatuses() {
   const { data } = useIntegrations();
   if (!data) return null;
-  const pick = ["zerog_inference", "aqua", "zerog_storage", "world_id"];
-  const short: Record<string, string> = { zerog_inference: "0G inference", aqua: "1inch Aqua", zerog_storage: "0G Storage", world_id: "World ID" };
   return (
-    <Link href="/reports#integrations" className="hidden xl:flex items-center gap-2" title="Live integration status">
-      {data.integrations
-        .filter((i) => pick.includes(i.key))
-        .map((i) => (
-          <span key={i.key} className="flex items-center gap-1.5 rounded-full border border-ink/10 bg-ivory-50 px-2.5 py-1 text-[0.66rem] font-medium text-ink-600" title={`${i.status} — ${i.detail}`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${DOT[i.status] ?? "bg-ink/30"}`} />
-            {short[i.key]}
+    <Link href="/reports#integrations" className="hidden xl:flex items-center gap-1.5" aria-label="Integration status, details in Reports">
+      {INTEGRATIONS.map(({ key, label, icon: Icon }) => {
+        const i = data.integrations.find((x) => x.key === key);
+        if (!i) return null;
+        return (
+          <span key={key} className="inline-flex items-center gap-1.5 rounded-full border border-line bg-ivory-50 px-2.5 h-8 text-[0.74rem] font-medium text-ink whitespace-nowrap" title={`${i.status}: ${i.detail}`}>
+            <Icon size={13} strokeWidth={1.8} className="text-gold" />
+            {label}
+            <span className={`h-1.5 w-1.5 rounded-full ${DOT[i.status] ?? "bg-ink/25"}`} aria-label={i.status} />
           </span>
-        ))}
+        );
+      })}
     </Link>
   );
 }
@@ -153,25 +189,22 @@ function Topbar({ onMenu }: { onMenu: () => void }) {
   const path = usePathname();
   const title = NAV.find((n) => (n.href === "/" ? path === "/" : path.startsWith(n.href)))?.label ?? "TRACE";
   return (
-    <header className="sticky top-0 z-30 bg-ivory/85 backdrop-blur-md hairline border-b border-ink/10">
-      <div className="flex items-center gap-3 px-4 md:px-6 h-[60px]">
-        <button onClick={onMenu} className="lg:hidden grid place-items-center h-9 w-9 rounded-md2 border border-ink/10 bg-ivory-50" aria-label="Open navigation">
+    <header className="sticky top-0 z-30 bg-ivory/90 backdrop-blur-md border-b border-line">
+      <div className="flex items-center gap-3 px-4 md:px-8 h-16">
+        <button onClick={onMenu} className="lg:hidden grid place-items-center h-9 w-9 rounded-md2 border border-line bg-ivory-50" aria-label="Open navigation">
           <Menu size={17} />
         </button>
-        <div className="flex items-center gap-2 min-w-0">
-          <Globe size={14} className="text-ink-600 shrink-0 hidden sm:block" />
-          <div className="min-w-0">
-            <div className="label !text-[0.52rem] !tracking-wide2 text-ink-600/70">TRACE</div>
-            <div className="serif text-[1.02rem] text-ink leading-none truncate">{title}</div>
-          </div>
+        <div className="min-w-0">
+          <div className="text-[0.66rem] text-ink-600 leading-none">TRACE /</div>
+          <div className="serif text-[1.15rem] text-ink leading-tight truncate">{title}</div>
         </div>
         <div className="flex-1" />
-        <IntegrationDots />
+        <IntegrationStatuses />
         <span
-          className="hidden sm:inline-flex items-center gap-1.5 rounded-md2 border border-gold/40 bg-gold/10 px-2.5 py-1.5 text-[0.74rem] font-semibold text-gold whitespace-nowrap"
+          className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-gold/30 bg-gold/10 px-3 h-8 text-[0.76rem] font-medium text-[#8A6528] whitespace-nowrap"
           title={`Ethereum Sepolia testnet, chain id ${SEPOLIA_CHAIN_ID}. TRACE never connects to mainnet.`}
         >
-          <span className="h-1.5 w-1.5 rounded-full bg-gold" /> Sepolia testnet
+          <span className="h-1.5 w-1.5 rounded-full bg-gold" /> Sepolia Testnet
         </span>
         <WalletButton />
       </div>
@@ -183,11 +216,11 @@ function Topbar({ onMenu }: { onMenu: () => void }) {
 function MobileNav({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
     <>
-      <div className={`lg:hidden fixed inset-0 z-40 bg-charcoal-900/40 transition-opacity ${open ? "opacity-100" : "opacity-0 pointer-events-none"}`} onClick={onClose} />
-      <aside className={`lg:hidden fixed top-0 left-0 z-50 h-full w-[270px] max-w-[85vw] bg-ivory border-r border-ink/10 flex flex-col transition-transform ${open ? "translate-x-0" : "-translate-x-full"}`}>
+      <div className={`lg:hidden fixed inset-0 z-40 bg-ink/20 transition-opacity ${open ? "opacity-100" : "opacity-0 pointer-events-none"}`} onClick={onClose} />
+      <aside className={`lg:hidden fixed top-0 left-0 z-50 h-full w-[270px] max-w-[85vw] bg-ivory border-r border-line flex flex-col transition-transform ${open ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="px-5 pt-5 pb-3 flex items-center justify-between">
           <Brand />
-          <button onClick={onClose} aria-label="Close navigation" className="p-1.5 rounded-md2 hover:bg-ink/5">
+          <button onClick={onClose} aria-label="Close navigation" className="p-1.5 rounded-md2 hover:bg-ivory-100">
             <X size={18} />
           </button>
         </div>
@@ -206,8 +239,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       <MobileNav open={menu} onClose={() => setMenu(false)} />
       <div className="flex-1 min-w-0 flex flex-col">
         <Topbar onMenu={() => setMenu(true)} />
-        <main className="flex-1 overflow-y-auto dark-scroll bg-ivory-50">
-          <div className="max-w-[1240px] mx-auto px-4 md:px-8 py-6 md:py-8">{children}</div>
+        <main className="flex-1 overflow-y-auto dark-scroll bg-ivory">
+          <div className="max-w-[1280px] mx-auto px-4 md:px-8 py-6 md:py-10">{children}</div>
         </main>
       </div>
     </div>

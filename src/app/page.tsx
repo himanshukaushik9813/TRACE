@@ -1,26 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Cpu, Crosshair, History, Archive, ScanSearch, Search, Wallet, FlaskConical } from "lucide-react";
+import { ChevronDown, ChevronRight, Crosshair, Search, Wallet } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { isAddress } from "@trace/chain-config";
 import { Page } from "@/components/page";
-import { Button, Card, EmptyState, ErrorState, LoadingState, Pill, SectionTitle } from "@/components/ui";
-import { PositionCard } from "@/components/positions";
-import { CaseFile } from "@/components/case-file";
+import { EmptyState, ErrorState, Pill } from "@/components/ui";
+import { EngineMark, type EngineState } from "@/components/engine-mark";
+import { BestExecution, PendingPanel, PerformancePanel, PositionPanel, WalletOverview, Workflow, usePlanTransactions } from "@/components/investigate";
 import { useSepoliaWallet } from "@/components/wallet";
-import { art } from "@/lib/assets";
 import { fmt } from "@/lib/format";
-import { api, useCurrentInvestigationId, useFullInvestigation, useInvestigationStatus, useRecentInvestigations, useSuggestedWallets, type InvestigationStatus } from "@/lib/api";
+import { api, useCurrentInvestigationId, useFullInvestigation, useInvestigationStatus, useRecentInvestigations, useSuggestedWallets } from "@/lib/api";
 
-const STAGES: { key: InvestigationStatus; label: string; icon: typeof ScanSearch; detail: string }[] = [
-  { key: "fetching", label: "Read Sepolia", icon: ScanSearch, detail: "Position NFTs, lifecycle logs, receipts" },
-  { key: "reconstructing", label: "Reconstruct", icon: History, detail: "Positions, principal vs fees, pool prices" },
-  { key: "inferring", label: "Strategy DNA + 0G", icon: Cpu, detail: "Deterministic metrics, gated AI hypothesis" },
-  { key: "backtesting", label: "Backtest", icon: FlaskConical, detail: "Look-ahead-safe, real swaps" },
-  { key: "archiving", label: "Archive", icon: Archive, detail: "0G Storage (Galileo)" },
-];
-const ORDER: InvestigationStatus[] = ["queued", "fetching", "reconstructing", "inferring", "backtesting", "archiving", "done"];
+const WINDOWS = [7, 14, 30, 90, 180];
 
 export default function InvestigatePage() {
   const [query, setQuery] = useState("");
@@ -31,18 +23,21 @@ export default function InvestigatePage() {
   const wallet = useSepoliaWallet();
   const qc = useQueryClient();
   const status = useInvestigationStatus(invId);
-  const full = useFullInvestigation(status.data?.status === "done" ? invId : null);
+  const inv = status.data;
+  const full = useFullInvestigation(inv?.status === "done" ? invId : null);
+  const fullData = inv?.status === "done" ? (full.data ?? null) : null;
+  const txs = usePlanTransactions(fullData);
   const suggested = useSuggestedWallets();
   const recent = useRecentInvestigations();
 
-  const run = async (addr?: string) => {
+  const run = async (addr?: string, windowDays = days) => {
     const w = (addr ?? query).trim();
     setSubmitErr(null);
     if (!isAddress(w)) return setSubmitErr("Enter a valid 0x… Ethereum address (40 hex characters).");
     setQuery(w);
     setSubmitting(true);
     try {
-      const r = await api<{ investigationId: string }>("/investigations", { method: "POST", body: { wallet: w, days } });
+      const r = await api<{ investigationId: string }>("/investigations", { method: "POST", body: { wallet: w, days: windowDays } });
       setInvId(r.investigationId);
       await qc.invalidateQueries({ queryKey: ["recent"] });
     } catch (e) {
@@ -52,186 +47,200 @@ export default function InvestigatePage() {
     }
   };
 
-  const inv = status.data;
-  const open = Boolean(inv);
-  const stageIdx = inv ? ORDER.indexOf(inv.status) : -1;
-  const summary = full.data?.investigation.summary ?? inv?.summary ?? null;
+  const running = Boolean(inv) && !["done", "no_positions", "failed"].includes(inv!.status);
+  const engine: EngineState = running || submitting ? "working" : fullData ? "ready" : "idle";
+  const recentList = (recent.data?.investigations ?? []).filter((r, i, all) => all.findIndex((x) => x.wallet.toLowerCase() === r.wallet.toLowerCase()) === i).slice(0, 8);
 
   return (
     <Page>
-      <section className="relative overflow-hidden rounded-panel border border-ink/10 bg-charcoal-900 on-dark">
-        <img src={art.topoWaves} alt="" aria-hidden className={`absolute inset-0 h-full w-full object-cover mix-blend-screen ${open ? "opacity-30" : "opacity-[0.55]"}`} />
-        <div className="absolute inset-0 bg-gradient-to-r from-charcoal-900 via-charcoal-900/75 to-transparent" />
-        <div className={`relative ${open ? "p-5 md:p-6" : "p-6 md:p-10"}`}>
-          {open ? (
-            <h1 className="serif text-xl md:text-2xl text-cream">Investigate another wallet</h1>
-          ) : (
-            <>
-              <p className="text-[0.8rem] text-gold-300">Reads Ethereum Sepolia live. No sample data, ever.</p>
-              <h1 className="serif text-[2rem] md:text-[3rem] leading-[1.04] text-cream max-w-[18ch] mt-3">Understand the strategy behind any wallet.</h1>
-              <p className="mt-4 max-w-[58ch] text-cream-muted text-[0.98rem] leading-relaxed">
-                Paste an address. TRACE rebuilds its Uniswap V3 positions from on-chain events, infers the strategy with evidence for every rule, backtests it on real swaps, and lets you ship the compatible rules to 1inch Aqua from your own wallet.
-              </p>
-            </>
-          )}
+      {/* 1. Wallet search */}
+      <section className="grid lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_380px] items-center gap-6 lg:gap-10">
+        <div className="min-w-0">
+          <h1 className="serif text-[2.4rem] md:text-[3.25rem] leading-[1.05] text-ink">Investigate a wallet</h1>
+          <p className="mt-3 text-[1rem] md:text-[1.12rem] text-ink-600 leading-relaxed max-w-[50ch]">
+            Analyze real on-chain activity, understand the strategy, and get an execution recommendation.
+          </p>
 
-          <div className={`${open ? "mt-4" : "mt-7"} max-w-3xl`}>
-            <div className="flex flex-col sm:flex-row gap-2 rounded-md2 border border-cream/15 bg-charcoal-800/80 p-1.5 backdrop-blur">
-              <label className="flex items-center gap-2 px-3 flex-1 min-w-0">
-                <Search size={17} className="text-gold-300 shrink-0" aria-hidden />
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && run()}
-                  placeholder="0x… wallet address on Sepolia"
-                  aria-label="Wallet address"
-                  spellCheck={false}
-                  className="w-full min-w-0 bg-transparent text-cream placeholder:text-cream-muted/50 text-[0.95rem] outline-none py-2.5 tabular"
-                />
-              </label>
-              <div className="flex gap-2">
+          <form
+            className="mt-7 flex flex-col sm:flex-row gap-2 rounded-card border border-line bg-ivory-50 p-2 shadow-lift max-w-[720px]"
+            onSubmit={(e) => {
+              e.preventDefault();
+              run();
+            }}
+          >
+            <label className="flex items-center gap-3 px-3 flex-1 min-w-0">
+              <Search size={19} strokeWidth={1.6} className="text-gold shrink-0" aria-hidden />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Enter an Ethereum Sepolia wallet address"
+                aria-label="Wallet address"
+                spellCheck={false}
+                autoComplete="off"
+                className="w-full min-w-0 bg-transparent text-ink placeholder:text-ink-600/70 text-[0.95rem] outline-none py-2.5 tabular"
+              />
+            </label>
+            <div className="flex gap-2">
+              <div className="relative flex-1 sm:flex-none">
                 <select
                   value={days}
                   onChange={(e) => setDays(Number(e.target.value))}
                   aria-label="Observation window"
-                  className="flex-1 sm:flex-none h-10 appearance-none bg-charcoal-900 text-cream text-[0.84rem] rounded-md2 pl-3 pr-8 border border-cream/15 bg-[length:12px] bg-no-repeat bg-[right_0.6rem_center]"
-                  style={{ backgroundImage: "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='%23C6A66B' stroke-width='1.6' fill='none'/></svg>\")" }}
+                  className="w-full h-11 appearance-none rounded-md2 border border-line bg-ivory pl-3.5 pr-9 text-[0.86rem] font-medium text-ink"
                 >
-                  {[7, 14, 30, 90, 180].map((d) => (
+                  {WINDOWS.map((d) => (
                     <option key={d} value={d}>
                       Last {d} days
                     </option>
                   ))}
                 </select>
-                <Button variant="gold" onClick={() => run()} disabled={submitting} className="flex-1 sm:flex-none sm:px-6 h-10">
-                  {submitting ? "Starting…" : "Investigate"}
-                </Button>
+                <ChevronDown size={15} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-ink-600" aria-hidden />
               </div>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="flex-1 sm:flex-none inline-flex items-center justify-center rounded-md2 bg-gold text-white px-7 h-11 text-[0.92rem] font-medium shadow-glow hover:bg-[#A67C38] disabled:opacity-50"
+              >
+                {submitting ? "Starting…" : "Investigate"}
+              </button>
             </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-[0.76rem] text-cream-muted">
-              {wallet.connected && wallet.address && (
-                <button onClick={() => run(wallet.address!)} className="inline-flex items-center gap-1.5 rounded-full border border-gold/30 px-2.5 py-1 hover:text-cream hover:border-gold/60">
-                  <Wallet size={12} className="text-gold-300" /> My wallet {fmt.addr(wallet.address)}
-                </button>
-              )}
-              {suggested.data && suggested.data.wallets.length > 0 && <span className="mr-0.5">Try a live liquidity provider:</span>}
-              {suggested.data?.wallets.slice(0, 3).map((s) => (
-                <button
-                  key={s.wallet}
-                  onClick={() => run(s.wallet)}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-cream/15 px-2.5 py-1 hover:text-cream hover:border-cream/35 tabular"
-                  title={`${suggested.data!.source}. ${s.mints} position mints; ${s.poolSwaps} real swaps in its pool recently.`}
-                >
-                  {s.pair ?? fmt.addr(s.wallet)}
-                  <span className="text-cream-muted/60">{fmt.addr(s.wallet)}</span>
-                </button>
-              ))}
-              {suggested.isLoading && <span>Finding active liquidity providers on Sepolia…</span>}
-            </div>
-            {submitErr && <div className="mt-3"><ErrorState title="Could not start the investigation" message={submitErr} /></div>}
-          </div>
-        </div>
-      </section>
+          </form>
 
-      {invId && inv?.status === "done" && full.data && <CaseFile full={full.data} invId={invId} />}
-
-      {invId && inv?.status !== "done" && (
-        <section className="mt-6">
-          <SectionTitle
-            eyebrow={inv ? `Investigating ${fmt.addr(inv.wallet)}` : undefined}
-            title={inv?.status === "no_positions" ? "Nothing to analyse" : inv?.status === "failed" ? "Investigation stopped" : "Reading the chain"}
-            action={inv?.status === "no_positions" ? <Pill tone="neutral"><Check size={12} /> Complete, no positions</Pill> : inv?.status === "failed" ? <Pill tone="brick">Stopped</Pill> : inv ? <Pill tone="gold">Running</Pill> : null}
-          />
-          {status.isError && <ErrorState message={(status.error as Error).message} />}
-          {status.isLoading && <LoadingState label="Loading investigation…" />}
-          {inv && (
-            <>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                {STAGES.map((s, i) => {
-                  const idx = ORDER.indexOf(s.key);
-                  const empty = inv.status === "no_positions";
-                  const state = inv.status === "done" || stageIdx > idx || (empty && s.key === "fetching") ? "done" : stageIdx === idx ? (inv.status === "failed" ? "failed" : "running") : inv.status === "failed" || empty ? "skipped" : "idle";
-                  const Icon = s.icon;
-                  return (
-                    <div key={s.key} className="rounded-md2 border border-ink/10 bg-ivory-50 p-3.5">
-                      <div className={`grid h-7 w-7 place-items-center rounded-md border ${state === "done" ? "bg-forest/12 border-forest/30 text-forest" : state === "running" ? "bg-gold/15 border-gold/40 text-gold" : "bg-ink/5 border-ink/10 text-ink-600"}`}>
-                        {state === "done" ? <Check size={14} /> : <Icon size={14} className={state === "running" ? "animate-pulseSoft" : ""} />}
-                      </div>
-                      <div className="text-[0.86rem] font-medium text-ink mt-2.5">{s.label}</div>
-                      <div className="text-[0.68rem] text-ink-600 mt-0.5">{s.detail}</div>
-                    </div>
-                  );
-                })}
-              </div>
-              {inv.status !== "failed" && inv.status !== "no_positions" && (
-                <div className="mt-3 text-[0.78rem] text-ink-600">
-                  {inv.progress.stage ?? "Queued"}
-                  {inv.progress.events != null && ` · ${inv.progress.events} events, ${inv.progress.positions} positions, ${inv.progress.rpcCalls} RPC calls`}
-                  {inv.progress.events == null && inv.progress.liveRpcCalls != null && ` · ${inv.progress.liveRpcCalls} RPC calls so far`}
-                  <span className="block text-[0.7rem] mt-1">Free-tier RPC limits apply; wallets with many positions take a few minutes.</span>
-                </div>
-              )}
-              {inv.status === "no_positions" && (
-                <div className="mt-4">
-                  <EmptyState title="No supported Uniswap V3 positions found" icon={<Crosshair size={17} />}>
-                    Sepolia was read successfully: {fmt.addr(inv.wallet)} has no Uniswap V3 position NFTs and none were minted or transferred in the last {inv.windowDays} days. TRACE shows nothing rather than sample data.
-                    <span className="block mt-2">
-                      To continue: pick one of the suggested live LP wallets above, try a longer window, or create a WETH/USDC position from this wallet on app.uniswap.org (Sepolia) and investigate again.
-                    </span>
-                  </EmptyState>
-                </div>
-              )}
-              {inv.status === "failed" && (
-                <div className="mt-4">
-                  <ErrorState title="Investigation failed" message={inv.error ?? "unknown error"} />
-                </div>
-              )}
-            </>
-          )}
-        </section>
-      )}
-
-      {inv?.status === "done" && summary && (
-        <section className="mt-8">
-          <SectionTitle eyebrow="Rebuilt from this wallet's on-chain events" title={`${fmt.count(summary.counts.positions, "Uniswap V3 position")}`} />
-          {summary.positions.length === 0 ? (
-            <EmptyState title="No positions in this window" />
-          ) : (
-            <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3">
-              {summary.positions.map((p) => (
-                <PositionCard key={p.tokenId} p={p} acct={summary.accounting.find((a) => a.tokenId === p.tokenId)} inv={invId} />
-              ))}
-            </div>
-          )}
-          {inv.notes.length > 0 && (
-            <ul className="mt-4 text-[0.8rem] text-ink-600 list-disc pl-5 space-y-1 max-w-[80ch]">
-              {inv.notes.map((n) => <li key={n}>{n}</li>)}
-            </ul>
-          )}
-        </section>
-      )}
-
-      <section className="mt-8">
-        <SectionTitle title="Recent investigations" />
-        {recent.isError && <ErrorState message={(recent.error as Error).message} />}
-        {recent.data && recent.data.investigations.length === 0 && <EmptyState title="No investigations yet">Enter a Sepolia address above, connect your wallet, or pick a suggested live LP wallet.</EmptyState>}
-        {recent.data && recent.data.investigations.length > 0 && (
-          <Card pad={false} className="divide-y divide-ink/8">
-            {recent.data.investigations.filter((r, i, all) => all.findIndex((x) => x.wallet.toLowerCase() === r.wallet.toLowerCase()) === i).slice(0, 8).map((r) => (
-              <button key={r.id} onClick={() => setInvId(r.id)} className="w-full text-left flex items-center gap-4 px-5 py-3 hover:bg-ink/3">
-                <div className="flex-1 min-w-0">
-                  <div className="text-[0.9rem] text-ink font-medium tabular">{fmt.addr(r.wallet)}</div>
-                  <div className="text-[0.76rem] text-ink-600 break-anywhere">
-                    {r.counts ? `${fmt.count(r.counts.positions, "position")}, ${fmt.count(r.counts.events, "event")}` : r.status === "no_positions" ? "No Uniswap V3 positions in the window" : r.status === "failed" ? (r.error ?? "failed").slice(0, 90) : r.status}
-                  </div>
-                </div>
-                <Pill tone={r.status === "done" ? "sage" : r.status === "failed" ? "brick" : r.status === "no_positions" ? "neutral" : "gold"}>{r.status === "no_positions" ? "no positions" : r.status}</Pill>
-                <span className="text-[0.74rem] text-ink-600 tabular hidden sm:block whitespace-nowrap">{new Date(r.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[0.78rem] text-ink-600 max-w-[720px]">
+            {wallet.connected && wallet.address && (
+              <button onClick={() => run(wallet.address!)} className="inline-flex items-center gap-1.5 hover:text-ink">
+                <Wallet size={13} className="text-gold" /> Use my wallet <span className="tabular">{fmt.addr(wallet.address)}</span>
+              </button>
+            )}
+            {suggested.data && suggested.data.wallets.length > 0 && <span>Or try a live liquidity provider:</span>}
+            {suggested.data?.wallets.slice(0, 3).map((s) => (
+              <button
+                key={s.wallet}
+                onClick={() => run(s.wallet)}
+                className="inline-flex items-center gap-1 underline decoration-gold/40 underline-offset-2 hover:text-ink tabular"
+                title={`${suggested.data!.source}. ${s.mints} position mints; ${s.poolSwaps} real swaps in its pool recently.`}
+              >
+                {s.pair ?? fmt.addr(s.wallet)}
               </button>
             ))}
-          </Card>
-        )}
+            {suggested.isLoading && <span>Finding active liquidity providers on Sepolia…</span>}
+          </div>
+          {submitErr && (
+            <div className="mt-3 max-w-[720px]">
+              <ErrorState title="Could not start the investigation" message={submitErr} />
+            </div>
+          )}
+        </div>
+        <EngineMark state={engine} className="hidden lg:block w-full h-auto" />
       </section>
+
+      {/* 2. Workflow, with the real stage of the current investigation */}
+      <div className="mt-8 lg:mt-6">
+        <Workflow inv={inv} full={fullData} txs={txs} />
+        {inv && running && (
+          <p className="mt-2.5 px-1 text-[0.76rem] text-ink-600">
+            Investigating <span className="tabular text-ink">{fmt.addr(inv.wallet)}</span>
+            {inv.progress.events != null && `: ${inv.progress.events} events, ${inv.progress.positions} positions, ${inv.progress.rpcCalls} RPC calls`}
+            {inv.progress.events == null && inv.progress.liveRpcCalls != null && `: ${inv.progress.liveRpcCalls} RPC calls so far`}. Free-tier RPC limits apply; wallets with many positions take a few minutes.
+          </p>
+        )}
+        {status.isError && (
+          <div className="mt-3">
+            <ErrorState message={(status.error as Error).message} />
+          </div>
+        )}
+        {full.isError && (
+          <div className="mt-3">
+            <ErrorState message={(full.error as Error).message} />
+          </div>
+        )}
+      </div>
+
+      {inv?.status === "no_positions" && (
+        <div className="mt-6">
+          <EmptyState title="No supported Uniswap V3 positions found" icon={<Crosshair size={17} />}>
+            Sepolia was read successfully: {fmt.addr(inv.wallet)} has no Uniswap V3 position NFTs, and none were minted or transferred in the last {inv.windowDays} days.
+            <span className="block mt-2">Try one of the live liquidity providers above, choose a longer window, or open a WETH/USDC position from this wallet on app.uniswap.org (Sepolia) and investigate again.</span>
+          </EmptyState>
+        </div>
+      )}
+
+      {inv?.status === "failed" && (
+        <div className="mt-6 space-y-3">
+          <ErrorState title="Investigation stopped" message={inv.error ?? "unknown error"} />
+          <button onClick={() => run(inv.wallet, inv.windowDays)} disabled={submitting} className="rounded-md2 border border-gold/45 bg-ivory-50 px-4 h-10 text-[0.86rem] font-medium text-ink hover:bg-ivory-100 disabled:opacity-50">
+            Run the investigation again
+          </button>
+        </div>
+      )}
+
+      {/* 3–5. Findings and the recommended action */}
+      {inv?.status !== "no_positions" && inv?.status !== "failed" && (
+        <div className="mt-6 grid lg:grid-cols-2 gap-5 items-start">
+          <div className="space-y-5 min-w-0">
+            {fullData && invId ? (
+              <>
+                <WalletOverview full={fullData} invId={invId} />
+                <PositionPanel full={fullData} invId={invId} />
+              </>
+            ) : (
+              <>
+                <PendingPanel title="Wallet overview">{running ? "Filled in when the analysis completes." : "Positions, pools and observed performance for the wallet you investigate."}</PendingPanel>
+                <PendingPanel title="Uniswap V3 position">{running ? "Rebuilding positions from on-chain events…" : "Token pair, liquidity, tick range and whether the price is inside it."}</PendingPanel>
+              </>
+            )}
+          </div>
+          <div className="space-y-5 min-w-0">
+            {fullData ? (
+              <PerformancePanel full={fullData} />
+            ) : (
+              <PendingPanel title="Position performance">{running ? "Replaying the strategy on real pool swaps…" : "The wallet's strategy against buy-and-hold, replayed on real pool swaps."}</PendingPanel>
+            )}
+            <BestExecution full={fullData} invId={invId} txs={txs} />
+          </div>
+        </div>
+      )}
+
+      {/* Progressive disclosure: history and notes stay out of the way */}
+      {(recentList.length > 0 || (fullData && fullData.investigation.notes.length > 0)) && (
+        <div className="mt-8 space-y-2">
+          {fullData && fullData.investigation.notes.length > 0 && (
+            <details className="group rounded-card border border-line bg-ivory-50 px-5 py-3.5">
+              <summary className="flex items-center gap-1.5 text-[0.86rem] font-medium text-ink">
+                <ChevronRight size={15} className="text-ink-600 transition-transform group-open:rotate-90" /> Investigation notes ({fullData.investigation.notes.length})
+              </summary>
+              <ul className="mt-2 text-[0.8rem] text-ink-600 list-disc pl-6 space-y-1 max-w-[80ch]">
+                {fullData.investigation.notes.map((n) => (
+                  <li key={n}>{n}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {recentList.length > 0 && (
+            <details className="group rounded-card border border-line bg-ivory-50 px-5 py-3.5">
+              <summary className="flex items-center gap-1.5 text-[0.86rem] font-medium text-ink">
+                <ChevronRight size={15} className="text-ink-600 transition-transform group-open:rotate-90" /> Recent investigations ({recentList.length})
+              </summary>
+              <div className="mt-2 divide-y divide-line">
+                {recentList.map((r) => (
+                  <button key={r.id} onClick={() => setInvId(r.id)} className="w-full text-left flex items-center gap-4 py-2.5 hover:bg-ivory -mx-2 px-2 rounded-md2">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[0.88rem] text-ink font-medium tabular">{fmt.addr(r.wallet)}</div>
+                      <div className="text-[0.74rem] text-ink-600 break-anywhere">
+                        {r.counts ? `${fmt.count(r.counts.positions, "position")}, ${fmt.count(r.counts.events, "event")}` : r.status === "no_positions" ? "No Uniswap V3 positions in the window" : r.status === "failed" ? (r.error ?? "failed").slice(0, 90) : r.status}
+                      </div>
+                    </div>
+                    <Pill tone={r.status === "done" ? "forest" : r.status === "failed" ? "brick" : r.status === "no_positions" ? "neutral" : "gold"}>{r.status === "no_positions" ? "no positions" : r.status}</Pill>
+                    <span className="text-[0.74rem] text-ink-600 tabular hidden sm:block whitespace-nowrap">
+                      {new Date(r.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </details>
+          )}
+        </div>
+      )}
     </Page>
   );
 }
