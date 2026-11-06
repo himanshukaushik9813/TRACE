@@ -5,9 +5,9 @@
  * client-side only (see liquidity-view.tsx). Everything drawn comes from the real
  * investigation; nothing is decorative data.
  *
- *   x  price on Uniswap's tick scale (log price: equal steps are equal % moves),
- *      shown in the readable direction (e.g. USDC per WETH)
- *   z  time, in Sepolia blocks across the investigation window (labelled with dates)
+ *   x  time, left → right, in Sepolia blocks across the investigation window (dated)
+ *   z  price on Uniswap's tick scale (log price: equal steps are equal % moves),
+ *      low at the front, high at the back, in the readable direction (e.g. USDC per WETH)
  *   y  the position's liquidity, log-scaled against the wallet's other positions;
  *      it steps up and down at every real add/remove event
  *
@@ -83,14 +83,14 @@ export type TerrainData = {
   dateAt: (block: number) => string | null;
 };
 
-const W = 10; // price axis
-const D = 7; // time axis
-const H_MIN = 0.28;
-const H_MAX = 1.7;
+const W = 10.5; // time axis (x)
+const D = 6; // price axis (z)
+const H_MIN = 0.12;
+const H_MAX = 1.9;
 
 const GOLD = "#B68A42";
 const GOLD_HI = "#E9C27A";
-const IN = "#D6AE62";
+const IN = "#D9A84E";
 const OUT = "#B9B3A7";
 const CLOSED = "#CFC8BB";
 const EMERALD = "#278653";
@@ -106,15 +106,22 @@ function useScales(data: TerrainData) {
     // Display coordinate: dir * tick, so low → high price always runs left → right.
     const a = Math.min(dir * t0, dir * t1);
     const b = Math.max(dir * t0, dir * t1);
-    const x = (tick: number) => ((Math.min(Math.max(dir * tick, a), b) - a) / (b - a || 1)) * W - W / 2;
+    // price → depth: low price at the front (+z), high at the back (−z)
+    const p = (tick: number) => D / 2 - ((Math.min(Math.max(dir * tick, a), b) - a) / (b - a || 1)) * D;
     const span = data.window.toBlock - data.window.fromBlock || 1;
-    const z = (block: number) => ((Math.min(Math.max(block, data.window.fromBlock), data.window.toBlock) - data.window.fromBlock) / span) * D - D / 2;
+    // time → x: start of the window on the left, latest block on the right
+    const t = (block: number) => ((Math.min(Math.max(block, data.window.fromBlock), data.window.toBlock) - data.window.fromBlock) / span) * W - W / 2;
     const liqs = data.slabs.flatMap((s) => [s.liquidity, ...s.segments.map((g) => g.liquidity)]).filter((v) => v > 0);
+    const max = liqs.length ? Math.max(...liqs) : 1;
+    const min = liqs.length ? Math.min(...liqs) : 1;
+    // Linear (true proportions, e.g. compounding growth) unless sizes differ by >50×; then log.
+    const linear = max / min <= 50;
     const logs = liqs.map((v) => Math.log10(v));
     const lo = logs.length ? Math.min(...logs) - 0.6 : 0;
-    const hi = logs.length ? Math.max(...logs) + (new Set(logs.map((v) => v.toFixed(3))).size === 1 ? 0.8 : 0) : 1;
-    const h = (liq: number) => (liq > 0 ? H_MIN + ((Math.log10(liq) - lo) / (hi - lo || 1)) * (H_MAX - H_MIN) : 0);
-    return { x, z, h, xRange: [a, b] as const };
+    const hi = logs.length ? Math.max(...logs) : 1;
+    const h = (liq: number) =>
+      liq <= 0 ? 0 : linear ? H_MIN + (liq / max) * (H_MAX - H_MIN) : H_MIN + ((Math.log10(liq) - lo) / (hi - lo || 1)) * (H_MAX - H_MIN);
+    return { p, t, h, pRange: [a, b] as const };
   }, [data]);
 }
 type Scales = ReturnType<typeof useScales>;
@@ -157,11 +164,11 @@ float grid(float v, float step) {
 void main() {
   vec2 p = vW.xz;
   // fine grid + stronger grid every 5 cells
-  float g = max(grid(p.x, uSize.x / 20.0) * 0.45, grid(p.y, uSize.y / 14.0) * 0.45);
-  g = max(g, max(grid(p.x, uSize.x / 4.0), grid(p.y, uSize.y / 2.0)) * 0.9);
+  float g = max(grid(p.x, uSize.x / 12.0), grid(p.y, uSize.y / 6.0)) * 0.35;
+  g = max(g, max(grid(p.x, uSize.x / 2.0), grid(p.y, uSize.y / 2.0)) * 0.6);
   // soft topographic rings for the brand landscape feel
   float r = length(p * vec2(0.9, 1.25));
-  float topo = (1.0 - smoothstep(0.0, max(fwidth(r), 1e-4) * 1.4, abs(fract(r * 1.6) - 0.5) * 0.625)) * 0.22;
+  float topo = (1.0 - smoothstep(0.0, max(fwidth(r), 1e-4) * 1.4, abs(fract(r * 1.2) - 0.5) * 0.833)) * 0.12;
   vec3 col = mix(uBase, uLine, g);
   col = mix(col, uGold, topo);
   // inside the plot: full; outside: fade to transparent ivory
@@ -187,30 +194,30 @@ function Floor() {
 
 /* ------------------------------------------------------------------ slabs */
 
-function Segment({ x0, w, z0, d, h, tone, hovered, closed }: { x0: number; w: number; z0: number; d: number; h: number; tone: "in" | "out" | "unknown"; hovered: boolean; closed: boolean }) {
-  const geo = useMemo(() => new BoxGeometry(w, h, d), [w, h, d]);
+function Segment({ x0, len, z0, depth, h, tone, hovered, closed }: { x0: number; len: number; z0: number; depth: number; h: number; tone: "in" | "out" | "unknown"; hovered: boolean; closed: boolean }) {
+  const geo = useMemo(() => new BoxGeometry(len, h, depth), [len, h, depth]);
   const edges = useMemo(() => new EdgesGeometry(geo), [geo]);
   const base = closed ? CLOSED : tone === "in" ? IN : tone === "out" ? OUT : "#D2C4A6";
   const glow = tone === "in" && !closed;
   return (
-    <group position={[x0 + w / 2, h / 2, z0 + d / 2]}>
+    <group position={[x0 + len / 2, h / 2, z0 + depth / 2]}>
       <mesh geometry={geo} castShadow>
         <meshPhysicalMaterial
           color={hovered ? GOLD_HI : base}
           emissive={glow ? "#8A5A12" : "#000000"}
-          emissiveIntensity={glow ? (hovered ? 0.55 : 0.32) : 0}
+          emissiveIntensity={glow ? (hovered ? 0.6 : 0.4) : 0}
           roughness={0.22}
           metalness={0.06}
           clearcoat={1}
           clearcoatRoughness={0.18}
           envMapIntensity={1.1}
           transparent
-          opacity={hovered ? 0.8 : closed ? 0.32 : tone === "in" ? 0.62 : 0.42}
+          opacity={hovered ? 0.85 : closed ? 0.32 : tone === "in" ? 0.7 : 0.45}
           depthWrite={false}
         />
       </mesh>
       <lineSegments geometry={edges}>
-        <lineBasicMaterial color={hovered ? INK : glow ? "#9A6E2C" : "#8F887C"} transparent opacity={hovered ? 0.95 : glow ? 0.7 : 0.4} />
+        <lineBasicMaterial color={hovered ? INK : glow ? "#9A6E2C" : "#8F887C"} transparent opacity={hovered ? 0.9 : glow ? 0.65 : 0.35} />
       </lineSegments>
     </group>
   );
@@ -253,7 +260,7 @@ function EventMarker({ e, pos, still, onHover, active }: { e: TerrainEvent; pos:
         {e.kind === "remove" && <coneGeometry args={[0.09, 0.18, 4]} />}
         {e.kind === "collect" && <cylinderGeometry args={[0.11, 0.11, 0.028, 40]} />}
         {e.kind === "close" && <torusGeometry args={[0.09, 0.022, 10, 28]} />}
-        <meshStandardMaterial color={m.color} metalness={e.kind === "collect" ? 0.9 : 0.3} roughness={e.kind === "collect" ? 0.25 : 0.4} emissive={m.color} emissiveIntensity={active ? 0.5 : 0.18} />
+        <meshStandardMaterial color={e.kind === "collect" ? "#E2B657" : m.color} metalness={e.kind === "collect" ? 0.75 : 0.3} roughness={e.kind === "collect" ? 0.28 : 0.4} emissive={e.kind === "collect" ? "#C08A2E" : m.color} emissiveIntensity={active ? 0.6 : e.kind === "collect" ? 0.35 : 0.18} />
       </mesh>
       {active && (
         <Html position={[0, 0.28, 0]} center zIndexRange={[50, 0]}>
@@ -279,14 +286,14 @@ function Slab({ s, sc, hovered, onHover, onOpen, still, hoverEvent, onHoverEvent
   onHoverEvent: (k: string | null) => void;
   price: { block: number; tick: number }[];
 }) {
-  const xa = sc.x(s.tickLower);
-  const xb = sc.x(s.tickUpper);
-  const x0 = Math.min(xa, xb);
-  const w = Math.max(Math.abs(xb - xa), 0.06);
+  const za = sc.p(s.tickLower);
+  const zb = sc.p(s.tickUpper);
+  const z0 = Math.min(za, zb);
+  const depth = Math.max(Math.abs(zb - za), 0.06);
   const segs = s.segments.length ? s.segments : [{ fromBlock: s.fromBlock, toBlock: s.toBlock, liquidity: s.liquidity, inRange: null }];
   const maxH = Math.max(...segs.map((g) => sc.h(g.liquidity)), 0.12);
   const heightAt = (block: number) => {
-    const g = segs.find((q) => block >= q.fromBlock && block <= q.toBlock) ?? segs[segs.length - 1];
+    const g = segs.find((q) => block >= q.fromBlock && block < q.toBlock) ?? segs[segs.length - 1];
     return Math.max(sc.h(g.liquidity), 0.12);
   };
   // Events sit on the block's top, over the price where it happened (clamped into the range).
@@ -298,11 +305,21 @@ function Slab({ s, sc, hovered, onHover, onOpen, still, hoverEvent, onHoverEvent
     }
     return best;
   };
-  const evPos = (e: TerrainEvent): [number, number, number] => {
-    const t = priceTickAt(e.block);
-    const px = t == null ? x0 + w / 2 : Math.min(Math.max(sc.x(t), x0 + 0.12), x0 + w - 0.12);
-    return [px, heightAt(e.block) + 0.24, sc.z(e.block)];
-  };
+  // Events a few blocks apart (e.g. collect, then re-add) stack upwards instead of overlapping.
+  const placed = (() => {
+    const out: { e: TerrainEvent; pos: [number, number, number] }[] = [];
+    let lastX = -Infinity;
+    let level = 0;
+    for (const e of s.events) {
+      const tk = priceTickAt(e.block);
+      const pz = tk == null ? z0 + depth / 2 : Math.min(Math.max(sc.p(tk), z0 + 0.12), z0 + depth - 0.12);
+      const px = sc.t(e.block);
+      level = Math.abs(px - lastX) < 0.14 ? level + 1 : 0;
+      lastX = px;
+      out.push({ e, pos: [px, Math.max(heightAt(e.block), heightAt(e.block + 5)) + 0.26 + level * 0.3, pz] });
+    }
+    return out;
+  })();
   return (
     <group
       onPointerOver={(e) => {
@@ -316,18 +333,18 @@ function Slab({ s, sc, hovered, onHover, onOpen, still, hoverEvent, onHoverEvent
       }}
     >
       {segs.map((g, i) => {
-        const z0 = sc.z(g.fromBlock);
-        const d = Math.max(sc.z(g.toBlock) - z0, 0.03);
+        const x0 = sc.t(g.fromBlock);
+        const len = Math.max(sc.t(g.toBlock) - x0, 0.03);
         const h = sc.h(g.liquidity);
         if (h <= 0) return null;
-        return <Segment key={i} x0={x0} w={w} z0={z0} d={d} h={h} tone={g.inRange == null ? "unknown" : g.inRange ? "in" : "out"} hovered={hovered} closed={!s.active} />;
+        return <Segment key={i} x0={x0} len={len} z0={z0} depth={depth} h={h} tone={g.inRange == null ? "unknown" : g.inRange ? "in" : "out"} hovered={hovered} closed={!s.active} />;
       })}
-      {s.events.map((e) => {
+      {placed.map(({ e, pos }) => {
         const key = `${e.tx}:${e.kind}:${e.block}`;
-        return <EventMarker key={key} e={e} pos={evPos(e)} still={still} onHover={onHoverEvent} active={hoverEvent === key} />;
+        return <EventMarker key={key} e={e} pos={pos} still={still} onHover={onHoverEvent} active={hoverEvent === key} />;
       })}
       {hovered && hoverEvent == null && (
-        <Html position={[x0 + w / 2, maxH + 0.55, sc.z((s.fromBlock + s.toBlock) / 2)]} center zIndexRange={[40, 0]}>
+        <Html position={[sc.t((s.fromBlock + s.toBlock) / 2), maxH + 0.6, z0 + depth / 2]} center zIndexRange={[40, 0]}>
           <div className="pointer-events-none whitespace-nowrap rounded-md2 border border-line bg-ivory-50 px-3 py-2 shadow-lift text-left">
             <div className="text-[0.8rem] font-semibold text-ink">{s.label}</div>
             <div className="text-[0.72rem] text-ink-600">{s.detail}</div>
@@ -342,10 +359,12 @@ function Slab({ s, sc, hovered, onHover, onOpen, still, hoverEvent, onHoverEvent
 
 /* ------------------------------------------------------------- price path */
 
-function PricePath({ points, still, nowLabel }: { points: Vector3[]; still: boolean; nowLabel: string | null }) {
-  const curve = useMemo(() => (points.length > 1 ? new CatmullRomCurve3(points, false, "centripetal", 0.2) : null), [points]);
+function PricePath({ points, still, nowLabel, nowShort }: { points: Vector3[]; still: boolean; nowLabel: string | null; nowShort: string | null }) {
+  const { size } = useThree();
+  const narrow = size.width < 520;
+  const curve = useMemo(() => (points.length > 1 ? new CatmullRomCurve3(points, false, "catmullrom", 0.1) : null), [points]);
   const tube = useMemo(() => (curve ? new TubeGeometry(curve, Math.min(points.length * 4, 900), 0.028, 8, false) : null), [curve, points.length]);
-  const glowTube = useMemo(() => (curve ? new TubeGeometry(curve, Math.min(points.length * 4, 900), 0.075, 8, false) : null), [curve, points.length]);
+  const glowTube = useMemo(() => (curve ? new TubeGeometry(curve, Math.min(points.length * 4, 900), 0.052, 8, false) : null), [curve, points.length]);
   const pulse = useRef<Mesh>(null);
   const halo = useRef<Mesh>(null);
   useFrame(({ clock }) => {
@@ -362,7 +381,7 @@ function PricePath({ points, still, nowLabel }: { points: Vector3[]; still: bool
   return (
     <group>
       <mesh geometry={glowTube} renderOrder={9}>
-        <meshBasicMaterial color={GOLD_HI} transparent opacity={0.18} blending={AdditiveBlending} depthWrite={false} toneMapped={false} />
+        <meshBasicMaterial color={GOLD_HI} transparent opacity={0.1} blending={AdditiveBlending} depthWrite={false} toneMapped={false} />
       </mesh>
       <mesh geometry={tube} renderOrder={10}>
         <meshStandardMaterial color={GOLD} emissive={GOLD} emissiveIntensity={0.55} metalness={0.7} roughness={0.25} toneMapped={false} />
@@ -385,14 +404,14 @@ function PricePath({ points, still, nowLabel }: { points: Vector3[]; still: bool
           <sphereGeometry args={[0.085, 20, 20]} />
           <meshStandardMaterial color={GOLD} emissive={GOLD_HI} emissiveIntensity={0.9} toneMapped={false} />
         </mesh>
-        <mesh position={[0, 1.15, 0]} renderOrder={8}>
-          <cylinderGeometry args={[0.012, 0.05, 2.3, 16, 1, true]} />
+        <mesh position={[0, 0.45, 0]} renderOrder={8}>
+          <cylinderGeometry args={[0.01, 0.045, 0.9, 16, 1, true]} />
           <meshBasicMaterial color={GOLD_HI} transparent opacity={0.28} blending={AdditiveBlending} depthWrite={false} side={DoubleSide} toneMapped={false} />
         </mesh>
         {nowLabel && (
-          <Html position={[0, 2.45, 0]} center zIndexRange={[30, 0]}>
-            <div className="pointer-events-none whitespace-nowrap rounded-full border border-gold/50 bg-ivory-50/95 px-2.5 py-1 text-[0.68rem] text-ink shadow-soft">
-              <span className="text-[#8A6528] font-semibold">Now</span> · {nowLabel}
+          <Html position={[-0.12, 0.9, 0]} zIndexRange={[30, 0]}>
+            <div className="pointer-events-none whitespace-nowrap rounded-full border border-gold/50 bg-ivory-50/95 px-2.5 py-1 text-[0.68rem] text-ink shadow-soft" style={{ transform: "translate(-100%, -50%)" }}>
+              <span className="text-[#8A6528] font-semibold">Now</span> · {narrow ? nowShort : nowLabel}
             </div>
           </Html>
         )}
@@ -403,9 +422,9 @@ function PricePath({ points, still, nowLabel }: { points: Vector3[]; still: bool
 
 /* ------------------------------------------------------------------- axes */
 
-function niceDisplayTicks(axis: TerrainAxis, xRange: readonly [number, number]): number[] {
-  const tickA = axis.dir * xRange[0];
-  const tickB = axis.dir * xRange[1];
+function niceDisplayTicks(axis: TerrainAxis, range: readonly [number, number]): number[] {
+  const tickA = axis.dir * range[0];
+  const tickB = axis.dir * range[1];
   const va = axis.toDisplay(tickA);
   const vb = axis.toDisplay(tickB);
   if (va == null || vb == null || !(va > 0) || !(vb > 0)) return [];
@@ -427,53 +446,62 @@ function niceDisplayTicks(axis: TerrainAxis, xRange: readonly [number, number]):
 function Axes({ data, sc }: { data: TerrainData; sc: Scales }) {
   const { size } = useThree();
   const narrow = size.width < 520;
-  const ticks = useMemo(() => niceDisplayTicks(data.axis, sc.xRange), [data.axis, sc.xRange]);
-  const zFront = D / 2 + 0.38;
+  const ticks = useMemo(() => niceDisplayTicks(data.axis, sc.pRange), [data.axis, sc.pRange]);
+  const xRight = W / 2 + 0.32;
   const times = [data.window.fromBlock, Math.round((data.window.fromBlock + data.window.toBlock) / 2), data.window.toBlock];
   const lab = "pointer-events-none block whitespace-nowrap text-[0.64rem] text-ink-600 tabular";
   return (
     <group>
-      {/* price ticks along the front edge */}
+      {/* price ticks along the right edge (depth) */}
       {(narrow ? ticks.filter((_, i) => i % 2 === 0) : ticks).map((v) => {
-        const x = sc.x(data.axis.toTick(v));
+        const z = sc.p(data.axis.toTick(v));
         return (
           <group key={v}>
-            <Line points={[[x, 0.002, D / 2], [x, 0.002, D / 2 + 0.16]]} color="#A89A80" lineWidth={1} />
-            <Html position={[x, 0, zFront]} center zIndexRange={[10, 0]}>
-              <span className={lab}>{data.axis.fmt(v)}</span>
+            <Line points={[[W / 2, 0.002, z], [W / 2 + 0.16, 0.002, z]]} color="#A89A80" lineWidth={1} />
+            <Html position={[xRight, 0, z]} zIndexRange={[10, 0]}>
+              <span className={lab} style={{ transform: "translate(0, -50%)" }}>{data.axis.fmt(v)}</span>
             </Html>
           </group>
         );
       })}
-      <Html position={[0, 0, D / 2 + 0.95]} center zIndexRange={[10, 0]}>
-        <span className="pointer-events-none whitespace-nowrap text-[0.7rem] font-medium text-ink">Price ({data.axis.unit}) →</span>
+      <Html position={[xRight + 0.1, 0, -D / 2 - 0.75]} zIndexRange={[10, 0]}>
+        <span className="pointer-events-none block whitespace-nowrap text-[0.7rem] font-medium text-ink" style={{ transform: "translate(-30%, -50%)" }}>
+          {narrow ? "↑ Price" : `↑ Price (${data.axis.unit})`}
+        </span>
       </Html>
-      {/* time along the right edge */}
+      {/* time along the front edge */}
       {times.map((b, i) => {
-        if (narrow && i === 1) return null;
+        if (narrow && i === 2) return null;
         const label = data.dateAt(b) ?? `Block ${b.toLocaleString("en-US")}`;
+        const x = sc.t(b);
         return (
-          <Html key={b} position={[W / 2 + 0.3, 0, sc.z(b)]} zIndexRange={[10, 0]}>
-            <span className={lab} style={{ transform: "translate(0, -50%)" }}>
-              {i === 2 ? `${label} (latest)` : label}
-            </span>
-          </Html>
+          <group key={b}>
+            <Line points={[[x, 0.002, D / 2], [x, 0.002, D / 2 + 0.16]]} color="#A89A80" lineWidth={1} />
+            <Html position={[x, 0, D / 2 + 0.42]} center zIndexRange={[10, 0]}>
+              <span className={lab}>{i === 2 && !narrow ? `${label} · latest` : label}</span>
+            </Html>
+          </group>
         );
       })}
+      {!narrow && (
+        <Html position={[0, 0, D / 2 + 0.95]} center zIndexRange={[10, 0]}>
+          <span className="pointer-events-none whitespace-nowrap text-[0.7rem] font-medium text-ink">Time →</span>
+        </Html>
+      )}
     </group>
   );
 }
 
 /* ----------------------------------------------------------------- camera */
 
-const TARGET = new Vector3(0.2, 0.35, 0.3);
-const SETTLE = new Spherical(15.2, 1.02, 0.62); // radius, polar, azimuth
-const START = new Spherical(25, 0.62, 1.25);
+const TARGET = new Vector3(0.7, 0.45, 1.0);
+const SETTLE = new Spherical(14.6, 0.98, 0.22); // radius, polar (from up), azimuth (from front, + = right)
+const START = new Spherical(26, 0.66, 0.85);
 
 function Director({ controls, still, interacted, visible }: { controls: React.RefObject<OrbitControlsImpl>; still: boolean; interacted: React.MutableRefObject<boolean>; visible: boolean }) {
   const { camera, size } = useThree();
   const t0 = useRef<number | null>(null);
-  const fit = Math.min(Math.max(1.75 / (size.width / size.height), 1), 2.0);
+  const fit = Math.min(Math.max(2.15 / (size.width / size.height), 1), 2.2);
   const sph = useMemo(() => new Spherical(), []);
   const v = useMemo(() => new Vector3(), []);
   useEffect(() => {
@@ -529,10 +557,11 @@ export default function LiquidityTerrain({ data, onOpen, height = 420 }: { data:
     return () => io.disconnect();
   }, []);
 
-  const pathPts = useMemo(() => data.price.map((p) => new Vector3(sc.x(p.tick), 0.06, sc.z(p.block))), [data.price, sc]);
+  const pathPts = useMemo(() => data.price.map((p) => new Vector3(sc.t(p.block), 0.06, sc.p(p.tick))), [data.price, sc]);
   const last = data.price[data.price.length - 1];
   const lastV = last ? data.axis.toDisplay(last.tick) : null;
   const nowLabel = lastV != null ? `${data.axis.fmt(lastV)} ${data.axis.unit}` : null;
+  const nowShort = lastV != null ? data.axis.fmt(lastV) : null;
 
   return (
     <div
@@ -552,7 +581,7 @@ export default function LiquidityTerrain({ data, onOpen, height = 420 }: { data:
         gl={{ antialias: true, alpha: true, preserveDrawingBuffer: true }}
         style={{ cursor: hover != null ? "pointer" : coarse ? "default" : "grab", touchAction: coarse ? "pan-y" : "none" }}
       >
-        <fog attach="fog" args={["#F4ECDD", 24, 46]} />
+        <fog attach="fog" args={["#F4ECDD", 26, 48]} />
         <Studio />
         <ambientLight intensity={0.45} />
         <directionalLight position={[7, 11, 6]} intensity={1.25} color="#FFF4E0" castShadow shadow-mapSize={[1024, 1024]} />
@@ -562,7 +591,7 @@ export default function LiquidityTerrain({ data, onOpen, height = 420 }: { data:
         {data.slabs.map((s) => (
           <Slab key={s.id} s={s} sc={sc} hovered={hover === s.id} onHover={setHover} onOpen={onOpen} still={still} hoverEvent={hoverEvent} onHoverEvent={setHoverEvent} price={data.price} />
         ))}
-        <PricePath points={pathPts} still={still} nowLabel={nowLabel} />
+        <PricePath points={pathPts} still={still} nowLabel={nowLabel} nowShort={nowShort} />
         <Axes data={data} sc={sc} />
         <Director controls={controls} still={still} interacted={interacted} visible={visible} />
         <OrbitControls

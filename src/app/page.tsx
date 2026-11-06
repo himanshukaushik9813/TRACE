@@ -201,7 +201,7 @@ export default function InvestigatePage() {
       {/* 2. The four stages: an explainer before a run, live status during and after it */}
       <div className="mt-9 lg:mt-7">
         {!inv && <h2 className="text-[0.95rem] font-semibold text-ink mb-2.5">How it works</h2>}
-        <Workflow inv={inv} full={fullData} exec={fullData ? exec : null} />
+        <Workflow inv={inv} full={fullData} exec={fullData ? exec : null} fullFailed={full.isError} />
         {inv && (
           <div className="mt-2.5 px-1 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[0.76rem]">
             <button

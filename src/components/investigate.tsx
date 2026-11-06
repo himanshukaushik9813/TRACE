@@ -75,13 +75,14 @@ function Chip({ tone, children }: { tone: "good" | "warn" | "bad" | "neutral"; c
 /*  2. Four-step workflow                                              */
 /* ------------------------------------------------------------------ */
 
-type StageState = "done" | "active" | "waiting" | "awaiting" | "warn" | "blocked" | "unavailable" | "cancelled";
+type StageState = "done" | "active" | "loading" | "waiting" | "awaiting" | "warn" | "blocked" | "unavailable" | "cancelled";
 type Stage = { title: string; subtitle: string; icon: LucideIcon; state: StageState; status: string };
 
 /** The five states the brief asks for (plus honest extras), worded for people. */
 const STATE_LABEL: Record<StageState, string> = {
   done: "Completed",
   active: "Running",
+  loading: "Finished",
   waiting: "Pending",
   awaiting: "Awaiting approval",
   warn: "Inconclusive",
@@ -116,7 +117,7 @@ const NEXT_TEXT = [
 const VERIFY_BUSY = { check: "Checking Aqua compatibility live", compile: "Compiling and simulating the plan", challenge: "Preparing the authorization",
   wallet: "Confirm the signature in MetaMask", server: "The server is verifying your signature" } as const;
 
-function stagesFor(inv: Investigation | undefined, full: FullInvestigation | null | undefined, exec: AquaExecution | null, aquaBlocked: boolean): Stage[] {
+function stagesFor(inv: Investigation | undefined, full: FullInvestigation | null | undefined, exec: AquaExecution | null, aquaBlocked: boolean, fullFailed = false): Stage[] {
   const idx = inv ? ORDER.indexOf(inv.status as (typeof ORDER)[number]) : -1;
   const st = inv?.status;
   const c = inv?.summary?.counts;
@@ -149,7 +150,10 @@ function stagesFor(inv: Investigation | undefined, full: FullInvestigation | nul
             : st !== "done"
               ? { state: "active", status: st === "backtesting" ? "Testing the strategy on real past trading" : "Saving the analysis" }
               : !full
-                ? { state: "active", status: "Loading the analysis" }
+                ? // The server finished; only the page's copy of the result is still on its way (or failed to arrive).
+                  fullFailed
+                  ? { state: "unavailable", status: "The analysis finished, but its result could not be loaded" }
+                  : { state: "loading", status: "Analysis finished; loading the result" }
                 : !primary
                   ? { state: "blocked", status: "No strategy was stored" }
                   : primary.family === "inconclusive"
@@ -216,6 +220,7 @@ function stagesFor(inv: Investigation | undefined, full: FullInvestigation | nul
 const STATE_DOT: Record<StageState, string> = {
   done: "bg-forest",
   active: "bg-gold animate-pulseSoft",
+  loading: "bg-ink/30",
   waiting: "bg-ink/20",
   awaiting: "bg-amber",
   warn: "bg-amber",
@@ -226,6 +231,7 @@ const STATE_DOT: Record<StageState, string> = {
 const STATE_TEXT: Record<StageState, string> = {
   done: "text-forest",
   active: "text-[#8A6528]",
+  loading: "text-ink-600",
   waiting: "text-ink-600",
   awaiting: "text-[#8A6528]",
   warn: "text-[#8A6528]",
@@ -251,11 +257,11 @@ function StepBadge({ icon: Icon, done, dim, delay }: { icon: LucideIcon; done: b
   );
 }
 
-export function Workflow({ inv, full, exec }: { inv: Investigation | undefined; full: FullInvestigation | null | undefined; exec: AquaExecution | null }) {
+export function Workflow({ inv, full, exec, fullFailed = false }: { inv: Investigation | undefined; full: FullInvestigation | null | undefined; exec: AquaExecution | null; fullFailed?: boolean }) {
   const integ = useIntegrations();
   const aqua = integ.data?.integrations.find((i) => i.key === "aqua");
   const aquaBlocked = aqua?.status === "BLOCKED BY EXTERNAL DEPENDENCY" || aqua?.status === "NOT IMPLEMENTED";
-  const list = stagesFor(inv, full, exec, aquaBlocked);
+  const list = stagesFor(inv, full, exec, aquaBlocked, fullFailed);
 
   // Flip only after the first paint, so ticks that are already earned still animate in once.
   const [painted, setPainted] = useState(false);
