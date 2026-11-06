@@ -10,20 +10,16 @@
  */
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useReadContracts } from "wagmi";
-import { erc20Abi, formatUnits, parseUnits } from "viem";
-import { Check, ChevronRight, ExternalLink, Loader2, Search, X, ShieldCheck, Sparkles, Zap, type LucideIcon } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowRight, Check, ChevronRight, ExternalLink, Search, ShieldCheck, Sparkles, Zap, type LucideIcon } from "lucide-react";
 import { explorer } from "@trace/chain-config";
 import { FAMILY } from "@/components/case-file";
 import { LineChart, sig } from "@/components/charts";
 import { TokenPair, rangeLabel } from "@/components/positions";
-import { useSepoliaWallet } from "@/components/wallet";
 import { Term } from "@/components/term";
 import { snapshot, type AquaExecution, type ExecSnapshot } from "@/lib/aqua-flow";
 import { fmt } from "@/lib/format";
-import { api, useIntegrations, withInv, type FullInvestigation, type Investigation, type TxRow, type V3Position } from "@/lib/api";
+import { api, useIntegrations, withInv, type FullInvestigation, type Investigation, type V3Position } from "@/lib/api";
 
 /* ------------------------------------------------------------------ */
 /*  Data helpers                                                       */
@@ -650,211 +646,6 @@ function RangeMeter({ lower, upper, current }: { lower: number; upper: number; c
   );
 }
 
-/** One row of the execution checklist, from server-recorded state. */
-function TxLine({ label, tx, state }: { label: string; tx?: TxRow | null; state: "done" | "active" | "failed" | "pending" }) {
-  return (
-    <li className="flex items-center gap-2.5 text-[0.82rem]">
-      <span
-        className={`grid h-5 w-5 shrink-0 place-items-center rounded-full ${
-          state === "done" ? "bg-forest text-white" : state === "failed" ? "bg-brick text-white" : state === "active" ? "border border-gold/60 text-gold" : "border border-line"
-        }`}
-        aria-hidden
-      >
-        {state === "done" ? <Check size={12} strokeWidth={3} /> : state === "failed" ? <X size={12} strokeWidth={3} /> : state === "active" ? <Loader2 size={12} className="animate-spin" /> : null}
-      </span>
-      <span className={state === "pending" ? "text-ink-600" : "text-ink"}>{label}</span>
-      {tx && (
-        <a href={explorer.tx(tx.tx_hash)} target="_blank" rel="noopener noreferrer" className="ml-auto inline-flex items-center gap-1 text-[0.72rem] text-ink-600 hover:text-gold tabular">
-          {fmt.hash(tx.tx_hash)} <ExternalLink size={11} />
-        </a>
-      )}
-    </li>
-  );
-}
-
-const txState = (t?: TxRow | null): "done" | "active" | "failed" | "pending" => (!t ? "pending" : t.status === "success" ? "done" : t.status === "reverted" ? "failed" : "active");
-
-/**
- * Verify and Execute, as two explicit approvals. Everything shown is rebuilt
- * from the server on every load, so a refresh resumes exactly where things are;
- * nothing is ever sent without a click and a wallet confirmation.
- */
-function ExecutePanel({ full, p, exec }: { full: FullInvestigation; p: V3Position; exec: AquaExecution }) {
-  const w = useSepoliaWallet();
-  const { snap, busy, error, recovery } = exec;
-  const [a0, setA0] = useState("");
-  const [a1, setA1] = useState("");
-  const [inputErr, setInputErr] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
-
-  const basis = full.compatibility?.report.basis;
-  const t0 = (p.token0Address ?? basis?.token0) as `0x${string}` | undefined;
-  const t1 = (p.token1Address ?? basis?.token1) as `0x${string}` | undefined;
-  const bal = useReadContracts({
-    contracts: w.address && t0 && t1
-      ? [
-          { address: t0, abi: erc20Abi, functionName: "balanceOf", args: [w.address as `0x${string}`] },
-          { address: t1, abi: erc20Abi, functionName: "balanceOf", args: [w.address as `0x${string}`] },
-        ]
-      : [],
-    query: { enabled: Boolean(w.address && t0 && t1) },
-  });
-  const balance = (i: 0 | 1) => {
-    const r = bal.data?.[i];
-    const d = i === 0 ? p.decimals0 : p.decimals1;
-    return r?.status === "success" && d != null ? Number(formatUnits(r.result as bigint, d)) : null;
-  };
-
-  const plan = snap.plan;
-  const mine = Boolean(plan && w.address && plan.maker.toLowerCase() === w.address.toLowerCase());
-  const shipped = snap.ship?.status === "success";
-  const verified = Boolean(snap.auth) || shipped;
-  const needInputs = !verified && (!plan || !mine || editing);
-  const blocked = !w.connected ? "Connect your wallet (top right) to continue." : !w.onSepolia ? "Switch your wallet to Sepolia to continue." : null;
-  const working = Boolean(busy) || Boolean(recovery);
-  const pending = snap.ship?.status === "submitted" || snap.approvals.some((t) => t.status === "submitted");
-
-  const doVerify = () => {
-    setInputErr(null);
-    if (!w.address || !full.primaryStrategyId) return;
-    if (!needInputs) return exec.verify({ strategyId: full.primaryStrategyId, maker: w.address, tokenId: p.tokenId });
-    if (p.decimals0 == null || p.decimals1 == null) return setInputErr("This position's token decimals are unknown, so amounts cannot be encoded.");
-    let x0: bigint, x1: bigint;
-    try {
-      x0 = a0.trim() ? parseUnits(a0.trim(), p.decimals0) : 0n;
-      x1 = a1.trim() ? parseUnits(a1.trim(), p.decimals1) : 0n;
-    } catch {
-      return setInputErr("Amounts must be plain decimal numbers, like 0.01.");
-    }
-    if (x0 + x1 === 0n) return setInputErr(`Enter how much ${p.token0} or ${p.token1} the Aqua order may use.`);
-    exec.verify({ strategyId: full.primaryStrategyId, maker: w.address, tokenId: p.tokenId, amount0: x0, amount1: x1, newPlan: Boolean(plan) });
-    setEditing(false);
-  };
-
-  const short = (i: 0 | 1, amt: string) => {
-    const b = balance(i);
-    const want = Number(amt);
-    return b != null && amt.trim() !== "" && Number.isFinite(want) && want > b;
-  };
-  const planAmounts = plan?.plan.tokens?.filter((t) => t.amount !== "0").map((t) => `${fmt.amt(Number(formatUnits(BigInt(t.amount), t.decimals)))} ${t.symbol}`).join(" and ");
-  const expiresAt = snap.auth ? new Date(snap.auth.expiresAt) : null;
-
-  return (
-    <div className="mt-5 border-t border-line pt-4 space-y-5">
-      {recovery && (
-        <p role="status" className="rounded-md2 border border-gold/30 bg-gold/8 px-3 py-2 text-[0.78rem] text-[#8A6528] flex items-start gap-2">
-          <Loader2 size={14} className="animate-spin mt-0.5 shrink-0" />
-          {recovery.state === "checking" ? "The page reloaded while your wallet was asked to send a transaction. Checking Sepolia so it is never sent twice…" : recovery.detail}
-        </p>
-      )}
-
-      {/* Verify */}
-      <div>
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="font-sans text-[0.92rem] font-semibold text-ink">Verify: sign the authorization</h3>
-          {verified && <Chip tone="good"><Check size={12} /> Verified</Chip>}
-        </div>
-        {verified ? (
-          <p className="mt-1 text-[0.76rem] text-ink-600">
-            Server-verified EIP-712 signature{planAmounts ? ` for ${planAmounts}` : ""}.
-            {expiresAt && !shipped && ` Valid until ${expiresAt.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}; ship before then or sign again.`}
-          </p>
-        ) : needInputs ? (
-          <>
-            <p className="mt-1 text-[0.76rem] text-ink-600">Choose how much the Aqua order may use. TRACE checks compatibility live, compiles and simulates the plan, then asks for one signature (no gas).</p>
-            <div className="mt-3 grid grid-cols-2 gap-3">
-              {([0, 1] as const).map((i) => {
-                const sym = i === 0 ? p.token0 : p.token1;
-                const b = balance(i);
-                return (
-                  <label key={i} className="min-w-0">
-                    <span className="text-[0.74rem] text-ink-600">{sym} to commit</span>
-                    <input
-                      value={i === 0 ? a0 : a1}
-                      onChange={(e) => (i === 0 ? setA0 : setA1)(e.target.value)}
-                      inputMode="decimal"
-                      placeholder="0.0"
-                      disabled={working}
-                      className="mt-1 w-full rounded-md2 border border-line bg-ivory-50 px-3 h-10 text-[0.9rem] text-ink tabular outline-none focus:border-gold/60 disabled:opacity-60"
-                    />
-                    <span className="mt-1 block text-[0.68rem] text-ink-600 tabular">{b != null ? `Wallet holds ${fmt.amt(b)} ${sym}` : " "}</span>
-                  </label>
-                );
-              })}
-            </div>
-            {(short(0, a0) || short(1, a1)) && (
-              <p className="mt-2 text-[0.74rem] text-[#8A6528] leading-relaxed">
-                Your wallet holds less than this. The order can still ship, because Aqua pulls tokens only when a swap fills, but swaps fill only once the tokens are in your wallet.
-              </p>
-            )}
-            {plan && !mine && <p className="mt-2 text-[0.74rem] text-ink-600">The last plan was compiled for {fmt.addr(plan.maker)}. Signing here compiles a new plan for your connected wallet.</p>}
-          </>
-        ) : (
-          <p className="mt-1 text-[0.76rem] text-ink-600">
-            Plan compiled for {planAmounts ?? "your wallet"}. {snap.expired ? "Your earlier signature expired." : ""}{" "}
-            <button onClick={() => setEditing(true)} disabled={working} className="underline decoration-line underline-offset-2 hover:text-ink">
-              Change amounts
-            </button>
-          </p>
-        )}
-        {(inputErr || error?.stage === "verify") && (
-          <p role="alert" className="mt-2 rounded-md2 border border-brick/25 bg-brick/5 px-3 py-2 text-[0.78rem] text-brick break-anywhere">{inputErr ?? error?.message}</p>
-        )}
-        {!verified && (
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            <button
-              onClick={doVerify}
-              disabled={Boolean(blocked) || working}
-              className="inline-flex items-center justify-center gap-2 rounded-md2 bg-gold text-white px-5 h-10 text-[0.88rem] font-medium shadow-glow hover:bg-[#A67C38] disabled:bg-ivory-100 disabled:text-ink-600 disabled:shadow-none disabled:border disabled:border-line disabled:cursor-not-allowed"
-            >
-              {busy?.stage === "verify" && <Loader2 size={15} className="animate-spin" />}
-              {busy?.stage === "verify" ? "Verifying…" : error?.stage === "verify" ? "Retry verification" : "Sign authorization"}
-            </button>
-            {blocked && <span className="text-[0.74rem] text-ink-600">{blocked}</span>}
-          </div>
-        )}
-      </div>
-
-      {/* Execute */}
-      <div className={verified ? "" : "opacity-60"}>
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="font-sans text-[0.92rem] font-semibold text-ink">Execute: approve and ship to 1inch Aqua</h3>
-          {shipped && <Chip tone="good"><Check size={12} /> Shipped</Chip>}
-        </div>
-        {plan && (
-          <ul className="mt-2 space-y-1.5">
-            {snap.approveSteps.map((st, i) => {
-              const tx = snap.approvals.find((t) => t.to_addr?.toLowerCase() === st.to.toLowerCase() && t.status !== "reverted") ?? snap.approvals.filter((t) => !t.to_addr)[i] ?? null;
-              const sym = plan.plan.tokens?.find((t) => t.address.toLowerCase() === st.to.toLowerCase())?.symbol ?? "token";
-              const active = busy?.stage === "execute" && busy.op === "approve" && !tx;
-              return <TxLine key={i} label={`Approve exact ${sym} amount`} tx={tx} state={active ? "active" : txState(tx)} />;
-            })}
-            <TxLine label="Ship the order to Aqua" tx={snap.ship} state={busy?.stage === "execute" && busy.op === "ship" && !snap.ship ? "active" : txState(snap.ship)} />
-          </ul>
-        )}
-        {error?.stage === "execute" && (
-          <p role="alert" className="mt-2 rounded-md2 border border-brick/25 bg-brick/5 px-3 py-2 text-[0.78rem] text-brick break-anywhere">{error.message}</p>
-        )}
-        {!shipped && (
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            <button
-              onClick={() => exec.execute()}
-              disabled={!verified || !mine || Boolean(blocked) || working || pending}
-              className="inline-flex items-center justify-center gap-2 rounded-md2 bg-gold text-white px-5 h-10 text-[0.88rem] font-medium shadow-glow hover:bg-[#A67C38] disabled:bg-ivory-100 disabled:text-ink-600 disabled:shadow-none disabled:border disabled:border-line disabled:cursor-not-allowed"
-            >
-              {(busy?.stage === "execute" || pending) && <Loader2 size={15} className="animate-spin" />}
-              {busy?.stage === "execute" ? "Executing…" : pending ? "Confirming on Sepolia…" : error?.stage === "execute" ? "Retry execution" : "Approve and ship"}
-            </button>
-            <span className="text-[0.74rem] text-ink-600">
-              {!verified ? "Available after verification." : pending ? "Waiting for the pending transaction; nothing is sent twice." : "You confirm each transaction in MetaMask. Tokens stay in your wallet."}
-            </span>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 export function BestExecution({ full, invId, exec }: { full: FullInvestigation | null; invId: string | null; exec: AquaExecution }) {
   const integ = useIntegrations();
   const aqua = integ.data?.integrations.find((i) => i.key === "aqua");
@@ -949,7 +740,24 @@ export function BestExecution({ full, invId, exec }: { full: FullInvestigation |
           <Check size={15} /> This strategy is live on 1inch Aqua (Sepolia).
         </div>
       ) : (
-        full && p && <ExecutePanel full={full} p={p} exec={exec} />
+        full &&
+        p && (
+          <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-3 border-t border-line pt-4">
+            <div className="flex-1 min-w-0 text-[0.78rem] text-ink-600">
+              {exec.snap.auth
+                ? "Authorized. Next: approve and ship from your wallet."
+                : exec.snap.plan
+                  ? "Transactions prepared. Next: review them and sign the authorization."
+                  : "A guided, 8-step flow: check compatibility, choose amounts, review the exact transactions, then confirm each one in your wallet."}
+            </div>
+            <Link
+              href={withInv("/execute", invId)}
+              className="inline-flex items-center justify-center gap-2 rounded-md2 bg-gold text-white px-5 h-11 text-[0.92rem] font-medium shadow-glow hover:bg-[#A67C38] shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/50"
+            >
+              {exec.snap.plan ? "Continue to Execute" : "Execute with 1inch Aqua"} <ArrowRight size={15} />
+            </Link>
+          </div>
+        )
       )}
     </section>
   );

@@ -220,7 +220,10 @@ export class Db {
     async listTransactions(where) {
         if (where.planId)
             return this.query(`select * from transactions where plan_id = $1 order by created_at`, [where.planId]);
-        return this.query(`select t.* from transactions t join execution_plans p on p.id = t.plan_id where lower(p.maker) = lower($1) order by t.created_at desc limit 100`, [where.wallet]);
+        return this.query(`select t.*, s.investigation, s.family, i.wallet as investigated_wallet, p.plan_json->'tokens' as plan_tokens
+         from transactions t join execution_plans p on p.id = t.plan_id
+         join strategies s on s.id = p.strategy_id join investigations i on i.id = s.investigation
+        where lower(p.maker) = lower($1) order by t.created_at desc limit 100`, [where.wallet]);
     }
     /* ---------------- storage ---------------- */
     async insertStorage(investigation, strategyId, refs) {

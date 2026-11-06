@@ -124,12 +124,18 @@ test("a completed investigation renders real data on every screen", async ({ pag
   }
 
   await page.goto(`/reports?inv=${id}`);
+  await expect(page.getByRole("heading", { name: "What TRACE found" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Download report (JSON)" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Integration status" })).toBeVisible();
-  await expect(page.getByText("VERIFIED TESTNET").first()).toBeVisible();
+  await expect(page.getByText("Working on Sepolia").first()).toBeVisible(); // plain label; technical label in the tooltip
+  const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Download report (JSON)" }).click()]);
+  expect(download.suggestedFilename()).toMatch(/^trace-report-0x[0-9a-fA-F]{8}-[0-9a-f]{8}\.json$/);
 
+  // Execute: the live compatibility check (real Sepolia reads), in plain words.
   await page.goto(`/execute?inv=${id}`);
-  await page.getByRole("button", { name: /on-chain (compatibility )?checks/ }).click();
-  await expect(page.getByText("Aqua registry deployed on Sepolia")).toBeVisible({ timeout: 120_000 });
+  await page.getByRole("button", { name: /Run the check|Check again/ }).click();
+  await page.getByText("What was checked").click({ timeout: 120_000 });
+  await expect(page.getByText("The Aqua registry exists on Sepolia")).toBeVisible({ timeout: 120_000 });
 });
 
 /**
@@ -181,15 +187,16 @@ test("workflow ticks only completed steps, and all four tick together after a co
 });
 
 /**
- * Verify and Execute from Best Execution, end to end in the browser. The API is
- * mocked statefully (no plan, authorization or transaction is written to the
- * real database): the mock records exactly what the real server would and
- * serves it back through /full, because the workflow ticks are driven only by
- * server state. The test wallet signs the EIP-712 challenge (Verify ticks), then
- * rejects the first approve (the flow stops with a clear message and resumes
- * from that step), then approves and ships: all four steps tick green.
+ * The guided 8-step Execute flow, end to end in the browser. The API is mocked
+ * statefully (no plan, authorization or transaction is written to the real
+ * database): the mock records exactly what the real server would and serves it
+ * back through /full, because every step is driven only by server state. The
+ * test wallet signs the EIP-712 challenge, rejects the first approve (the flow
+ * stops with a clear message and resumes from that step), then approves and
+ * ships. Investigate's workflow then shows all four steps complete, and a
+ * browser refresh of Investigate starts fresh without sending anything again.
  */
-test("Verify and Execute tick green inline, and execution resumes after a rejected approve", async ({ page, request }) => {
+test("guided Execute: review, sign, a rejected approve resumes, ship; Investigate ticks all four", async ({ page, request }) => {
   const recent = await (await request.get(`${API}/investigations/recent?limit=30`)).json();
   let id: string | null = null;
   let real: Record<string, unknown> | null = null;
@@ -228,11 +235,14 @@ test("Verify and Execute tick green inline, and execution resumes after a reject
   const now = () => new Date().toISOString();
   const plans: unknown[] = [];
   const auths: unknown[] = [];
-  const txs: { id: string; op: string; tx_hash: string; status: string; to_addr: string; plan_id: string; created_at: string }[] = [];
-  const compat = { strategyId: "s", verdict: "PARTIAL", rules: [], capabilities: [], checks: [], unsupportedNotes: [], assessedAt: 0 };
+  const txs: { id: string; op: string; tx_hash: string; status: string; to_addr: string; plan_id: string; created_at: string; block?: string; confirmations?: number; matches_plan?: boolean }[] = [];
+  const compat = { strategyId: "s", verdict: "PARTIAL", rules: [{ rule: "Collects fees", category: "fee", status: "supported" }, { rule: "Risk limit", category: "risk", status: "unsupported", gap: "No on-chain risk limits in Aqua." }], capabilities: [], checks: [], unsupportedNotes: [], assessedAt: 0 };
   const plan = {
     maker,
-    params: { priceLow: 1, priceHigh: 2 },
+    planHash: "0xplan",
+    strategyHash: "0xstrategy",
+    order: "0x00",
+    params: { priceLow: 1, priceHigh: 2, feeBps: 30 },
     tokens: [{ address: token, symbol: "WETH", decimals: 18, amount: "10000000000000000" }],
     steps: [
       { op: "approve", description: "approve", to: token, data: "0x", value: "0" },
@@ -240,7 +250,9 @@ test("Verify and Execute tick green inline, and execution resumes after a reject
     ],
     notCompiled: [],
   };
-  await page.route(`**/investigations/${id}/full`, (r) => r.fulfill({ json: { ...real, plans: [...plans].reverse(), authorizations: [...auths].reverse(), transactions: [...txs].reverse() } }));
+  await page.route(`**/investigations/${id}/full`, (r) =>
+    r.fulfill({ json: { ...real, compatibility: { id: "c", maker: null, verdict: "PARTIAL", report: compat, createdAt: now() }, plans: [...plans].reverse(), authorizations: [...auths].reverse(), transactions: [...txs].reverse() } }),
+  );
   await page.route("**/strategies/*/compatibility", (r) => r.fulfill({ json: { reportId: "r", compatibility: compat } }));
   await page.route("**/strategies/*/plan", (r) => {
     plans.push({ id: "p1", maker, planHash: "0xplan", createdAt: now(), plan });
@@ -260,32 +272,46 @@ test("Verify and Execute tick green inline, and execution resumes after a reject
   });
   await page.route("**/transactions/0x*", (r) => {
     const t = txs.find((x) => r.request().url().endsWith(x.tx_hash));
-    if (t) t.status = "success"; // the receipt arrives
+    if (t) Object.assign(t, { status: "success", block: "12345678", confirmations: 3, matches_plan: true }); // the receipt arrives
     return t ? r.fulfill({ json: t }) : r.fulfill({ status: 404, json: { error: "not found" } });
   });
 
-  await page.goto(`/?inv=${id}`);
-  const flow = page.getByRole("list", { name: /Investigation workflow/ });
-  await expect(flow).toHaveAttribute("aria-label", /2 of 4 steps complete/, { timeout: 30_000 });
+  await page.goto(`/execute?inv=${id}`);
+  const steps = page.getByRole("list", { name: /Execution steps/ });
+  await expect(steps).toHaveAttribute("aria-label", /3 of 8 complete/, { timeout: 30_000 });
+  await expect(page.getByText("does not run on Aqua.")).toBeVisible(); // step 3, in plain words
   await page.getByRole("button", { name: /Connect wallet/ }).click();
-  await page.getByLabel(/to commit/).first().fill("0.01");
 
-  // Verify: one signature, verified by the (mocked) server → the Verify step ticks.
+  // Step 4: amounts → the transactions are prepared and dry-run.
+  await page.getByLabel(/to commit/).last().fill("0.01");
+  await page.getByRole("button", { name: "Prepare the transactions" }).click();
+  // Step 5: plain review, then the explicit checkbox.
+  await expect(page.getByText(/allow Aqua to use exactly 0\.01 WETH/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("button", { name: "Sign authorization" })).toHaveCount(0); // step 6 opens only after the review
+  await page.getByLabel("I have reviewed these transactions").check();
+  await expect(steps).toHaveAttribute("aria-label", /5 of 8 complete/);
+
+  // Step 6: one signature, verified by the (mocked) server.
   await page.getByRole("button", { name: "Sign authorization" }).click();
-  await expect(flow).toHaveAttribute("aria-label", /3 of 4 steps complete/, { timeout: 30_000 });
-  await expect(flow.getByText("Verify, complete")).toBeAttached();
+  await expect(steps).toHaveAttribute("aria-label", /6 of 8 complete/, { timeout: 30_000 });
 
-  // Execute: the first approve is rejected in the wallet → clear message, resumable.
+  // Step 7: the first approve is rejected in the wallet → clear message, resumable.
   await page.getByRole("button", { name: "Approve and ship" }).click();
   await expect(page.getByRole("alert").filter({ hasText: "You rejected the request in your wallet" })).toBeVisible({ timeout: 30_000 });
-  await expect(flow).toHaveAttribute("aria-label", /3 of 4 steps complete/);
-
-  // Retry: approve + ship confirm → all four ticks.
+  await expect(steps).toHaveAttribute("aria-label", /6 of 8 complete/);
   await page.getByRole("button", { name: "Retry execution" }).click();
-  await expect(flow).toHaveAttribute("aria-label", /4 of 4 steps complete/, { timeout: 60_000 });
+
+  // Step 8: receipt.
+  await expect(steps).toHaveAttribute("aria-label", /8 of 8 complete/, { timeout: 60_000 });
+  await expect(page.getByText("Matches the plan you authorized")).toBeVisible();
+  expect(txs.map((t) => t.op)).toEqual(["approve", "ship"]); // nothing sent twice
+
+  // Investigate reads the same server state: all four workflow steps tick.
+  await page.goto(`/?inv=${id}`);
+  const flow = page.getByRole("list", { name: /Investigation workflow/ });
+  await expect(flow).toHaveAttribute("aria-label", /4 of 4 steps complete/, { timeout: 30_000 });
   await expect(page.getByText("All four steps complete")).toBeVisible();
   await expect(page.getByText("This strategy is live on 1inch Aqua")).toBeVisible();
-  expect(txs.map((t) => t.op)).toEqual(["approve", "ship"]); // nothing sent twice
 
   // A browser refresh starts the Investigate page from the beginning: no
   // investigation loaded, every step back to waiting, nothing sent again.
@@ -296,4 +322,3 @@ test("Verify and Execute tick green inline, and execution resumes after a reject
   expect(await page.evaluate(() => localStorage.getItem("trace:lastInvestigation"))).toBeNull();
   expect(txs.map((t) => t.op)).toEqual(["approve", "ship"]);
 });
-
