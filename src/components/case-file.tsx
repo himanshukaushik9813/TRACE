@@ -21,6 +21,16 @@ export const FAMILY: Record<string, string> = {
   inconclusive: "Inconclusive — too little evidence",
 };
 
+/** One plain sentence per strategy family, for people new to liquidity. */
+export const FAMILY_PLAIN: Record<string, string> = {
+  passive_concentrated: "The wallet picks one price range, deposits into it, and mostly leaves it alone while it collects trading fees.",
+  passive_full_range: "The wallet provides liquidity at every possible price, like a classic pool, so it never has to adjust anything.",
+  periodic_range_adjustment: "The wallet moves its price range on a fairly regular schedule to follow the market.",
+  active_range_management: "The wallet often moves its price range to keep it close to the current price.",
+  capital_redeployment: "The wallet repeatedly takes money out and puts it back in, changing how much it has deployed.",
+  inconclusive: "There is not enough activity to name a strategy with confidence. TRACE says so instead of guessing.",
+};
+
 type Tone = "good" | "warn" | "muted";
 type Step = { key: string; title: string; verdict: string; detail: string; href: string; tone: Tone };
 

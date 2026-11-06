@@ -99,8 +99,17 @@ test("a completed investigation renders real data on every screen", async ({ pag
   await expect(page.getByText("Lifecycle events")).toBeVisible();
 
   await page.goto(`/strategy?inv=${id}`);
-  await expect(page.getByRole("heading", { name: "Strategy DNA" })).toBeVisible();
+  await expect(page.getByText("A hypothesis, not confirmed intent")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Supporting on-chain evidence" })).toBeVisible();
+  await page.getByText("Technical details").first().click();
   await expect(page.getByText(/0G Private Computer (was unavailable|proposed this hypothesis)/)).toBeVisible();
+  await expect(page.getByText(/Strategy DNA: eight measurements/)).toBeVisible();
+
+  // Old /saved links land on Strategy → Versions; with two or more versions, Compare shows a side-by-side.
+  await page.goto(`/saved?inv=${id}`);
+  await expect(page).toHaveURL(/\/strategy\?tab=versions/);
+  await expect(page.getByText(/Pick two to see what changed|No strategy versions/)).toBeVisible();
+  if ((await page.getByRole("checkbox").count()) >= 2) await expect(page.getByRole("heading", { name: "Compare versions" })).toBeVisible();
 
   await page.goto(`/backtest?inv=${id}`);
   await expect(page.getByText(/Backtest could not be completed|Insufficient real data|Historical replay on real swaps/)).toBeVisible();

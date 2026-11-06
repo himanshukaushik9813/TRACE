@@ -149,3 +149,19 @@ test("malformed investigation ids are a 404, not a server error", async () => {
   assert.equal((await fetch(`${base}/investigations/not-a-uuid/events`)).status, 404);
   assert.equal((await fetch(`${base}/investigations/not-a-uuid/positions/1`)).status, 404);
 });
+
+test("GET /strategies/:id validates the id and returns the stored version read-only", async () => {
+  assert.equal((await fetch(`${base}/strategies/not-a-uuid`)).status, 404);
+  const id = "11111111-2222-4333-8444-555555555555";
+  assert.equal((await fetch(`${base}/strategies/${id}`)).status, 404); // no row
+  const row = { id, irId: "ir_0123456789abcdef", ir: { family: "passive_concentrated", rules: [] }, versionHash: "fnv1a:0123456789abcdef" };
+  const q = db.query;
+  db.query = async (sql, params) => (/from strategies s join investigations/.test(sql) && params[0] === id ? [row] : []);
+  try {
+    const r = await fetch(`${base}/strategies/${id}`);
+    assert.equal(r.status, 200);
+    assert.deepEqual((await r.json()).strategy, row);
+  } finally {
+    db.query = q;
+  }
+});

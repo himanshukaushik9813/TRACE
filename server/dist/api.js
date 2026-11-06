@@ -14,6 +14,7 @@
  *   GET  /investigations/:id/positions/:tokenId
  *   POST /investigations/:id/archive           retry 0G Storage archiving
  *   GET  /strategies/by-wallet/:wallet         immutable strategy versions
+ *   GET  /strategies/:id                       one version with its full IR (read-only)
  *   POST /strategies/:id/compatibility         on-chain Aqua compatibility {maker?}
  *   POST /strategies/:id/plan                  compile an execution plan {maker, amount0, amount1}
  *   GET  /plans/:id                            plan + authorizations + transactions
@@ -296,6 +297,18 @@ export function createApi(deps) {
          from strategies s join investigations i on i.id = s.investigation
         where lower(i.wallet) = lower($1) order by s.created_at desc limit 50`, [P(req, "wallet")]);
         res.json({ strategies: rows });
+    }));
+    /** One immutable strategy version with its full IR (read-only; used by version compare). */
+    app.get("/strategies/:id", h(async (req, res) => {
+        const id = P(req, "id");
+        if (!isUuid(id))
+            return bad(res, "strategy not found", 404);
+        const [row] = await db.query(`select s.id, s.ir_id as "irId", s.parent_ir_id as "parentIrId", s.ir_json as ir, s.version_hash as "versionHash", s.family, s.confidence,
+              s.provider, s.role, s.created_at as "createdAt", s.investigation, i.wallet, i.window_days as "windowDays"
+         from strategies s join investigations i on i.id = s.investigation where s.id = $1`, [id]);
+        if (!row)
+            return bad(res, "strategy not found", 404);
+        res.json({ strategy: row });
     }));
     const loadForCompile = async (strategyId, tokenId) => {
         const st = await db.getStrategy(strategyId).catch(() => null);
