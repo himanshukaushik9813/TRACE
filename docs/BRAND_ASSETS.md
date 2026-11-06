@@ -18,7 +18,6 @@ Configured in `src/lib/partners.ts`. All five were checked on 2026-11-07, and ea
 | Ethereum | `ethereum.org/images/assets/svgs/ethereum-logo-landscape-black.svg` | ethereum.org/en/assets: "ETH logo landscape", transparent background |
 | 1inch | `1inch.com/assets/images/landing/press-room/assets/1inch_logo_black.svg` | 1inch.com/press-room: "1inch wordmark black logo", the version for light backgrounds |
 | 0G | `0g.ai/assets/681c472ba991e2e4ca164fe6_Black-OG-Logo.svg` | 0g.ai/brandkit: black ØG logo |
-| World | `world.org/icons/worldcoin-orb-world-logo.svg` | world.org (the logo World serves on its own press page). The full kit is at world.org/brand under "Download Logos" |
 
 **Self-hosting** (optional): put the same file in `public/brand/partners/<key>.svg`. The layout then serves it from TRACE's domain instead of the brand's host.
 
@@ -29,4 +28,4 @@ If a logo fails to load, the card falls back to a plain text wordmark.
 - **Size:** fixed height (20 px on mobile, 22 px on desktop) and natural width (`object-fit: contain`). Never stretched or cropped.
 - **No changes to the mark:** no recolouring, rotation, filters or shadows on the logo itself. 0G's brand kit forbids drop shadows, rotation and stretching. The subtle depth and hover effects move the white card, never the mark.
 - **Hierarchy:** logos are smaller than TRACE and sit on white cards, below the TRACE identity.
-- **Captions:** each card's caption states what TRACE uses the technology for ("V3 liquidity data", "Sepolia testnet", "Aqua execution", "AI compute & storage", "World ID"). That is a role, not an integration status.
+- **Captions:** each card's caption states what TRACE uses the technology for ("V3 liquidity data", "Sepolia testnet", "Aqua execution", "AI compute & storage"). That is a role, not an integration status.

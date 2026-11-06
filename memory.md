@@ -44,7 +44,7 @@ packages/                Engine (TypeScript, built to dist/ by scripts/build-pac
   strategy-inference     fingerprints (Strategy DNA), deterministic baseline, 0G Router client + gate
   backtester             real-swap backtest, canonical V3 math, enforced look-ahead guard
   aqua-adapter           compatibility + on-chain checks, SwapVM compile (1inch SDKs), simulate, verify receipts
-  world-auth             EIP-712 authorization + optional World ID v4
+  authorization          EIP-712 wallet authorization (server-verified)
   zero-g-storage         0G Galileo uploads + Merkle-proof read-back
 
 server/src               config.ts · integrations.ts · db.ts · pipeline.ts · worker.ts · api.ts · index.ts
@@ -72,14 +72,13 @@ npm run test:e2e                           # Playwright against the running app 
 - **Persistence:** `DATABASE_URL` (Supabase **session pooler**), `DATABASE_URL_DIRECT`, `DATABASE_SSL`, `REDIS_URL` (Upstash `rediss://`), `PORT`, `CORS_ORIGINS`.
 - **0G inference:** `ZERO_G_ROUTER_URL`, `ZERO_G_API_KEY`, `ZERO_G_MODEL` (default glm-4.7), `ZERO_G_TRUST_MODE`, `ZERO_G_VERIFY_TEE`.
 - **0G Storage:** `OG_STORAGE_RPC_URL`, `OG_STORAGE_INDEXER_URL`, `OG_STORAGE_PRIVATE_KEY` (burner), `OG_STORAGE_ADDRESS`.
-- **World ID:** `WORLD_APP_ID`, `WORLD_RP_ID`, `WORLD_RP_SIGNING_KEY`, `WORLD_ACTION`, `WORLD_ENVIRONMENT`.
 - **Frontend:** `NEXT_PUBLIC_TRACE_API_URL`, `NEXT_PUBLIC_CHAIN_ID`, `NEXT_PUBLIC_SEPOLIA_PUBLIC_RPC`.
 
 ### Design system (minimal premium light theme, 2026-11-06)
 Source brief: `TRACE_Claude_Minimal_Light_Theme_Reference_Pack.zip` (spec .md + reference PNG, in ~/Downloads). **Light theme only**: no dark cards, hero or sidebar anywhere.
 - Tokens (`tailwind.config.js`): `ivory` #F7F3EB (canvas), `ivory-50` #FFFFFF (cards), `ivory-100` #F3EBDD (secondary), `ink` #171714, `ink-600` #77736A, `gold` #B68A42 / `gold-300` #C6A66B, `forest` #278653 (success), `line` #E9E2D6 (borders), `rounded-card` 14px, `shadow-lift`. Type: Playfair Display (headings, lining numerals forced in globals.css) + Inter.
 - `Card dark` / `onDark` props still exist for call-site compatibility but render light.
-- Investigate (`src/app/page.tsx` + `src/components/investigate.tsx`) has exactly five sections: (1) search hero + `EngineMark` (pure-SVG isometric ivory/gold engine, `src/components/engine-mark.tsx`; its seams glow only while an investigation runs); (2) the `Workflow` of Analyze → Understand → Verify → Execute, with *real* stage status — Analyze = chain read finished; Understand = a non-inconclusive primary strategy; **Verify = a server-validated EIP-712 authorization** (World ID noted when verified); **Execute = the Aqua `ship` tx confirmed by its receipt**. `GET /investigations/:id/full` now returns `authorizations` and `transactions` for the investigation's plans (server/src/api.ts), and `useFullInvestigation` keeps polling every 10 s while a plan exists without a successful ship. A completed step's icon flips in 3D to a green tick (`StepBadge`, `.flip*` CSS in globals.css) with a ring pulse; a green progress rail fills under the strip; when all four are done the ticks pulse together once and an "All four steps complete" note (with the ship tx link) swings in (`.all-done`, `.complete-in`); (3) `WalletOverview` + `PositionPanel` (basis position, last real swap price, in/out of range); (4) `PerformancePanel` (backtest observed replay vs buy & hold, source/assumptions in a `<details>`, honest empty state); (5) `BestExecution` (gold-bordered card; **runs Verify + Execute inline** via `ExecutePanel` + `useAquaExecution` in `src/lib/aqua-flow.ts`: amounts → compatibility → compile + simulate → EIP-712 sign (server-verified) → exact approvals → ship, each tx confirmed through `GET /transactions/:hash`, resumable after a rejection, and it invalidates `["full", invId]` so the workflow ticks live; the `/execute` page stays as the step-by-step view; recommended Aqua range = the basis position's own ticks, because that is what `aqua-adapter/compile.ts` compiles; the button is disabled with a stated reason when there is no investigation, Aqua is blocked, the strategy is inconclusive, or the verdict is INCOMPATIBLE). Recent investigations and notes live in collapsed `<details>`.
+- Investigate (`src/app/page.tsx` + `src/components/investigate.tsx`) has exactly five sections: (1) search hero + `EngineMark` (pure-SVG isometric ivory/gold engine, `src/components/engine-mark.tsx`; its seams glow only while an investigation runs); (2) the `Workflow` of Analyze → Understand → Verify → Execute, with *real* stage status — Analyze = chain read finished; Understand = a non-inconclusive primary strategy; **Verify = a server-validated EIP-712 authorization**; **Execute = the Aqua `ship` tx confirmed by its receipt**. `GET /investigations/:id/full` now returns `authorizations` and `transactions` for the investigation's plans (server/src/api.ts), and `useFullInvestigation` keeps polling every 10 s while a plan exists without a successful ship. A completed step's icon flips in 3D to a green tick (`StepBadge`, `.flip*` CSS in globals.css) with a ring pulse; a green progress rail fills under the strip; when all four are done the ticks pulse together once and an "All four steps complete" note (with the ship tx link) swings in (`.all-done`, `.complete-in`); (3) `WalletOverview` + `PositionPanel` (basis position, last real swap price, in/out of range); (4) `PerformancePanel` (backtest observed replay vs buy & hold, source/assumptions in a `<details>`, honest empty state); (5) `BestExecution` (gold-bordered card; **runs Verify + Execute inline** via `ExecutePanel` + `useAquaExecution` in `src/lib/aqua-flow.ts`: amounts → compatibility → compile + simulate → EIP-712 sign (server-verified) → exact approvals → ship, each tx confirmed through `GET /transactions/:hash`, resumable after a rejection, and it invalidates `["full", invId]` so the workflow ticks live; the `/execute` page stays as the step-by-step view; recommended Aqua range = the basis position's own ticks, because that is what `aqua-adapter/compile.ts` compiles; the button is disabled with a stated reason when there is no investigation, Aqua is blocked, the strategy is inconclusive, or the verdict is INCOMPATIBLE). Recent investigations and notes live in collapsed `<details>`.
 - The case file is now only the compact band above investigation screens (`InvestigationGate`).
 - Charts: hand-built SVG from real data only; light by default (`LineChart` `onDark` defaults to false; per-series `width`).
 
@@ -149,7 +148,7 @@ Source brief: `TRACE_Claude_Minimal_Light_Theme_Reference_Pack.zip` (spec .md + 
     - The pipeline heartbeat writes `progress.liveRpcCalls` every 2.5s, and the UI shows "N RPC calls so far".
   - On a free key, the first run for a brand-new wallet is RPC-bound. For a demo, run the wallet once beforehand; the cache then makes it fast for 30 days.
 - **Aqua ship needs only ETH for gas plus exact approvals.** The maker's token balances are not required to ship; Aqua pulls tokens only when swaps fill, and the fork test sets only ETH.
-- **World ID.** No credentials. "World Agent Pass" isn't an official product. Authorization is an EIP-712 wallet signature, with an optional World ID v4 staging layer.
+- **Authorization** is the EIP-712 wallet signature only (no third-party human verification; removed at the user's request on 2026-11-07, do not re-add).
 
 ---
 
@@ -165,7 +164,6 @@ Source brief: `TRACE_Claude_Minimal_Light_Theme_Reference_Pack.zip` (spec .md + 
 | 0G inference | BLOCKED (key trust mode "private", no providers) |
 | 0G Storage | BLOCKED (burner unfunded) |
 | EIP-712 auth | VERIFIED with real MetaMask on Sepolia 2026-11-06 (auth 91c46c2e…) |
-| World ID | BLOCKED (no creds) |
 
 ### Test results (last run 2026-11-06, after the speed work)
 - typecheck ✓ · `next build` ✓
@@ -177,7 +175,6 @@ Source brief: `TRACE_Claude_Minimal_Light_Theme_Reference_Pack.zip` (spec .md + 
 1. Fund the 0G burner `0xe8f9c5bA6c8c196B72989193362f3A28638a754A` at faucet.0g.ai, then press **Retry archive** on Reports.
 2. Create a new 0G Router key with standard/verified trust mode (or wait for private providers).
 3. From wallet `0x5971…`, create WETH/USDC positions on Sepolia (app.uniswap.org), investigate the wallet, and do a real MetaMask approve → ship. That moves Aqua to VERIFIED TESTNET.
-4. Optional: World ID staging credentials.
 5. Optional: rotate the Infura key. It once appeared in a local RPC error during development, and also briefly in a test file; that was replaced with a dummy before any commit.
 
 ### Resilience batch delivered 2026-11-06 (commit ca51f2b)
@@ -215,7 +212,7 @@ The original repo had these problems:
 - the build was broken
 - the chain reader used a non-existent Uniswap ABI (`Mint` / `getPool` / `TransferSingle` on the NPM)
 - six of eight screens were hardcoded fixtures
-- the World "Agent Pass" proof was self-signed HMAC by the server
+- a fake "Agent Pass" proof was self-signed HMAC by the server
 - `chain-config` had addresses with no code
 - Redis TLS and password were dropped
 - the backtest had a look-ahead bug and hardcoded mainnet parameters
@@ -331,7 +328,7 @@ All of these were replaced in the 2026-11-06 migration.
 - **2026-11-06 22:55 IST (verification pass + audit, docs/TEST_REPORT.md)** — Offline checks in the VM: unit 56/56, frontend/server/packages typecheck clean, lint clean (before and after the fixes). Live checks through the deployed API and browser pane:
   - Real investigations `02503ab3…` and `81bb6025…` (restart) of wallet 0x4797…eb4c ran end to end.
   - 0G inference failed live: 503 `no_provider_for_trust_mode`, request `f1197eb1…`. The key is private-tier.
-  - 0G Storage: uploader balance is 0. World ID is unconfigured.
+  - 0G Storage: uploader balance is 0.
   - Aqua compatibility PARTIAL, 7/7 checks.
   - All 8 recorded approve/ship txs were re-verified `status 0x1` via the publicnode Sepolia RPC. All were sent from 0x6583…d2De; ships go to the Aqua registry.
   - Onboarding, tooltips (real Tab/Escape), refresh and navigation work; 0 overflow at 1440 and 390.
@@ -339,7 +336,7 @@ All of these were replaced in the 2026-11-06 migration.
 
   Fixed: (1) the mobile-drawer logo was invisible (duplicate SVG gradient id `mark-g`; now `useId`; same fix for RangeBand `band`); (2) Investigate said "Sign/Approve… below", now "…on the Execute page".
   - Not run: E2E, test:live, test:fork (no network or browser in the VM).
-  - The user then sent a bigger ETHGlobal "winning-level audit & upgrade" brief (phases 1–7). TEST_REPORT.md §6 holds the proposed order; waiting for the user's go-ahead and decisions (0G key, faucet, World ID 4.0 vs AgentKit).
+  - The user then sent a bigger ETHGlobal "winning-level audit & upgrade" brief (phases 1–7). TEST_REPORT.md §6 holds the proposed order; waiting for the user's go-ahead and decisions (0G key, faucet).
 - **2026-11-06 23:10 IST (deployed dad5f11; queue fix)** — The user pushed; Vercel and Render both deployed dad5f11. Three fresh production investigations (c1feddd0…, 824a9197…, 9bc7b12f…) had no `priceRangeExits` in their DNA, so the jobs were processed by an older worker. The only other worker on the same Upstash queue is a local API on the Mac. Fix: a per-deployment `TRACE_QUEUE_NAME` (see Gotchas), plus a `finished` log line. Needs a push; then check the Render logs for `queue "trace-investigations-prod"` and re-run one investigation to confirm the new metric.
 - **2026-11-06 23:15 IST (a9a562b live, verified)** — Pushed by the user. Render's blueprint sync added `TRACE_QUEUE_NAME=trace-investigations-prod` after that deploy had already started, so the first instance still logged the default queue. Claude ran Manual Deploy → Restart service, and the logs now show `queue "trace-investigations-prod"`. Gotcha: a new blueprint env var needs a restart if the deploy raced the sync.
   - Fresh production investigation `baf7b5ca-220d-4c76-8fcf-deca84fc9c21` has the new DNA fields (priceRangeExits 0, answered 0, median null; time in range 100%). This confirms the earlier missing fields came from an old worker on the shared queue.
@@ -369,7 +366,7 @@ All of these were replaced in the 2026-11-06 migration.
     - The user needs to push 9e0e3dc, 56a3fe3 and the docs commit.
     - Then re-run 0x4A22 (90 days) on prod. Its stored rules ("collects every 0.3 h", "~100% in range") predate 9e0e3dc.
     - **Phase 4 is not started** and waits for the user's go-ahead.
-    - Still blocked: a standard-mode 0G key, a funded storage wallet, and World ID credentials.
+    - Still blocked: a standard-mode 0G key and a funded storage wallet.
   - Gotcha: `test/api.test.mjs` stubs `db.getInvestigation` in an earlier test, so later tests must reset it.
 - **2026-11-07 (Phase 4: 1inch Aqua execution proof)**
   - **Pushed and verified live:**
@@ -404,35 +401,7 @@ All of these were replaced in the 2026-11-06 migration.
   - **Gotchas:**
     - SwapVM `sqrt(P*1e18)` in the SDK docs means P is already 1e18-scaled. Use `Price.toSqrt` or `sqrt(P)·1e18`.
     - A router quote needs no KycNFT. Swaps do.
-- **2026-11-07 (Phase 5: World ID human authorization)**
-  - **Product research:**
-    - There is no official product called "World ID Agent Pass".
-    - AgentKit is for agent wallets (AgentBook, x402), so it does not fit a human authorizing one plan.
-    - We used World ID 4.0 IDKit instead, per docs.world.org/world-id/idkit/integrate.
-  - **Protected action:** `aqua:ship` needs a verified human. `aqua:dock` does not.
-  - **Without registration:**
-    - When WORLD_APP_ID, WORLD_RP_ID and WORLD_RP_SIGNING_KEY are missing, protected execution is **disabled**.
-    - `WORLD_ID_ENFORCE=false` is an explicit opt-out, and the UI says so.
-  - **Challenge:** it returns `world`, containing app_id, action, environment, signal and the RP context signed by the server, plus a request token that seals the challenge, nonce and expiry together.
-  - **Signal:** keccak256 of the claims (wallet, chain, strategy id, version hash, plan hash, action, challenge, expiry).
-  - **Verification:** `verifyWorldProof` runs these checks:
-    - the seal, expiry, nonce, action and environment;
-    - no session proofs;
-    - signal_hash;
-    - World's v4 verify API, with the proof forwarded unchanged;
-    - the environment and nullifier World returns.
-  - **Replay protection:** the challenge is consumed, and (nullifier, action#nonce) is recorded once.
-  - **Second gate:** `/transactions` refuses an aqua:ship authorization unless `worldStatus` is verified.
-  - **Frontend:**
-    - `src/components/world-id.tsx` wraps IDKitRequestWidget with orbLegacy({ signal }) and is loaded dynamically with ssr:false.
-    - The `aqua-flow` verify() waits for the widget through a promise bridge, then asks for the wallet signature.
-    - Step 6 shows the two checks separately, the HumanPill states, and what the authorization is bound to.
-  - **Test hooks:** `ApiDeps.worldFetch` exists for tests only and replaces World's verify API with a test double.
-  - **Tests:** 110/110 pass. The new files are `test/world.test.mjs` and the Phase 5 block in `test/api.test.mjs`.
-  - **Docs:** `docs/PHASE_5_WORLD_ID.md`.
-  - **No live verification exists.** It is waiting on the user to register at developer.world.org and paste the 3 env vars on Render. With staging, the simulator works.
-  - **Ordering matters for Phase 4:** after this deploy, shipping is disabled until World ID is registered. The Phase 4 live ship therefore either goes before the push, or after registration through the full World ID flow.
-  - Phase 6 waits until the integration status is verified.
+- **2026-11-07 (Phase 5, later reverted)** — A third-party human-verification layer was built for `aqua:ship`, then removed entirely at the user's request (code, package, DB columns via migration 0004, tests, docs, decks, intro logo). Execution is authorized by the EIP-712 wallet signature only; the auth package is now `packages/authorization` (`@trace/authorization`).
 - **2026-11-07 (Cinematic launch intro + ecosystem reveal)**
   - **Where it lives:** `src/components/launch/*`:
     - TraceLaunchScene (R3F, lazy), with TopographicTerrain (shader contours + a gold path that draws itself) and FloatingTraceEmblem (extruded star + platform);

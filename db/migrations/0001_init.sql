@@ -231,19 +231,10 @@ create table authorizations (
   signature         text not null,
   validated         boolean not null,
   verification_json jsonb not null,
-  world_status      text not null default 'not_configured',
-  world_nullifier   text,
   expires_at        timestamptz not null,
   created_at        timestamptz not null default now()
 );
 create index on authorizations (plan_id, created_at desc);
-
-create table world_nullifiers (
-  nullifier  text not null,
-  action     text not null,
-  created_at timestamptz not null default now(),
-  primary key (nullifier, action)
-);
 
 create table transactions (
   id                  uuid primary key default gen_random_uuid(),

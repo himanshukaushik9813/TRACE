@@ -213,8 +213,8 @@ You need MetaMask with a little **Sepolia ETH** for steps 6–7 only.
    re-sent.
 
 Expected "blocked" items on Reports (external dependencies, not bugs): 0G inference
-(the key is in private trust mode with no providers), 0G Storage (the uploader
-wallet is unfunded) and World ID (no credentials).
+(the key is in private trust mode with no providers) and 0G Storage (the uploader
+wallet is unfunded).
 
 ---
 

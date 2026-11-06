@@ -24,7 +24,6 @@ export const GLOSSARY = {
   aqua: { term: "1inch Aqua", text: "A 1inch protocol that lets a wallet offer liquidity through a strategy while its tokens stay in the wallet. TRACE can recreate supported strategy rules on it." },
   aquaCompatibility: { term: "Aqua compatibility", text: "Which of the strategy's rules can be expressed as a 1inch Aqua order. Rules that cannot are listed, never silently dropped." },
   authorization: { term: "Authorization", text: "A free signature from your wallet that approves exactly this plan. The server checks it before anything can be sent. It costs no gas and moves no tokens." },
-  worldId: { term: "World ID", text: "A privacy-preserving proof, made with the World App, that a unique human approves this exact plan. TRACE requires it before shipping; it is separate from your wallet signature and reveals no personal data." },
   approve: { term: "Approve", text: "A wallet transaction allowing the Aqua contract to use an exact amount of one token. TRACE never asks for unlimited approval." },
   ship: { term: "Ship", text: "The transaction that publishes your strategy to 1inch Aqua on Sepolia. Your tokens stay in your wallet until a trade actually fills." },
   receipt: { term: "Receipt", text: "The blockchain's record that a transaction was included and whether it succeeded. TRACE checks every receipt itself." },

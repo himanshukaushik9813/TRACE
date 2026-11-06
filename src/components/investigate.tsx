@@ -114,7 +114,7 @@ const NEXT_TEXT = [
 ];
 
 const VERIFY_BUSY = { check: "Checking Aqua compatibility live", compile: "Compiling and simulating the plan", challenge: "Preparing the authorization",
-  human: "Verify you are human with World ID", wallet: "Confirm the signature in MetaMask", server: "The server is verifying your signature" } as const;
+  wallet: "Confirm the signature in MetaMask", server: "The server is verifying your signature" } as const;
 
 function stagesFor(inv: Investigation | undefined, full: FullInvestigation | null | undefined, exec: AquaExecution | null, aquaBlocked: boolean): Stage[] {
   const idx = inv ? ORDER.indexOf(inv.status as (typeof ORDER)[number]) : -1;
@@ -165,12 +165,11 @@ function stagesFor(inv: Investigation | undefined, full: FullInvestigation | nul
   const eErr = exec?.error?.stage === "execute" ? exec.error.message : null;
   const shipped = snap.ship?.status === "success";
   const signer = snap.auth ?? (full?.authorizations ?? []).find((a) => a.planId === snap.plan?.id && a.validated) ?? null;
-  const world = signer?.worldStatus === "verified" ? ", World ID verified" : signer?.worldStatus === "not_configured" ? " (World ID not configured on this server)" : "";
 
   const verify: Pick<Stage, "state" | "status"> = !analysed
     ? { state: "waiting", status: "After analysis" }
     : shipped || snap.auth
-      ? { state: "done", status: `Signed by ${fmt.addr(signer?.wallet ?? snap.plan!.maker)}${world}` }
+      ? { state: "done", status: `Signed by ${fmt.addr(signer?.wallet ?? snap.plan!.maker)}` }
       : busy?.stage === "verify"
         ? { state: "active", status: VERIFY_BUSY[busy.what] }
         : vErr

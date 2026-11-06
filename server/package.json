@@ -11,7 +11,7 @@
     "@trace/strategy-inference": "0.1.0",
     "@trace/backtester": "0.1.0",
     "@trace/aqua-adapter": "0.1.0",
-    "@trace/world-auth": "0.1.0",
+    "@trace/authorization": "0.1.0",
     "@trace/zero-g-storage": "0.1.0",
     "express": "^4.19.2",
     "pg": "^8.12.0",

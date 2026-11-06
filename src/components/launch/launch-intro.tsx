@@ -33,7 +33,7 @@ const TraceLaunchScene = dynamic(loadScene, { ssr: false, loading: () => null })
 type Variant = "webgl" | "css" | "reduced" | "short";
 type Flags = { land: boolean; emblem: boolean; brand: boolean; prepare: boolean; shown: number; settled: boolean; identity: boolean };
 const NONE: Flags = { land: false, emblem: false, brand: false, prepare: false, shown: 0, settled: false, identity: false };
-const ALL: Flags = { land: true, emblem: true, brand: true, prepare: true, shown: 5, settled: true, identity: true };
+const ALL: Flags = { land: true, emblem: true, brand: true, prepare: true, shown: PARTNERS.length, settled: true, identity: true };
 
 const SCENE_START_TIMEOUT_MS = 2600;
 const HARD_LIMIT_MS = 10_000;
@@ -123,7 +123,7 @@ export function LaunchIntro({ logos }: { logos: PartnerLogos }) {
       set({ land: true });
       after(T.platform[0], () => set({ emblem: true }));
       after(T.brand, () => set({ brand: true, prepare: true }));
-      for (let i = 0; i < 5; i++) after(T.partnerFirst + i * T.partnerStep, () => set({ shown: i + 1 }));
+      for (let i = 0; i < PARTNERS.length; i++) after(T.partnerFirst + i * T.partnerStep, () => set({ shown: i + 1 }));
       after(T.partnersSettle, () => set({ settled: true }));
       after(T.identity, () => set({ identity: true }));
       after(T.exit, () => {

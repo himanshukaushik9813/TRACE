@@ -3,12 +3,16 @@
  *
  *   SCENE 1  0.0–1.5  landscape fades in, contours drift, camera glides, a gold path draws
  *   SCENE 2  1.5–2.5  platform forms, the TRACE emblem rises; TRACE logo + name appear
- *   SCENE 3  2.5–5.0  five ecosystem cards arrive one by one, each linked to the emblem,
+ *   SCENE 3  2.5–5.0  the ecosystem cards arrive one by one, each linked to the emblem,
  *                     then glide into their final row
  *   SCENE 4  5.0–6.0  identity: category, tagline, "Built with ecosystem technologies"
  *   SCENE 5  6.0–7.0  gold light sweep; terrain and cards dissolve, emblem recedes,
  *                     crossfade with a slight zoom into the real dashboard
  */
+
+import { PARTNERS } from "@/lib/partners";
+
+const PARTNER_COUNT = PARTNERS.length;
 
 export const T = {
   landscapeIn: [0, 1.1],
@@ -38,7 +42,7 @@ export type Anchor = { x: number; y: number; set: boolean };
 /** DOM flags at time t (used by the ?introAt=<s> QA freeze). */
 export function flagsAt(t: number) {
   let shown = 0;
-  for (let i = 0; i < 5; i++) if (t >= T.partnerFirst + i * T.partnerStep) shown = i + 1;
+  for (let i = 0; i < PARTNER_COUNT; i++) if (t >= T.partnerFirst + i * T.partnerStep) shown = i + 1;
   return {
     land: t >= 0,
     emblem: t >= T.platform[0],

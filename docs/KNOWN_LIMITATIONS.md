@@ -10,7 +10,6 @@ These are stated plainly. Nothing below is hidden behind demo data.
 2. **0G Storage.** The dedicated Galileo uploader has a zero balance. Fund it at [faucet.0g.ai](https://faucet.0g.ai) (0.1 0G per day), then press **Retry archive** on the Reports screen.
 3. **Aqua swap (taker).** 1inch gates takers behind the KycNFT, so the swap leg is reported as blocked. Ship and dock are unaffected.
 4. **Aqua on Sepolia.** 1inch documents Sepolia as outside the production chain set. TRACE uses the documented test pair (registry `0xe802…139b`, router `0x016b…b070`); the current router is not on Sepolia.
-5. **World ID.** Not configured. Add `WORLD_APP_ID`, `WORLD_RP_ID` and `WORLD_RP_SIGNING_KEY` (staging) to enable it. Without them, authorization is the EIP-712 wallet signature only.
 
 ## Data and infrastructure
 - **RPC limits.** Infura's free tier caps `eth_getLogs` at 10,000 blocks per request and throttles bursts.

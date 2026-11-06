@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-import { buildTypedData, newChallenge, verifyAuthorization, worldSignal } from "@trace/world-auth";
+import { buildTypedData, newChallenge, verifyAuthorization } from "@trace/authorization";
 
 // A throwaway key generated per test run — exists only in memory, never funded.
 const account = privateKeyToAccount(generatePrivateKey());
@@ -67,10 +67,4 @@ test("non-Sepolia chain id is rejected", async () => {
   const c = claims({ chainId: 1 });
   const r = await verifyAuthorization({ claims: c, signature: await sign(c), expected: expected(c), challengeFresh: true });
   assert.equal(r.validated, false);
-});
-
-test("World ID signal binds the exact claims", () => {
-  const c = claims();
-  assert.equal(worldSignal(c), worldSignal({ ...c }));
-  assert.notEqual(worldSignal(c), worldSignal({ ...c, planHash: "x" }));
 });

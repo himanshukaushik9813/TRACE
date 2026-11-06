@@ -14,7 +14,7 @@ import { contentHash, idHash } from "./canonical.js";
  * Stamp a StrategyIR with its deterministic identity: id = hash of the IR's
  * own content (minus the volatile id field). Recomputing on the same content
  * always yields the same id — this is how downstream components (Aqua
- * compile, World proof) pin to *this* strategy version.
+ * compile, authorization) pin to *this* strategy version.
  */
 export function finalizeStrategyIR(draft) {
     const body = { ...draft, id: undefined };

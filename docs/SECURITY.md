@@ -21,7 +21,6 @@
 - The signature is checked *before* the challenge is consumed, so invalid signatures can't burn challenges. The challenge is then consumed with a single conditional `UPDATE`, so a replay fails.
 - `POST /transactions` refuses any op the authorization does not cover (a ship authorization cannot dock).
   - Each recorded transaction is re-verified from its receipt: sender equals the authorized wallet, and the calldata matches the plan step.
-- Optional World ID: the proof signal is bound to the same claims, the RP signature is made server-side, and nullifiers are unique per action.
 
 ## Transaction construction
 - Plans are compiled deterministically with the official 1inch SDKs, never from model output.

@@ -15,7 +15,7 @@ import type { StrategyIR } from "./types.js";
  * Stamp a StrategyIR with its deterministic identity: id = hash of the IR's
  * own content (minus the volatile id field). Recomputing on the same content
  * always yields the same id — this is how downstream components (Aqua
- * compile, World proof) pin to *this* strategy version.
+ * compile, authorization) pin to *this* strategy version.
  */
 export declare function finalizeStrategyIR(draft: Omit<StrategyIR, "id"> & {
     id?: string;

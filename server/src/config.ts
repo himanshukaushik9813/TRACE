@@ -20,7 +20,6 @@ export type TraceConfig = {
   queueName: string;
   zeroG: { routerUrl?: string; apiKey?: string; model?: string; trustMode?: "standard" | "verified" | "private"; verifyTee: boolean };
   storage: { rpcUrl?: string; indexerUrl?: string; privateKey?: string };
-  world: { appId?: string; rpId?: string; signingKey?: string; action: string; environment: "staging" | "production"; enforce: boolean };
   corsOrigins: string[];
 };
 
@@ -64,15 +63,6 @@ export function loadConfig(): { config: TraceConfig; checks: Check[]; fatal: str
       verifyTee: env("ZERO_G_VERIFY_TEE") !== "false",
     },
     storage: { rpcUrl: env("OG_STORAGE_RPC_URL"), indexerUrl: env("OG_STORAGE_INDEXER_URL"), privateKey: env("OG_STORAGE_PRIVATE_KEY") },
-    world: {
-      appId: env("WORLD_APP_ID"),
-      rpId: env("WORLD_RP_ID"),
-      signingKey: env("WORLD_RP_SIGNING_KEY"),
-      action: env("WORLD_ACTION") ?? "trace-authorize-execution",
-      environment: env("WORLD_ENVIRONMENT") === "production" ? "production" : "staging",
-      // Protected actions (aqua:ship) need a verified human. Only an explicit "false" turns this off.
-      enforce: env("WORLD_ID_ENFORCE") !== "false",
-    },
     corsOrigins: (env("CORS_ORIGINS") ?? "http://localhost:3000,http://127.0.0.1:3000").split(",").map((s) => s.trim()),
   };
 
@@ -82,12 +72,6 @@ export function loadConfig(): { config: TraceConfig; checks: Check[]; fatal: str
     { name: "REDIS_URL", required: false, set: Boolean(config.redisUrl), note: "without it the queue runs in-process (no durability)" },
     { name: "ZERO_G_ROUTER_URL / ZERO_G_API_KEY", required: false, set: Boolean(config.zeroG.routerUrl && config.zeroG.apiKey), note: "0G inference" },
     { name: "OG_STORAGE_PRIVATE_KEY", required: false, set: Boolean(config.storage.privateKey), note: "0G Storage uploads (funded Galileo burner key)" },
-    {
-      name: "WORLD_APP_ID / WORLD_RP_ID / WORLD_RP_SIGNING_KEY",
-      required: false,
-      set: Boolean(config.world.appId && config.world.rpId && config.world.signingKey),
-      note: config.world.enforce ? "World ID 4.0 — without it, protected execution (aqua:ship) is disabled" : "World ID 4.0 (WORLD_ID_ENFORCE=false: protected actions do NOT require it)",
-    },
   ];
   return { config, checks, fatal };
 }

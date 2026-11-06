@@ -319,30 +319,23 @@ export class Db {
     signature: string;
     validated: boolean;
     verification: AuthorizationVerification;
-    worldStatus: string;
-    worldNullifier: string | null;
   }): Promise<string> {
     const r = await this.query<{ id: string }>(
-      `insert into authorizations (plan_id, wallet, action, claims_json, signature, validated, verification_json, world_status, world_nullifier, expires_at)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9, to_timestamp($10)) returning id`,
-      [a.planId, a.wallet, a.action, JSON.stringify(a.claims), a.signature, a.validated, JSON.stringify(a.verification), a.worldStatus, a.worldNullifier, a.claims.expiresAt],
+      `insert into authorizations (plan_id, wallet, action, claims_json, signature, validated, verification_json, expires_at)
+       values ($1,$2,$3,$4,$5,$6,$7, to_timestamp($8)) returning id`,
+      [a.planId, a.wallet, a.action, JSON.stringify(a.claims), a.signature, a.validated, JSON.stringify(a.verification), a.claims.expiresAt],
     );
     return r[0].id;
   }
 
   async getAuthorization(id: string) {
     const r = await this.query(
-      `select id, plan_id as "planId", wallet, action, validated, verification_json as verification, world_status as "worldStatus",
+      `select id, plan_id as "planId", wallet, action, validated, verification_json as verification,
               expires_at as "expiresAt", created_at as "createdAt", (expires_at > now()) as live
          from authorizations where id = $1`,
       [id],
     );
     return r[0] ?? null;
-  }
-
-  async recordNullifier(nullifier: string, action: string): Promise<boolean> {
-    const r = await this.query(`insert into world_nullifiers (nullifier, action) values ($1,$2) on conflict do nothing returning nullifier`, [nullifier, action]);
-    return r.length === 1;
   }
 
   /* ---------------- transactions ---------------- */

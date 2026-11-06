@@ -21,7 +21,6 @@ to mark a feature "Working".
 | 4 | Backtest (replay, benchmarks, What If) | **Partially Working** | real pool swaps; look-ahead guard enforced by a DB trigger | yes / yes / yes | kept | **No**: Max DD, IL, counterfactual | `backtester.test.mjs` (valuation bounds, look-ahead, determinism). The live run completed 4 runs. **What If: Not Implemented. Capital utilization is computed but never shown.** |
 | 5 | Strategy Versions (history + comparison) | **Partially Working** | `strategies` table (immutable, content-addressed) | yes / partial / yes | kept | **No**: raw family keys, irId, hash | List works (`/strategies/by-wallet`). **Compare: Not Implemented.** Ids carried only ~24 bits (bug B6). |
 | 6 | Execute (compatibility, compile, authorization, execution) | **Working** | Aqua registry + router on Sepolia, real receipts | yes / yes / yes | refresh-safe (send intents are reconciled) | **No**: calldata, plan hash, `signatureOk` | **Real MetaMask runs from `0x6583…d2De` (two):** approve `0x04b632a8…` + ship `0x48350bf8…` (blocks 12074436/438), approve `0x0983a2de…` + ship `0x4de0a62e…` (12074613/615), all `success`. `test:fork`: approve → ship → dock on an Anvil Sepolia fork. Two separate execution UIs existed (home and `/execute`). |
-| 7 | World ID (human authorization) | **Not available (blocked)** | — | labelled | — | partly | `WORLD_RP_ID` / `WORLD_RP_SIGNING_KEY` not configured. EIP-712 wallet authorization alone is used and labelled "World ID not configured on this server". The code path is unit-tested (`authorization.test.mjs` World signal binding). |
 | 8 | 0G Private Computer (AI inference) | **Not available (blocked)** | — | labelled with the reason | — | partly | Every live call returns `no_provider_for_trust_mode`: the key is locked to "private" trust mode and no private provider exists. The baseline is kept as primary; no fake hypothesis is shown. |
 | 9 | 0G Storage (artifacts) | **Not available (blocked)** | — | labelled with the reason | — | partly | The burner `0xe8f9…754A` has a balance of 0 on Galileo, so the archive fails fast with a faucet message. `storage.test.mjs`: unconfigured gives no refs. |
 | 10 | Reports | **Working** (no export) | `/full`, `/integrations`, `/archive` | yes / yes / yes | kept | **No**: fingerprint, `eth_getCode` | E2E visits Reports. Integration labels re-checked live (see section 3). **Download/export: Not Implemented.** |
@@ -53,7 +52,6 @@ to mark a feature "Working".
 | eip712 | VERIFIED TESTNET | 2 wallet signatures verified by the server |
 | zerog_inference | BLOCKED BY EXTERNAL DEPENDENCY | `no_provider_for_trust_mode` (key locked to "private") |
 | zerog_storage | BLOCKED BY EXTERNAL DEPENDENCY | uploader balance 0 0G on Galileo |
-| world_id | BLOCKED BY EXTERNAL DEPENDENCY | RP id / signing key not configured |
 | database | VERIFIED LIVE | migrations 0001–0003 |
 | queue | VERIFIED LIVE | BullMQ on Upstash (TLS) |
 
@@ -74,7 +72,6 @@ Two further bugs were found while testing the redesign:
 | 4 | Backtest | **Working** | Plain cards for Observed vs Simulated, now including capital utilization. Simulated lines are dashed. **What If** (`POST /investigations/:id/whatif`): width, re-centre, starting money and cost per move; not persisted; always labelled "Simulation, not observed". Default options reproduce the stored backtest byte for byte | `backtester.test.mjs` (golden plus What If isolation), `api.test.mjs` (validation), E2E 4 runs a real What If |
 | 5 | Strategy Versions | **Working** | Now a tab of Strategy. **Compare** shows two versions side by side, with changed rows highlighted and the rule-set difference. `GET /strategies/:id`. `/saved` redirects | `api.test.mjs`, E2E 4 and `ux.spec` |
 | 6 | Execute | **Working** | One 8-step guided flow on the single server-state hook:<br>1. Review<br>2. Compatibility<br>3. What will not run<br>4. Amounts<br>5. Transaction review<br>6. Authorize<br>7. Wallet confirm<br>8. Receipt<br>Dock and taker moved under Advanced. Nothing is sent without a wallet confirmation | E2E 6 (mocked wallet: rejected approve, then resume, ship, 8 of 8, and nothing sent twice). `test:fork` (approve → ship → dock on the real Aqua bytecode). The real MetaMask runs in section 1 |
-| 7 | World ID | **Not available (blocked)** | Shown in plain words: "Not set up on this server". The technical reason is in the details | `/integrations` |
 | 8 | 0G Private Computer | **Not available (blocked)** | Plain reason on Strategy, Reports and the top bar | `/integrations` |
 | 9 | 0G Storage | **Not available (blocked)** | The Reports archive section explains why, with a "Try archiving again" button | `/integrations` |
 | 10 | Reports | **Working** | A plain summary (found, strategy, performance, executed), **Download report (JSON)** of the real `/full` payload, plain integration statuses with technical labels in tooltips | E2E 4 (download filename) |
@@ -103,7 +100,7 @@ The E2E suite covers, as named in `e2e/trace.spec.ts` and `e2e/ux.spec.ts`:
 - **Every page** has no console errors and no sideways overflow, desktop and mobile.
 - **Terrain:** renders in 3D, and falls back to 2D without WebGL.
 
-**Not run (needs the user):** a new MetaMask signature and ship. Two real ones were done earlier today; see section 1, row 6. World ID and 0G need credentials or funds.
+**Not run (needs the user):** a new MetaMask signature and ship. Two real ones were done earlier today; see section 1, row 6. 0G needs credentials or funds.
 
 ## 6. Still unavailable (external, reported honestly)
 
@@ -111,9 +108,8 @@ The E2E suite covers, as named in `e2e/trace.spec.ts` and `e2e/ux.spec.ts`:
 |---|---|---|
 | 0G Private Computer inference | The API key is locked to "private" trust mode and no private provider exists (`no_provider_for_trust_mode`) | A key with a public trust mode, or a private provider |
 | 0G Storage archive | Uploader `0xe8f9…754A` has 0 0G on Galileo | Fund it from the 0G faucet, then use "Try archiving again" on Reports |
-| World ID | `WORLD_RP_ID` / `WORLD_RP_SIGNING_KEY` not set | Set both in `.env.local` |
 
-None of these is faked. The deterministic baseline remains the primary strategy, and EIP-712 wallet authorization works without World ID. The UI says so in plain words.
+None of these is faked. The deterministic baseline remains the primary strategy, and EIP-712 wallet authorization protects every execution. The UI says so in plain words.
 
 ## 7. Page-by-page UI changes
 

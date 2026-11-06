@@ -32,7 +32,7 @@ TRACE turns those logs into an evidence-backed, versioned **Strategy IR**. Every
   - Rule-by-rule compatibility with on-chain checks.
   - A deterministic SwapVM order compiled with the official SDKs.
   - Exact-amount approvals, ship and dock signed in MetaMask, and receipt and event verification.
-- **Authorization.** An EIP-712 signature bound to the strategy version, plan hash, action, a single-use challenge and an expiry, verified server-side. World ID v4 (staging) can be layered on top.
+- **Authorization.** An EIP-712 signature bound to the strategy version, plan hash, action, a single-use challenge and an expiry, verified server-side.
 - **0G Storage.** Genuine Galileo uploads with Merkle-proof read-back. A reference is shown only after a successful upload.
 
 ## Integration status (2026-11-06)
@@ -44,7 +44,6 @@ TRACE turns those logs into an evidence-backed, versioned **Strategy IR**. Every
 | Aqua swap (taker) | **BLOCKED BY EXTERNAL DEPENDENCY**: 1inch KycNFT required |
 | 0G inference | **BLOCKED BY EXTERNAL DEPENDENCY**: key fixed to *private* trust mode, no private providers available |
 | 0G Storage | **BLOCKED BY EXTERNAL DEPENDENCY**: uploader wallet needs testnet 0G |
-| World ID v4 | **BLOCKED BY EXTERNAL DEPENDENCY**: credentials not configured |
 
 Live status: `GET /integrations`, or the **Reports** screen. Details are in [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
 
@@ -53,14 +52,14 @@ Live status: `GET /integrations`, or the **Reports** screen. Details are in [doc
 Next.js (wagmi, Sepolia) ──► Express API ──► BullMQ worker ──► chain-data (viem, Sepolia)
         │  wallet signs txs        │                │            uniswap-v3 · strategy-inference (+0G Router)
         ▼                          ▼                ▼            backtester · zero-g-storage (0G Galileo)
-   Sepolia (Aqua, ERC-20)     Postgres (Supabase)  aqua-adapter (1inch SDKs) · world-auth (EIP-712 + World ID)
+   Sepolia (Aqua, ERC-20)     Postgres (Supabase)  aqua-adapter (1inch SDKs) · authorization (EIP-712)
 ```
 More detail in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 **Stack:**
 - Frontend: Next.js 14, React 18, Tailwind, wagmi 3, viem 2, TanStack Query.
 - Backend: Express, BullMQ, ioredis, pg.
-- Integrations: @1inch/aqua-sdk, @1inch/swap-vm-sdk, @0gfoundation/0g-storage-ts-sdk, @worldcoin/idkit-core.
+- Integrations: @1inch/aqua-sdk, @1inch/swap-vm-sdk, @0gfoundation/0g-storage-ts-sdk.
 - Testing: Foundry (anvil), node:test, Playwright.
 
 ## Setup
@@ -76,7 +75,6 @@ npm run build && npm run start                 # web app       → :3000
 - Required: `SEPOLIA_RPC_URL`, `DATABASE_URL`.
 - Recommended: `REDIS_URL`.
 - Optional (0G): `ZERO_G_ROUTER_URL`, `ZERO_G_API_KEY`, `ZERO_G_MODEL`, `OG_STORAGE_*`.
-- Optional (World ID): `WORLD_*`.
 
 The full template is [.env.example](.env.example). The server validates its configuration at startup, prints which variables are set (never their values), and refuses a non-Sepolia setup.
 

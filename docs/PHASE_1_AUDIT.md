@@ -39,14 +39,13 @@ TRACE API + worker (Express + BullMQ, one process) ─────── Render 
    ├── Redis (Upstash, TLS) ── BullMQ queue (TRACE_QUEUE_NAME; prod = trace-investigations-prod) + finalized-log cache
    ├── Ethereum Sepolia RPC (Infura + optional fallbacks) ── packages/chain-data
    ├── 0G Router (OpenAI-compatible inference) ── packages/strategy-inference/zero-g.ts
-   ├── 0G Storage (Galileo testnet, burner uploader) ── packages/zero-g-storage
-   └── World ID v4 (optional, staging) ── packages/world-auth/proof.ts
+   └── 0G Storage (Galileo testnet, burner uploader) ── packages/zero-g-storage
 User wallet (MetaMask) signs EIP-712 authorizations and sends approve/ship/dock itself; the server never holds a user key.
 ```
 
 **Engine packages** (`packages/*`, built to committed `dist/` by `scripts/build-packages.mjs`):
 `chain-config` (addresses, chain guard) → `strategy-ir` (types, canonical hashing, validators) → `uniswap-v3` (reconstruction)
-→ `strategy-inference` (DNA, deterministic baseline, 0G client + gate) → `backtester` → `aqua-adapter` → `world-auth` → `zero-g-storage` → `chain-data`.
+→ `strategy-inference` (DNA, deterministic baseline, 0G client + gate) → `backtester` → `aqua-adapter` → `authorization` → `zero-g-storage` → `chain-data`.
 
 **Pipeline** (`server/src/pipeline.ts` `runInvestigation` / `runStages`): fetch Sepolia history → reconstruct → pool price series
 (real Swap events) → Strategy DNA + evidence-only baseline → 0G hypothesis (gated) → backtest → archive to 0G Storage → done.
@@ -125,18 +124,11 @@ Cancellation checkpoints between stages.
 | Swap / taker side | **Blocked** (external) | Requires the 1inch KycNFT (`AQUA.kycNft`) |
 | E2E Execute tests #5/#6 | **Mocked/demo only** (tests only) | They inject a fake EIP-1193 wallet and intercept plan, authorization and transaction routes. They prove UI state handling, **not** execution, and were not executed here |
 
-### 9. World ID authorization: **Partially working** (EIP-712 wallet authorization works; World ID is **not usable**)
-- **EIP-712 authorization: Fully working.** `packages/world-auth/src/index.ts` (`AUTH_DOMAIN`, `AUTH_TYPES`, `buildTypedData`, `newChallenge`, `verifyAuthorization`);
+### 9. Wallet authorization: **Fully working** (EIP-712)
+- **EIP-712 authorization: Fully working.** `packages/authorization/src/index.ts` (`AUTH_DOMAIN`, `AUTH_TYPES`, `buildTypedData`, `newChallenge`, `verifyAuthorization`);
   routes `POST /plans/:id/challenge` (maker-only, single-use challenge, `AUTH_TTL_SECONDS = 600`), `POST /authorizations` (`db.consumeChallenge`).
   Tests: `authorization.test.mjs` ×8 and `api.test.mjs` ×4 (replay, wrong signer, expiry, tampered plan hash, non-Sepolia, scope gating) — all pass.
   Live: 4 validated authorizations by `0x6583…d2De`.
-- **World ID v4 layer: backend only.** `packages/world-auth/src/proof.ts` (`worldConfigured`, `worldRpRequest`, `verifyWorldProof`, `worldSignal`);
-  `api.ts` adds an RP request to the challenge and verifies the proof plus a single-use nullifier (`db.recordNullifier`, table `world_nullifiers`).
-  - **Not implemented:** frontend proof collection. `@worldcoin/idkit` is a dependency in `package.json` but is imported nowhere in `src/`, and the client never sends `world` to `POST /authorizations`.
-  - **Not configured:** `WORLD_APP_ID`, `WORLD_RP_ID`, `WORLD_RP_SIGNING_KEY` are missing locally and on Render.
-  - ⚠ **Enabling the credentials alone would break Verify:** when World ID is configured and no proof is sent, `api.ts` sets `validated = false`.
-  - ⚠ **Design issue:** nullifiers are unique per `(nullifier, WORLD_ACTION)`, and `WORLD_ACTION` is one fixed value, so each person could authorize only **once ever**.
-  - Agent Pass / AgentKit: **Not implemented**.
 
 ### 10. 0G Private Computer: **Blocked by an external dependency** (code complete)
 - **Code:** `packages/strategy-inference/src/zero-g.ts` `runZeroGInference` (Bearer key, optional `X-0G-Provider-Trust-Mode`, `verify_tee`, `model_not_capable` retry, JSON parsing, `tee_verified` check)
@@ -166,7 +158,7 @@ Cancellation checkpoints between stages.
 
 ### 14. Database and background workers: **Fully working**
 - **Code:** `db/migrations/0001_init.sql` (16 tables: wallets, investigations, raw_events, investigation_events, positions, strategy_dna, inference_runs, strategies, backtest_runs,
-  compatibility_reports, execution_plans, challenges, authorizations, world_nullifiers, transactions, storage_artifacts), `0002_no_positions_status.sql`, `0003_cancel_and_tx_idempotency.sql`
+  compatibility_reports, execution_plans, challenges, authorizations, transactions, storage_artifacts), `0002_no_positions_status.sql`, `0003_cancel_and_tx_idempotency.sql`
   (one live ship per plan); `scripts/migrate.mjs`; `server/src/db.ts` (`Db`); `server/src/worker.ts` (`createBullQueue`: 15-min lock, `maxStalledCount 0`, per-deployment `TRACE_QUEUE_NAME`;
   `createInMemoryQueue` fallback; `requeueDecision`); `server/src/index.ts` (DB ping retry ×5 with `DATABASE_URL_DIRECT` fallback, `requeueInterrupted`, EADDRINUSE handling).
 - **Tests:** `worker.test.mjs` ×4 (idempotent add, recovery decisions) — pass. Live: `/health` → database ok, queue bullmq.
@@ -189,7 +181,6 @@ honest integration labels.
 ## 3. Incomplete features
 - **0G inference:** code complete, never succeeded live (blocked; module 10).
 - **0G Storage:** code complete, never uploaded; backtest not archived (module 11).
-- **World ID v4:** no frontend proof flow; per-human single-use nullifier design; not configured (module 9). **Agent Pass / AgentKit:** not implemented.
 - **Aqua dock:** implemented, never executed on Sepolia. **Aqua swap:** blocked by the KycNFT.
 - **Integration status labels** for Aqua and EIP-712 are derived from DB rows (`integrations.ts`). They are accurate today because all 8 rows were checked on-chain, but they do not re-check receipts.
 - **Test coverage gaps in this environment:** live, fork and E2E suites not executed (section 0).
@@ -200,7 +191,6 @@ honest integration labels.
 
 ## 5. Broken features
 - **No user-facing feature is broken** on the live deployment as of `a9a562b`.
-- **Latent breakage:** setting the World ID credentials without a frontend proof flow would make every authorization fail (module 9).
 - **Production misbehaviour:** API rate limits are effectively global on Render (risk R1).
 - **Fixed during this session (not open):** invisible mobile-drawer logo (`c2d205e`); stale "below" wording (`c2d205e`); shared dev/prod queue (`a9a562b`).
 
@@ -210,7 +200,6 @@ Presence only; no values shown. Local = `.env.local` on the Mac; Render = the tr
 
 | Variable | Local | Render | Effect |
 |---|---|---|---|
-| `WORLD_APP_ID`, `WORLD_RP_ID`, `WORLD_RP_SIGNING_KEY` | missing | missing | World ID disabled (and must not be enabled before the frontend flow exists) |
 | `ZERO_G_API_KEY` | set | set | **Present but unusable:** private-tier key with no provider. Needs a standard or verified key |
 | `ZERO_G_MODEL`, `ZERO_G_TRUST_MODE`, `ZERO_G_VERIFY_TEE` | missing | missing | Defaults: `glm-4.7`, key default, `verify_tee` on |
 | `OG_STORAGE_PRIVATE_KEY` (+ RPC, indexer, address) | set | set | **Wallet unfunded:** needs testnet 0G from the faucet |
@@ -231,7 +220,6 @@ Presence only; no values shown. Local = `.env.local` on the Mac; Render = the tr
 | R2 | **No authentication on write routes**: anyone can start investigations (spends the Infura budget), compile plans, or trigger `/archive` (will spend the storage burner's 0G once funded) | Medium | `server/src/api.ts` |
 | R3 | **Shared dev/prod data stores**: local runs and scripts write to the production DB; local boot `requeueInterrupted` can pick up production investigations into the local queue | Medium | `server/src/index.ts`, env |
 | R4 | **Credentials exposed in chat on 2026-11-06** (DB password, Upstash token, 0G key, storage key): rotate | High until rotated | Supabase, Upstash, 0G, Render and `.env.local` |
-| R5 | **World ID enablement would block authorizations**, and its nullifier design allows one authorization per human ever | Medium (latent) | `api.ts` `POST /authorizations`, `db.recordNullifier` |
 | R6 | **CORS accepts any private-network / `.local` origin in production** (`isLocalDevOrigin` is not environment-gated) | Low | `server/src/api.ts` |
 | R7 | **Plaintext testnet private key on disk**: `.demo-wallet.local.json` (gitignored and not in history; testnet only) | Low | repo root |
 | R8 | **Dependency advisory**: Next 14.2.15 has a known critical `npm audit` finding whose fix is a major upgrade (recorded in memory.md; not re-checked here because there is no network) | Medium | `package.json` |
@@ -242,7 +230,6 @@ Presence only; no values shown. Local = `.env.local` on the Mac; Render = the tr
 2. **Separate dev from prod data** (R3): a dev Supabase project or schema and a dev Redis, or at minimum a guard that stops local boot from re-queuing production rows.
 3. **0G inference unblock:** a new standard or verified key (user) → one live run → record the request id, model and TEE flag as evidence.
 4. **0G Storage unblock:** fund the burner (user) → one archive with read-back → show the root hash; add the backtest artifact; consider auth or limits on `/archive` (R2).
-5. **World ID v4, done properly:** IDKit flow in `guided-execute.tsx` (using the RP request from `/challenge`), per-plan or per-execution action scoping for nullifiers, denied, expired and cancelled paths, and tests. Only then set the credentials.
 6. **Aqua evidence pack:** run dock on Sepolia from the UI; run `test:fork` on the Mac; document the tx hashes.
 7. **Run the full suites on the Mac:** `test:live`, `test:fork`, `test:e2e`; record the results in `docs/TEST_REPORT.md`.
 8. **Judge-facing docs** (README, ARCHITECTURE, INTEGRATIONS, SECURITY, DEMO_SCRIPT, FEEDBACK).

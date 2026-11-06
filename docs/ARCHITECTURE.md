@@ -19,7 +19,7 @@
 
  Execute flow (API, on demand):
    aqua-adapter  on-chain compatibility checks → SwapVM order (official 1inch SDK) → plan
-   world-auth    challenge → EIP-712 signature by the user → server verification (+ World ID)
+   authorization challenge → EIP-712 signature by the user → server verification
    aqua-adapter  receipt verification of approve / ship / dock (events + virtual balances)
 ```
 
@@ -34,7 +34,7 @@
 | `packages/strategy-inference` | Strategy DNA fingerprints, deterministic families and rules, the 0G Router client and the evidence gate. |
 | `packages/backtester` | Canonical V3 position math on real swaps, fee model from swap flow, enforced train/test split. |
 | `packages/aqua-adapter` | Rule-by-rule compatibility, on-chain checks, SwapVM compile, simulation, receipt verification. |
-| `packages/world-auth` | EIP-712 typed data and verification, World ID v4 signal, RP signing and verification. |
+| `packages/authorization` | EIP-712 typed data and server-side verification of the wallet authorization. |
 | `packages/zero-g-storage` | Genuine 0G Storage uploads with Merkle-proof read-back. |
 | `server/` | Config validation, integration probes, Express routes, BullMQ worker, Postgres layer. |
 | `src/` | Next.js app: 8 screens, wagmi wallet, network guard, real-data hooks. |
@@ -47,7 +47,7 @@ The migrations in `db/migrations/` are applied by `scripts/migrate.mjs`.
 - `strategies` are immutable and content-addressed by `ir_id`. A 0G hypothesis records its evidence baseline as `parent_ir_id`.
 - `backtest_runs` have a database-level no-look-ahead trigger.
 - `execution_plans` are immutable and have a unique `plan_hash`.
-- `challenges` are single-use and consumed atomically. They feed `authorizations` and `world_nullifiers`.
+- `challenges` are single-use and consumed atomically. They feed `authorizations`.
 - `transactions` hold receipt-verified status, confirmations, gas, whether the calldata matched the plan, and the outcome.
 - `storage_artifacts` has a row only after a successful upload.
 - Every chain-dependent row carries `chain_id` with `CHECK (chain_id = 11155111)`.

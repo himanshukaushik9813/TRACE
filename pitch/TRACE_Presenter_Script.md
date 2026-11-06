@@ -44,7 +44,7 @@ TRACE is one intelligence layer on top of an open stack.
 - **Ethereum** is the verifiable foundation. Every event TRACE reconstructs can be checked on-chain.
 - **1inch Aqua** is the execution layer. We compile supported rules into an Aqua strategy, and ships are verified on Aqua's Sepolia test deployment.
 - **0G** provides private AI inference and storage for investigation reports. That integration is built and is waiting on network access and funding.
-- **World ID** adds a proof of human before protected actions. It is built and waiting on app registration.
+- **Your wallet** approves every execution: the user signs an authorization bound to the exact plan, and the server verifies it before anything runs.
 
 We show these honestly: green means working today, amber means integrated but pending access. These are technologies we build with, not claimed partnerships.
 
@@ -87,5 +87,4 @@ Thank you.
 - **0G:**
   - inference is integrated but blocked: the private-tier key returns `no_provider_for_trust_mode`;
   - Storage is integrated but blocked because the wallet is unfunded.
-- **World ID:** built. Shipping stays disabled until the World app is registered (`WORLD_APP_ID`, `WORLD_RP_ID`, `WORLD_RP_SIGNING_KEY`).
 - **No partnership** with any listed project is claimed. The logos are the official brand files, unmodified.

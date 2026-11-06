@@ -19,7 +19,6 @@ import { api, useCurrentInvestigationId, useIntegrations, withInv, type FullInve
 const UNAVAILABLE_PLAIN: Record<string, string> = {
   zerog_inference: "The 0G AI network has no provider for TRACE's private (TEE) mode right now, so TRACE uses its evidence-only analysis instead. Nothing is faked.",
   zerog_storage: "The server's 0G archive account has no 0G test tokens to pay for storage, so reports are not archived on 0G yet.",
-  world_id: "World ID needs app credentials on the server. Every execution is still protected by your own wallet signature.",
 };
 
 function IntegrationTable() {

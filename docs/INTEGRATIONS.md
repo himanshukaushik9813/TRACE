@@ -11,7 +11,6 @@ Every integration is either working against real infrastructure or labelled with
 | 0G Private Computer (Router) inference | **BLOCKED BY EXTERNAL DEPENDENCY** | Calls go out for real and return real router request IDs. The configured key is locked to *private* (TEE) trust mode, and no model currently has a private provider, so every call fails with `no_provider_for_trust_mode`. |
 | 0G Storage (Galileo testnet) | **BLOCKED BY EXTERNAL DEPENDENCY** | Real SDK uploads are attempted; the dedicated uploader wallet has 0 balance, so they fail with `INSUFFICIENT_FUNDS` |
 | EIP-712 wallet authorization | **IMPLEMENTED BUT NOT VERIFIED** with a real MetaMask signature | Verified in tests with real secp256k1 signatures (tamper, replay, expiry, wrong signer, wrong chain) |
-| World ID v4 (staging) | **BLOCKED BY EXTERNAL DEPENDENCY** | Built; no `WORLD_RP_ID` / `WORLD_RP_SIGNING_KEY` configured |
 | Postgres (Supabase) | **VERIFIED LIVE** | Migrations applied via the IPv4 session pooler |
 | Job queue (BullMQ on Upstash Redis, TLS) | **VERIFIED LIVE** | `PING` → `PONG`; jobs processed |
 
@@ -80,8 +79,3 @@ Every integration is either working against real infrastructure or labelled with
   - The single-use challenge is consumed atomically, so a replay is rejected.
   - Execution endpoints refuse any transaction that isn't covered by a validated authorization.
   - A frontend button on its own is never treated as authorization.
-- **World ID v4 (optional layer).**
-  - The IDKit `signal` is the keccak256 of the same claims.
-  - The backend signs the RP request, forwards the proof to `developer.world.org/api/v4/verify/{rp_id}`, matches the `signal_hash` and enforces `(nullifier, action)` uniqueness.
-  - It is labelled *World ID staging — not production identity verification*.
-  - "World Agent Pass" is not an official World product; the real agent offering is AgentKit, which needs World App verification.

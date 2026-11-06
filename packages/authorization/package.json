@@ -1,0 +1,20 @@
+{
+  "name": "@trace/authorization",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Execution authorization: EIP-712 wallet signature bound to (wallet, chain, strategy version, plan hash, action, challenge, expiry), verified server-side.",
+  "dependencies": {
+    "@trace/strategy-ir": "0.1.0",
+    "viem": "^2.57.16"
+  },
+  "main": "dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "dist/index.d.ts"
+}

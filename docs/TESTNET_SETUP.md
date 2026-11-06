@@ -13,7 +13,6 @@
 | Redis | Upstash | `REDIS_URL` (`rediss://…`) |
 | 0G Router key | https://pc.0g.ai | `ZERO_G_API_KEY`. Pick a trust mode that has providers (see `GET /v1/models`). |
 | 0G Storage uploader | `cast wallet new`, then fund at https://faucet.0g.ai | `OG_STORAGE_PRIVATE_KEY` — a dedicated testnet-only burner |
-| World ID (optional) | https://developer.world.org | `WORLD_APP_ID`, `WORLD_RP_ID`, `WORLD_RP_SIGNING_KEY` (staging) |
 
 ## 3. Install and run
 ```bash

@@ -38,7 +38,7 @@ const order = [
   "strategy-inference",
   "backtester",
   "aqua-adapter",
-  "world-auth",
+  "authorization",
   "zero-g-storage",
   "chain-data",
 ];

@@ -26,8 +26,6 @@ E2E tests are **never** counted as proof of real execution.
 | 10b | Aqua **dock** | **Implemented, not verified live** | Covered only by `npm run test:fork` (Anvil fork); never run on Sepolia from the UI |
 | 10c | Aqua **swap (taker)** | **Blocked** (external) | Requires the 1inch KycNFT |
 | 11 | EIP-712 authorization (Verify) | **Working** | 4 validated authorizations in the DB, all signed by `0x6583…d2De`. Replay protection, expiry and plan binding are covered by unit tests |
-| 11b | World ID v4 (staging) | **Blocked** (not configured) | `WORLD_RP_ID / WORLD_RP_SIGNING_KEY` not set. The code path exists and is optional |
-| 11c | World **Agent Pass / AgentKit** | **Not implemented** | No AgentKit code. TRACE has no autonomous agent acting for a user today |
 | 12 | 0G Storage archival | **Blocked** (external) | Uploader `0xe8f9…754A` has 0 balance on 0G Galileo (live RPC check). `storage: []` on new investigations; no root hash is shown, which is correct |
 | 13 | Reports and Activity | **Working** | Live integration status and a JSON download. Activity for `0x6583…d2De` returns its 8 receipt-verified transactions |
 | 14 | Onboarding | **Working** | Verified live: welcome shows on first visit; **Skip** hides it for the session (survives refresh); **Don't show again** persists into a new session; **Replay the tour** restores it |
@@ -98,7 +96,6 @@ Fixes 1–2 pass typecheck and lint. They go live on Vercel after the next `git 
 |---|---|
 | 0G inference | Create a 0G Router key in **standard** (or verified) trust mode at pc.0g.ai, or confirm which models serve private mode (`GET /v1/models`). Update `ZERO_G_API_KEY` in `.env.local` and on Render |
 | 0G Storage | Fund `0xe8f9c5bA6c8c196B72989193362f3A28638a754A` at https://faucet.0g.ai, then use **Retry archive** (`POST /investigations/:id/archive`) |
-| World ID | Register the app at developer.world.org (World ID 4.0) and set `WORLD_APP_ID`, `WORLD_RP_ID`, `WORLD_RP_SIGNING_KEY`. For the **AgentKit / Agent Pass** track, confirm the Mumbai prize requirement first (see section 6) |
 | Credentials | Rotate the DB password, Upstash token and 0G key that were pasted into chat |
 
 ---
@@ -121,10 +118,6 @@ Ordered by judge impact per hour, real integrations first. Nothing is faked; eac
    exists in the IR and DNA, so this is mainly UI plus two new metrics (re-entry, price response).
 4. **0G Storage evidence:** after funding, archive report, IR and backtest; show the root hash only
    after a verified read-back; add a test.
-5. **World ID decision:** either finish World ID 4.0 (prove-human before ship, bound to plan hash,
-   action and expiry, with a denied path), or build AgentKit if the Mumbai prize requires
-   "human-backed agents". The latter needs a real agent role, such as a monitoring agent.
-   **Needs your call.**
 6. **Aqua evidence pack:** a reproducible script plus documented tx hashes for approve → ship →
    **dock** on Sepolia (dock is not yet demonstrated live), and the fork test documented.
 7. **Judge docs (Phase 7):** README, ARCHITECTURE, INTEGRATIONS, SECURITY, DEMO_SCRIPT, FEEDBACK,

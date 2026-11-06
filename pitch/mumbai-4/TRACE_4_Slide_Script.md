@@ -26,7 +26,7 @@ It's for new LPs learning how concentrated liquidity is managed, experienced LPs
 
 This is the live product on Sepolia. Let me show you."
 
-**→ Switch to the demo:** wallet → positions + 3D terrain → strategy with evidence → backtest → Aqua check → World ID approve (and one cancelled attempt) → on-chain transfer.
+**→ Switch to the demo:** wallet → positions + 3D terrain → strategy with evidence → backtest → Aqua check → sign the authorization in MetaMask → approve + ship on Sepolia (show one rejected signature: nothing runs).
 
 ## Slide 3 · Technology stack (~45 s)
 
@@ -36,11 +36,11 @@ This is the live product on Sepolia. Let me show you."
 - **Ethereum** is the proof: every finding links to its transaction.
 - **1inch Aqua** is execution: we verify the order hash, approvals and price bounds before anyone signs.
 - **0G** handles private AI inference and report storage.
-- **World ID** makes sure a real human approves execution. It's verified on our server, and replays are blocked.
+- **Your wallet signature** approves execution: it is bound to this exact plan, verified on our server, and can't be replayed.
 
 Green works today; amber is built and waiting on access."
 
-*(Update the amber pills first if World or 0G come online.)*
+*(Update the 0G pill first if it comes online.)*
 
 ## Slide 4 · Why TRACE + what's next (~60 s)
 

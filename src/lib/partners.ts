@@ -16,7 +16,7 @@
 export type PartnerLogo = { src: string; height: number; margin?: string };
 
 export type Partner = {
-  key: "uniswap" | "ethereum" | "1inch" | "0g" | "world";
+  key: "uniswap" | "ethereum" | "1inch" | "0g";
   name: string;
   /** What TRACE uses it for — a role, not an integration status. */
   role: string;
@@ -53,13 +53,6 @@ export const PARTNERS: Partner[] = [
     role: "AI compute & storage",
     source: "https://0g.ai/brandkit (Black ØG logo)",
     logo: { src: "https://0g.ai/assets/681c472ba991e2e4ca164fe6_Black-OG-Logo.svg", height: 18 },
-  },
-  {
-    key: "world",
-    name: "World",
-    role: "World ID",
-    source: "https://world.org/brand (World logo, served by world.org)",
-    logo: { src: "https://world.org/icons/worldcoin-orb-world-logo.svg", height: 18 },
   },
 ];
 

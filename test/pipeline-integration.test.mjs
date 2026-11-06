@@ -28,7 +28,7 @@ function recorder() {
   };
   return { db, rec };
 }
-const cfg = { zeroG: {}, storage: {}, world: {} };
+const cfg = { zeroG: {}, storage: {} };
 const job = (wallet) => ({ investigationId: "00000000-0000-4000-8000-0000000000bb", wallet, days: 30 });
 
 test("real wallet end to end: reconstruct → DNA → strategy → backtest says insufficient_data without prices → done", async () => {

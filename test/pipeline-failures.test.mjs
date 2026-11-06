@@ -20,7 +20,7 @@ function recorder() {
     db[m] = async () => writes.push(m);
   return { db, statuses, writes };
 }
-const cfg = { zeroG: {}, storage: {}, world: {} };
+const cfg = { zeroG: {}, storage: {} };
 const job = { investigationId: "00000000-0000-4000-8000-0000000000aa", wallet: "0x4A2268D5047E9A03c4C6A279d833337D9DD1909e", days: 30 };
 
 test("RPC failure: the investigation fails with the real error code, scrubbed, and stores nothing", async () => {

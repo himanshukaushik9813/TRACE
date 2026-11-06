@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { Search, Boxes, BrainCircuit, FlaskConical, Terminal, FileText, Activity, Menu, X, ExternalLink, Zap, Cpu, Database, ScanFace } from "lucide-react";
+import { Search, Boxes, BrainCircuit, FlaskConical, Terminal, FileText, Activity, Menu, X, ExternalLink, Zap, Cpu, Database } from "lucide-react";
 import { SEPOLIA_CHAIN_ID, explorer } from "@trace/chain-config";
 import { art } from "@/lib/assets";
 import { useIntegrations, withInv, type IntegrationStatus } from "@/lib/api";
@@ -154,7 +154,6 @@ const INTEGRATIONS = [
   { key: "aqua", label: "1inch Aqua", icon: Zap },
   { key: "zerog_inference", label: "0G Inference", icon: Cpu },
   { key: "zerog_storage", label: "0G Storage", icon: Database },
-  { key: "world_id", label: "World ID", icon: ScanFace },
 ];
 
 function IntegrationStatuses() {

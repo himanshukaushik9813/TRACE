@@ -378,7 +378,7 @@ export type FullInvestigation = {
   backtest: { result: BacktestResult; status: string; createdAt: string } | null;
   compatibility: { id: string; maker: string | null; verdict: string; report: Compatibility; createdAt: string } | null;
   plans: { id: string; maker: string; planHash: string; plan: ExecutionPlan; createdAt: string }[];
-  /** EIP-712 (+ optional World ID) authorizations for those plans, newest first. Optional: older API builds omit it. */
+  /** EIP-712 wallet authorizations for those plans, newest first. Optional: older API builds omit it. */
   authorizations?: AuthorizationRow[];
   /** TRACE-recorded Sepolia transactions for those plans, newest first. */
   transactions?: TxRow[];
@@ -391,27 +391,13 @@ export type AuthorizationRow = {
   wallet: string;
   action: string;
   validated: boolean;
-  /** World ID outcome: verified · rejected · expired · replayed · required · unavailable · not_required (older rows: not_configured · failed · skipped). */
-  worldStatus: string;
   strategyId?: string;
   strategyVersionHash?: string;
   planHash?: string;
-  /** True when a World ID nullifier (anonymous human reference) is stored with this authorization. */
-  humanBound?: boolean;
   notes?: string[];
   expiresAt: string;
   live: boolean;
   createdAt: string;
-};
-
-/** The World ID request the server issues with each challenge (see POST /plans/:id/challenge). */
-export type WorldRequest = {
-  app_id: `app_${string}`;
-  action: string;
-  environment: "staging" | "production";
-  signal: string;
-  rp_context: { rp_id: string; nonce: string; created_at: number; expires_at: number; signature: string };
-  token: string;
 };
 
 export type TxRow = {
