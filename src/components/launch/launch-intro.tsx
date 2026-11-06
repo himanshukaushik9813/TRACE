@@ -17,7 +17,7 @@ import dynamic from "next/dynamic";
 import { Component, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { BrandMark } from "@/components/brand-mark";
 import { INTRO_REPLAY_EVENT, lowPowerDevice, markIntroSeen, markIntroSession, prefersReducedMotion, readIntroMode, webglUsable, type IntroMode } from "@/lib/intro";
-import type { PartnerLogos } from "@/lib/partners";
+import { PARTNERS, type PartnerLogos } from "@/lib/partners";
 import type { SceneQuality } from "./trace-launch-scene";
 import { T, flagsAt, frozenAt, type Anchor } from "./timeline";
 import { TraceBrandReveal, CATEGORY, TAGLINE } from "./trace-brand-reveal";
@@ -145,6 +145,14 @@ export function LaunchIntro({ logos }: { logos: PartnerLogos }) {
       setMode(m);
       setPhase("playing");
       setRun((r) => r + 1);
+      if (v !== "short") {
+        // Warm the official logo files so they are ready when the cards arrive.
+        for (const p of PARTNERS) {
+          const img = new Image();
+          img.referrerPolicy = "no-referrer";
+          img.src = logos[p.key] ?? p.logo.src;
+        }
+      }
       if (v === "webgl") {
         void loadScene();
         after(SCENE_START_TIMEOUT_MS / 1000, () => {
@@ -158,7 +166,7 @@ export function LaunchIntro({ logos }: { logos: PartnerLogos }) {
       }
       if (at == null) after(HARD_LIMIT_MS / 1000, () => finish(true));
     },
-    [begin, finish],
+    [begin, finish, logos],
   );
 
   useIsoLayoutEffect(() => {

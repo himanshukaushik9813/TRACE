@@ -8,18 +8,21 @@ TRACE never draws or approximates these marks. Each logo is the brand's own file
 used unmodified. Until a file is present, the intro shows a plain text wordmark
 (the name in TRACE's UI font).
 
-## Where to put the files
+## Sources: official files, loaded from each brand's own host
 
-`public/brand/partners/<key>.svg` (or `.png` / `.webp`). The layout picks them up
-automatically on the next build or dev reload.
+Configured in `src/lib/partners.ts`. All five were checked on 2026-11-07, and each loads cross-origin from trace-eth.vercel.app.
 
-| Key | Brand | Official source | Which file |
-|---|---|---|---|
-| `uniswap` | Uniswap | uniswap.org → footer → **Brand assets** (follow the Uniswap Trademark Policy) | Lockup (unicorn + wordmark), the version for light backgrounds |
-| `ethereum` | Ethereum | https://ethereum.org/en/assets/ → "Ethereum brand assets", transparent background | **ETH logo landscape (gray)** or (purple) |
-| `1inch` | 1inch | https://1inch.com → brandbook and assets (per help.1inch.com, Rebranding FAQ) | Horizontal logo for light backgrounds |
-| `0g` | 0G | https://0g.ai/brandkit | Primary logo for light backgrounds |
-| `world` | World | https://world.org/press (media kit) | World logo (wordmark) for light backgrounds |
+| Brand | Official file | Found on |
+|---|---|---|
+| Uniswap | `raw.githubusercontent.com/Uniswap/brand-assets/main/Uniswap Brand Assets/Uniswap_horizontallogo_pink.svg` | github.com/Uniswap/brand-assets (linked as "Brand assets" from uniswap.org). The README asks users to follow the Brand Guide and Trademark Policy |
+| Ethereum | `ethereum.org/images/assets/svgs/ethereum-logo-landscape-black.svg` | ethereum.org/en/assets: "ETH logo landscape", transparent background |
+| 1inch | `1inch.com/assets/images/landing/press-room/assets/1inch_logo_black.svg` | 1inch.com/press-room: "1inch wordmark black logo", the version for light backgrounds |
+| 0G | `0g.ai/assets/681c472ba991e2e4ca164fe6_Black-OG-Logo.svg` | 0g.ai/brandkit: black ØG logo |
+| World | `world.org/icons/worldcoin-orb-world-logo.svg` | world.org (the logo World serves on its own press page). The full kit is at world.org/brand under "Download Logos" |
+
+**Self-hosting** (optional): put the same file in `public/brand/partners/<key>.svg`. The layout then serves it from TRACE's domain instead of the brand's host.
+
+If a logo fails to load, the card falls back to a plain text wordmark.
 
 ## How they are displayed (brand rules respected)
 

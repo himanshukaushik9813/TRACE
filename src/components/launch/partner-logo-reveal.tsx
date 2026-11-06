@@ -6,7 +6,7 @@
  * TRACE emblem, one after another, then all glide into their final row (SCENE 4)
  * under the heading. Logos are the brands' own files, unmodified (no rotation,
  * recolouring, shadows or stretching — the depth effect moves the card, never
- * the mark). Without a file, a plain text wordmark is shown.
+ * the mark). If a logo cannot load, a plain text wordmark is shown.
  */
 
 import { forwardRef, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
@@ -35,6 +35,7 @@ export const PartnerLogoReveal = forwardRef<PartnerCardsHandle, Props>(function 
   const cards = useRef<(HTMLElement | null)[]>([]);
   const [offsets, setOffsets] = useState<{ x: number; y: number }[] | null>(null);
   const [moving, setMoving] = useState(false); // transforms animate only after the arc is in place
+  const [failed, setFailed] = useState<Partial<Record<string, boolean>>>({}); // logo did not load → text wordmark
   useImperativeHandle(ref, () => ({ cards: () => cards.current }), []);
 
   // Measure where each card sits in the final row, and offset it to its arc position.
@@ -76,7 +77,6 @@ export const PartnerLogoReveal = forwardRef<PartnerCardsHandle, Props>(function 
         {PARTNERS.map((p, i) => {
           const on = still || i < shown;
           const off = !still && !settled && offsets ? offsets[i] : { x: 0, y: 0 };
-          const logo = logos[p.key];
           return (
             <li
               key={p.key}
@@ -92,13 +92,22 @@ export const PartnerLogoReveal = forwardRef<PartnerCardsHandle, Props>(function 
             >
               {/* The card lifts on hover; the logo inside is never transformed. */}
               <div className="rounded-md2 border border-line bg-ivory-50 px-3.5 sm:px-4 py-2.5 shadow-soft min-w-[96px] sm:min-w-[118px] flex flex-col items-center justify-center transition duration-200 hover:-translate-y-0.5 hover:border-gold/40 hover:shadow-lift">
-                <span className="h-[20px] sm:h-[22px] flex items-center">
-                  {logo ? (
-                    // Official asset, unmodified: fixed height, natural width, never stretched.
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={logo} alt={p.name} className="h-full w-auto max-w-[118px] object-contain" draggable={false} />
-                  ) : (
+                <span className="h-[24px] flex items-center justify-center">
+                  {failed[p.key] ? (
                     <span className="text-[0.92rem] sm:text-[0.98rem] font-semibold tracking-tight text-ink leading-none">{p.name}</span>
+                  ) : (
+                    // Official asset, unmodified: uniform scaling only, never stretched or recoloured.
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={logos[p.key] ?? p.logo.src}
+                      alt={p.name}
+                      className="w-auto max-w-none select-none"
+                      style={{ height: logos[p.key] ? 22 : p.logo.height, margin: logos[p.key] ? undefined : p.logo.margin }}
+                      draggable={false}
+                      referrerPolicy="no-referrer"
+                      decoding="async"
+                      onError={() => setFailed((f) => ({ ...f, [p.key]: true }))}
+                    />
                   )}
                 </span>
                 <span className="mt-1 text-[0.6rem] sm:text-[0.62rem] text-ink-600 whitespace-nowrap">{p.role}</span>
