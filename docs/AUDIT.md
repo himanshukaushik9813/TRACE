@@ -41,6 +41,7 @@ to mark a feature "Working".
 | B8 | A run cancelled mid-stage still wrote DNA, strategies, the inference run, the backtest and storage until the next stage boundary | `checkpoint()` before every write in `pipeline.ts`; the backtest `catch` re-throws the cancellation | Live: cancelled during `fetching`, then **0** rows in positions, strategies, DNA, backtest, storage and events. Worker log: "cancelled; stopped at a stage boundary" |
 | B9 | Home "Source and assumptions" printed slippage `0.003%` (the fraction 0.003 = 0.3 %) | `fmt.frac` | — |
 | B10 | `/positions/[id]` ignored an error loading the investigation; `/saved` ignored an investigation load error and showed raw family keys (`passive_concentrated`) | Error states added; `FAMILY` labels | typecheck |
+| B11 | (found in Phase 3) `investigation.fromBlock/toBlock` are Postgres bigints and reach the browser as **strings**, although the client type says `number`. Arithmetic on them silently failed (`Number.isFinite("118…")` is false) | The terrain coerces with `Number()`; the audit records the type mismatch | Live: the 3D view now renders for `0x4797…` |
 
 ## 3. Integrations (live, `GET /integrations?refresh=1`, 2026-11-06)
 

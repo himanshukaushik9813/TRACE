@@ -87,8 +87,16 @@ test("a completed investigation renders real data on every screen", async ({ pag
   const id = done.id;
 
   await page.goto(`/positions?inv=${id}`);
-  await expect(page.getByText(/reconstructed position/)).toBeVisible();
-  await expect(page.getByText(/NFT #\d+/).first()).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: /liquidity positions?/ })).toBeVisible();
+  // The 3D terrain (or its 2D fallback when the browser has no WebGL) is the hero.
+  await expect(page.getByRole("heading", { name: "Liquidity over price and time" })).toBeVisible();
+  await expect(page.locator("figure canvas, figure svg").first()).toBeVisible({ timeout: 20_000 });
+  // Cards are plain; NFT ids live behind "View details".
+  await page.getByRole("link", { name: /View details of/ }).first().click();
+  await expect(page.getByText("What went into this position")).toBeVisible();
+  await page.getByText("Technical details").click();
+  await expect(page.getByText(/#\d+/).first()).toBeVisible();
+  await expect(page.getByText("Lifecycle events")).toBeVisible();
 
   await page.goto(`/strategy?inv=${id}`);
   await expect(page.getByRole("heading", { name: "Strategy DNA" })).toBeVisible();
