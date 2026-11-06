@@ -11,7 +11,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowRight, Check, ChevronRight, ExternalLink, Search, ShieldCheck, Sparkles, Zap, type LucideIcon } from "lucide-react";
+import { ArrowRight, Check, ChevronRight, ExternalLink, Search, ShieldCheck, Zap, type LucideIcon } from "lucide-react";
 import { explorer } from "@trace/chain-config";
 import { FAMILY } from "@/components/case-file";
 import { LineChart, sig } from "@/components/charts";
@@ -207,7 +207,7 @@ function stagesFor(inv: Investigation | undefined, full: FullInvestigation | nul
 
   return [
     { title: "Analyze", subtitle: STAGE_TEXT.analyze, icon: Search, ...analyze },
-    { title: "Understand", subtitle: STAGE_TEXT.understand, icon: Sparkles, ...understand },
+    { title: "Understand", subtitle: STAGE_TEXT.understand, icon: Search, ...understand },
     { title: "Verify", subtitle: STAGE_TEXT.verify, icon: ShieldCheck, ...verify },
     { title: "Execute", subtitle: STAGE_TEXT.execute, icon: Zap, ...execute },
   ];
@@ -286,8 +286,8 @@ export function Workflow({ inv, full, exec }: { inv: Investigation | undefined; 
             >
               <StepBadge icon={s.icon} done={painted && done} dim={s.state === "waiting"} delay={i * 140} />
               <div className="min-w-0">
-                <div className="text-[0.74rem] font-semibold tracking-[0.14em] uppercase text-ink">
-                  <span className="text-gold tabular mr-1.5">{i + 1}</span>
+                <div className="text-[0.9rem] font-semibold text-ink">
+                  <span className="text-ink-600 tabular font-normal mr-1.5">{i + 1}.</span>
                   {s.title}
                   <span className="sr-only">{done ? ", complete" : s.state === "active" ? ", in progress" : ""}</span>
                 </div>
@@ -349,7 +349,7 @@ function WorkflowNow({ stage, index }: { stage: Stage; index: number }) {
   return (
     <div role="status" aria-live="polite" className="mt-3 grid sm:grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 rounded-card border border-line bg-ivory-50 px-4 py-3 text-[0.8rem]">
       <div className="font-semibold text-ink whitespace-nowrap">
-        Now: <span className="uppercase tracking-[0.12em] text-[0.72rem]">{stage.title}</span>
+        Now: {stage.title}
       </div>
       <div className="text-ink-600 min-w-0 break-words">
         {stage.status}.

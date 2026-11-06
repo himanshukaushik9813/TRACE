@@ -2,27 +2,28 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Editorial Luxury Fintech — TRACE design system */
+/* TRACE design system: a research instrument. Neutral paper, crisp ink, ruled panels;
+   brand ochre is reserved for data and the mark. */
 :root {
   color-scheme: light;
   /* Palette (spec 2.1) */
-  --canvas: #f7f3eb;
+  --canvas: #f4f3ef;
   --card: #ffffff;
-  --ivory: #f3ebdd;
+  --ivory: #eceae4;
   --ivory-50: #ffffff;
-  --line: #e9e2d6;
+  --line: #dedbd3;
   --success: #278653;
-  --stone: #e9e0d0;
+  --stone: #e2dfd8;
   --charcoal: #171714;
   --charcoal-900: #11110f;
   --graphite: #252520;
-  --gold: #b68a42;
+  --gold: #946a2b;
   --gold-300: #c6a66b;
   --gold-200: #d9c08f;
   --sage: #78866b;
   --sage-600: #344c3a;
-  --ink: #171714;
-  --ink-600: #77736a;
+  --ink: #17181b;
+  --ink-600: #5f6166;
   --cream: #f3ebdd;
   --cream-muted: #b7b0a2;
   --forest: #278653;
@@ -39,19 +40,36 @@ body {
   margin: 0;
   background: var(--canvas);
   color: var(--ink);
-  font-family: var(--font-sans), Inter, "Geist", system-ui, -apple-system,
+  font-family: var(--font-sans), "IBM Plex Sans", system-ui, -apple-system,
     "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  font-feature-settings: "cv02", "cv03", "cv04", "ss01";
+  font-size: 15px;
+  line-height: 1.5;
 }
 
-/* Headings are editorial serif */
+/* Headings: the interface face, set tight and heavy — no display serif. */
 h1, h2, h3, .serif {
-  font-family: var(--font-serif), "Playfair Display", "Cormorant Garamond",
-    Georgia, serif;
+  font-family: var(--font-sans), "IBM Plex Sans", system-ui, sans-serif;
   font-weight: 600;
-  letter-spacing: -0.01em;
-  /* Playfair defaults to old-style figures, which make "0x" read as "ox" */
+  letter-spacing: -0.018em;
   font-variant-numeric: lining-nums;
+}
+h1 { letter-spacing: -0.024em; }
+
+/* The TRACE wordmark is the only serif in the product (it is the logo). */
+.wordmark {
+  font-family: var(--font-serif), Georgia, serif;
+  font-weight: 600;
+  font-variant-numeric: lining-nums;
+}
+
+/* On-chain identifiers read as identifiers: monospace, never decorative. */
+a[href*="etherscan.io/tx/"],
+a[href*="etherscan.io/address/"],
+a[href*="etherscan.io/block/"],
+a[href*="etherscan.io/nft/"],
+.font-mono {
+  font-family: var(--font-mono), "IBM Plex Mono", ui-monospace, monospace;
+  letter-spacing: -0.01em;
 }
 
 /* Tabular numerals for financial data */
@@ -68,15 +86,7 @@ h1, h2, h3, .serif {
   color: var(--ink-600);
 }
 
-/* Subtle paper grain on light surfaces */
-.paper::before {
-  content: "";
-  position: absolute; inset: 0;
-  pointer-events: none;
-  opacity: 0.5;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.35'/></svg>");
-  mix-blend-mode: multiply;
-}
+/* (paper grain removed: texture was decoration, not information) */
 
 /* Hairline hair-rule */
 .hairline { border-color: rgba(23, 23, 20, 0.1); }
@@ -97,7 +107,7 @@ h1, h2, h3, .serif {
 
 /* Gold focus ring */
 :focus-visible {
-  outline: 2px solid var(--gold);
+  outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
 

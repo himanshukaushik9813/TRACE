@@ -21,7 +21,7 @@ export function TraceBrandReveal({ brand, identity, still, sweep }: { brand: boo
     <div className="flex flex-col items-center text-center">
       <div className="flex items-center gap-3" style={fade(brand)}>
         <BrandMark size={44} />
-        <h1 className={`serif leading-none tracking-[0.16em] text-ink text-[2.5rem] sm:text-[3.3rem] ${sweep && brand && !still ? "intro-sweep" : ""}`}>TRACE</h1>
+        <h1 className={`wordmark leading-none tracking-[0.16em] text-ink text-[2.5rem] sm:text-[3.3rem] ${sweep && brand && !still ? "intro-sweep" : ""}`}>TRACE</h1>
       </div>
       <p className="mt-2.5 text-[0.7rem] sm:text-[0.76rem] uppercase tracking-[0.28em] text-[#8A6528] font-medium" style={fade(identity)}>
         {CATEGORY}

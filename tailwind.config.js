@@ -6,12 +6,13 @@ module.exports = {
       colors: {
         // Primary backgrounds
         // Minimal light theme: canvas, white cards, warm secondary surface
+        // Paper: a neutral warm grey (not cream), white panels, quiet secondary surfaces
         ivory: {
-          DEFAULT: '#F7F3EB', // main background
-          50: '#FFFFFF', // card surface
-          100: '#F3EBDD', // secondary surface
-          200: '#E9E0D0', // warm stone
-          300: '#DDD2BC',
+          DEFAULT: '#F4F3EF', // main background
+          50: '#FFFFFF', // panel surface
+          100: '#ECEAE4', // secondary surface
+          200: '#E2DFD8', // stone
+          300: '#D3CFC6',
         },
         // Primary dark surfaces
         charcoal: {
@@ -22,7 +23,7 @@ module.exports = {
         },
         // Accents
         gold: {
-          DEFAULT: '#B68A42', // antique gold
+          DEFAULT: '#946A2B', // brand ochre (AA with white text)
           300: '#C6A66B', // muted gold
           200: '#D9C08F',
         },
@@ -33,10 +34,10 @@ module.exports = {
         },
         // Text
         ink: {
-          DEFAULT: '#171714',
-          600: '#77736A', // secondary text
+          DEFAULT: '#17181B',
+          600: '#5F6166', // secondary text (AA on paper and white)
         },
-        line: '#E9E2D6', // hairline borders
+        line: '#DEDBD3', // hairline borders
         cream: {
           DEFAULT: '#F3EBDD', // light on dark
           muted: '#B7B0A2', // muted light
@@ -48,20 +49,25 @@ module.exports = {
         graphite: '#252520',
       },
       fontFamily: {
-        serif: ['var(--font-serif)', 'Playfair Display', 'Cormorant Garamond', 'Georgia', 'serif'],
-        sans: ['var(--font-sans)', 'Inter', 'Geist', 'system-ui', 'sans-serif'],
+        // `serif` is the wordmark face only; everything else is Plex.
+        serif: ['var(--font-serif)', 'Georgia', 'serif'],
+        sans: ['var(--font-sans)', 'IBM Plex Sans', 'system-ui', 'sans-serif'],
+        mono: ['var(--font-mono)', 'IBM Plex Mono', 'ui-monospace', 'monospace'],
       },
       boxShadow: {
-        soft: '0 1px 2px rgba(23,23,20,0.04), 0 8px 24px -12px rgba(23,23,20,0.12)',
-        card: '0 1px 0 rgba(23,23,20,0.03), 0 10px 30px -18px rgba(23,23,20,0.25)',
-        glow: '0 1px 2px rgba(120,86,30,0.18), 0 6px 16px -8px rgba(182,138,66,0.55)',
-        lift: '0 1px 2px rgba(23,23,20,0.03), 0 12px 32px -20px rgba(80,62,30,0.22)',
+        // Flat, instrument-like: panels are separated by rules, not floating shadows.
+        // Only overlays (menus, tooltips, dialogs) keep a real shadow.
+        soft: '0 1px 0 rgba(23,24,27,0.04)',
+        card: '0 1px 0 rgba(23,24,27,0.04)',
+        glow: 'none',
+        lift: '0 1px 0 rgba(23,24,27,0.05)',
+        overlay: '0 12px 32px -12px rgba(23,24,27,0.28)',
       },
       borderRadius: {
-        md2: '10px',
-        lg2: '14px',
-        panel: '16px',
-        card: '14px',
+        md2: '5px',
+        lg2: '8px',
+        panel: '8px',
+        card: '8px',
       },
       letterSpacing: {
         wide2: '0.14em',

@@ -8,7 +8,7 @@
 
 import { useRouter } from "next/navigation";
 import { replayIntro } from "@/lib/intro";
-import { Search, Sparkles, X } from "lucide-react";
+import { Search, X } from "lucide-react";
 import { ONBOARDING_STEPS, hideOnboarding, markOnboarding, replayOnboarding, useMarkOnboarding, useOnboarding, useSessionSkip, type OnboardingStep } from "@/lib/onboarding";
 
 const STAGES = [
@@ -75,20 +75,19 @@ export function WelcomeCard({ onExample }: { onExample: () => void }) {
   const [skipped, skip] = useSessionSkip();
   if (!ob || ob.hidden || ob.done.seenIntro || skipped) return null;
   return (
-    <section aria-labelledby="welcome-title" className="relative mb-7 rounded-card border border-gold/45 bg-ivory-50 shadow-lift p-5 md:p-6">
+    <section aria-labelledby="welcome-title" className="relative mb-7 rounded-card border border-line bg-ivory-50 p-5 md:p-6">
       <button onClick={skip} aria-label="Skip the welcome for now" className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-md2 text-ink-600 hover:text-ink hover:bg-ivory-100">
         <X size={16} />
       </button>
-      <div className="text-[0.7rem] uppercase tracking-[0.14em] text-gold font-semibold">Welcome to TRACE</div>
-      <h2 id="welcome-title" className="serif text-[1.5rem] md:text-[1.7rem] text-ink mt-1 leading-tight">See how any wallet provides liquidity, in plain words.</h2>
+      <h2 id="welcome-title" className="text-[1.3rem] md:text-[1.45rem] text-ink leading-tight pr-8">New here? Start with a real wallet.</h2>
       <p className="text-[0.9rem] text-ink-600 mt-2 max-w-[70ch] leading-relaxed">
         Paste the address of a wallet that provides liquidity on Uniswap V3 (Sepolia test network). TRACE reads its public history, explains its strategy and shows how it performed. Nothing is signed or sent unless you choose to execute later.
       </p>
       <ol aria-label="The four stages" className="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[0.8rem] text-ink">
         {STAGES.map((s, i) => (
           <li key={s.t} className="inline-flex items-center gap-1.5" title={s.d}>
-            {i > 0 && <span aria-hidden className="text-ink-600">→</span>}
-            <span className="tabular text-gold font-semibold">{i + 1}</span>
+            {i > 0 && <span aria-hidden className="text-line mx-1">/</span>}
+            <span className="tabular text-ink-600">{i + 1}.</span>
             <span className="font-medium">{s.t}</span>
             <span className="sr-only">: {s.d}</span>
           </li>
@@ -103,7 +102,7 @@ export function WelcomeCard({ onExample }: { onExample: () => void }) {
           }}
           className="inline-flex items-center gap-2 rounded-md2 bg-gold text-white px-4 h-10 text-[0.86rem] font-medium hover:bg-[#A67C38] focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/50"
         >
-          <Sparkles size={15} /> Start with an example wallet
+          Start with an example wallet
         </button>
         <button
           onClick={() => {

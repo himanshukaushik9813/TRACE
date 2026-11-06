@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { Search, Boxes, BrainCircuit, FlaskConical, Terminal, FileText, Activity, Menu, X, ExternalLink, Zap, Cpu, Database } from "lucide-react";
 import { SEPOLIA_CHAIN_ID, explorer } from "@trace/chain-config";
-import { art } from "@/lib/assets";
 import { useIntegrations, withInv, type IntegrationStatus } from "@/lib/api";
 import { BrandMark } from "@/components/brand-mark";
 import { WalletButton, NetworkBanner } from "@/components/wallet";
@@ -73,13 +72,12 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
             onClick={onNavigate}
             aria-current={active ? "page" : undefined}
             title={item.hint}
-            className={`group flex items-center gap-3 rounded-md2 px-3 py-2.5 transition-colors ${
-              active ? "bg-gold text-white shadow-glow" : "text-ink hover:bg-ivory-100"
+            className={`group flex items-center gap-3 rounded-md2 px-3 py-2 transition-colors ${
+              active ? "bg-ivory-50 text-ink font-semibold shadow-[inset_2px_0_0_#B68A42]" : "text-ink-600 hover:text-ink hover:bg-ivory-100"
             }`}
           >
-            <Icon size={17} strokeWidth={1.6} className={active ? "text-white" : "text-ink-600 group-hover:text-ink"} />
-            <span className="text-[0.9rem] font-medium flex-1">{item.label}</span>
-            {active && <span className="h-1.5 w-1.5 rounded-full bg-white/90" />}
+            <Icon size={16} strokeWidth={1.75} className={active ? "text-gold" : "text-ink-600 group-hover:text-ink"} />
+            <span className="text-[0.9rem] flex-1">{item.label}</span>
           </Link>
         );
       })}
@@ -92,23 +90,22 @@ function ChainFooter({ onNavigate }: { onNavigate?: () => void }) {
   const ok = data?.chain.ok;
   const block = data?.chain.latestBlock ?? null;
   return (
-    <div className="relative mt-4">
-      <img src={art.lg.mountain} alt="" aria-hidden className="w-full h-24 object-cover object-top opacity-35 mix-blend-multiply pointer-events-none" style={{ maskImage: "linear-gradient(to bottom, transparent, #000 45%)", WebkitMaskImage: "linear-gradient(to bottom, transparent, #000 45%)" }} loading="lazy" />
-      <div className="px-4 pb-5 -mt-6 relative space-y-2">
-        <div className="inline-flex items-center gap-2 rounded-full border border-line bg-ivory-50 px-3 py-1.5 text-[0.76rem] font-medium text-ink">
-          <span className={`h-2 w-2 rounded-full ${isError || (data && !ok) ? "bg-brick" : ok ? "bg-forest" : "bg-ink/25"}`} />
-          {isError ? "API unreachable" : data && !ok ? "Sepolia RPC error" : "Sepolia Testnet"}
+    <div className="mt-4 border-t border-line">
+      <div className="px-4 pt-3 pb-5 space-y-2">
+        <div className="flex items-center gap-2 text-[0.78rem] text-ink">
+          <span className={`h-2 w-2 rounded-[2px] ${isError || (data && !ok) ? "bg-brick" : ok ? "bg-forest" : "bg-ink/25"}`} />
+          {isError ? "API unreachable" : data && !ok ? "Sepolia RPC error" : "Connected to Sepolia"}
         </div>
         {block != null && (
           <a
             href={explorer.block(block)}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-between rounded-md2 border border-line bg-ivory-50 px-3 py-2 text-[0.78rem] text-ink tabular hover:border-gold/40"
+            className="flex items-center justify-between text-[0.76rem] text-ink-600 tabular hover:text-ink"
             title="Latest Sepolia block read by the TRACE API"
           >
-            Block {block.toLocaleString("en-US")}
-            <ExternalLink size={13} className="text-ink-600" />
+            <span>Block {block.toLocaleString("en-US")}</span>
+            <ExternalLink size={12} />
           </a>
         )}
         <TourFooter onNavigate={onNavigate} />
@@ -122,8 +119,8 @@ function Brand() {
     <div className="flex items-center gap-2.5">
       <BrandMark />
       <div>
-        <div className="serif text-[1.35rem] tracking-tight text-ink leading-none">TRACE</div>
-        <div className="text-[0.62rem] text-ink-600 mt-1">On-Chain Strategy Intelligence</div>
+        <div className="wordmark text-[1.3rem] tracking-[0.06em] text-ink leading-none">TRACE</div>
+        <div className="text-[0.66rem] text-ink-600 mt-1">On-chain strategy intelligence</div>
       </div>
     </div>
   );
@@ -160,16 +157,16 @@ function IntegrationStatuses() {
   const { data } = useIntegrations();
   if (!data) return null;
   return (
-    <Link href="/reports#integrations" className="hidden xl:flex items-center gap-1.5" aria-label="Integration status, details in Reports">
+    <Link href="/reports#integrations" className="hidden xl:flex items-center hover:[&>span]:text-ink" aria-label="Integration status, details in Reports">
       {INTEGRATIONS.map(({ key, label, icon: Icon }) => {
         const i = data.integrations.find((x) => x.key === key);
         if (!i) return null;
         const plain = plainStatus(i.status);
         return (
-          <span key={key} className="inline-flex items-center gap-1.5 rounded-full border border-line bg-ivory-50 px-2.5 h-8 text-[0.74rem] font-medium text-ink whitespace-nowrap" title={`${label}: ${plain.label}. ${i.detail}`}>
-            <Icon size={13} strokeWidth={1.8} className="text-gold" />
+          <span key={key} className="inline-flex items-center gap-1.5 px-2.5 h-7 text-[0.74rem] text-ink-600 whitespace-nowrap border-l border-line first:border-l-0" title={`${label}: ${plain.label}. ${i.detail}`}>
+            <Icon size={13} strokeWidth={1.75} className="text-ink-600" />
             {label}
-            <span className={`h-1.5 w-1.5 rounded-full ${DOT[i.status] ?? "bg-ink/25"}`} aria-hidden />
+            <span className={`h-1.5 w-1.5 rounded-[1px] ${DOT[i.status] ?? "bg-ink/25"}`} aria-hidden />
             <span className="sr-only">: {plain.label}</span>
           </span>
         );
@@ -182,22 +179,19 @@ function Topbar({ onMenu }: { onMenu: () => void }) {
   const path = usePathname();
   const title = NAV.find((n) => isActive(n, path))?.label ?? (path.startsWith("/case-study") ? "Case study" : "TRACE");
   return (
-    <header className="sticky top-0 z-30 bg-ivory/90 backdrop-blur-md border-b border-line">
-      <div className="flex items-center gap-3 px-4 md:px-8 h-16">
+    <header className="sticky top-0 z-30 bg-ivory border-b border-line">
+      <div className="flex items-center gap-3 px-4 md:px-8 h-14">
         <button onClick={onMenu} className="lg:hidden grid place-items-center h-9 w-9 rounded-md2 border border-line bg-ivory-50" aria-label="Open navigation">
           <Menu size={17} />
         </button>
-        <div className="min-w-0">
-          <div className="text-[0.66rem] text-ink-600 leading-none">TRACE /</div>
-          <div className="serif text-[1.15rem] text-ink leading-tight truncate">{title}</div>
-        </div>
+        <div className="min-w-0 text-[1.05rem] font-semibold text-ink leading-tight truncate">{title}</div>
         <div className="flex-1" />
         <IntegrationStatuses />
         <span
-          className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-gold/30 bg-gold/10 px-3 h-8 text-[0.76rem] font-medium text-[#8A6528] whitespace-nowrap"
+          className="hidden sm:inline-flex items-center gap-1.5 rounded-md2 border border-line bg-ivory-50 px-2.5 h-8 text-[0.76rem] font-medium text-ink whitespace-nowrap"
           title={`Ethereum Sepolia testnet, chain id ${SEPOLIA_CHAIN_ID}. TRACE never connects to mainnet.`}
         >
-          <span className="h-1.5 w-1.5 rounded-full bg-gold" /> Sepolia Testnet
+          <span className="h-1.5 w-1.5 rounded-[1px] bg-gold" /> Sepolia testnet
         </span>
         <WalletButton />
       </div>

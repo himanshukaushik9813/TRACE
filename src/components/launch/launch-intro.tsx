@@ -246,7 +246,7 @@ export function LaunchIntro({ logos }: { logos: PartnerLogos }) {
         <div className="absolute inset-0 grid place-items-center">
           <div className="flex flex-col items-center">
             <BrandMark size={52} />
-            <div className="serif mt-3 leading-none tracking-[0.18em] text-ink text-[2.6rem]">TRACE</div>
+            <div className="wordmark mt-3 leading-none tracking-[0.18em] text-ink text-[2.6rem]">TRACE</div>
           </div>
         </div>
       ) : (

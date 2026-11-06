@@ -1,12 +1,11 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Crosshair, Plus, RotateCcw, Search, Sparkles, Wallet } from "lucide-react";
+import { ChevronDown, ChevronRight, Crosshair, Plus, RotateCcw, Search, Wallet } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { isAddress } from "@trace/chain-config";
 import { Page } from "@/components/page";
 import { EmptyState, ErrorState, Pill } from "@/components/ui";
-import { EngineMark, type EngineState } from "@/components/engine-mark";
 import { Term } from "@/components/term";
 import { WelcomeCard } from "@/components/welcome";
 import { markOnboarding, useMarkOnboarding } from "@/lib/onboarding";
@@ -85,35 +84,34 @@ export default function InvestigatePage() {
 
   /** Once a case is open the hero steps back so the findings come first. */
   const compact = Boolean(invId && inv);
-  const engine: EngineState = running || submitting ? "working" : fullData ? "ready" : "idle";
   const recentList = (recent.data?.investigations ?? []).filter((r, i, all) => all.findIndex((x) => x.wallet.toLowerCase() === r.wallet.toLowerCase()) === i).slice(0, 8);
 
   return (
     <Page>
       {!compact && <WelcomeCard onExample={() => run(EXAMPLE_WALLET)} />}
       {/* 1. What TRACE does + the wallet input (the one thing to do first) */}
-      <section className="grid lg:grid-cols-[minmax(0,1fr)_300px] xl:grid-cols-[minmax(0,1fr)_360px] items-center gap-6 lg:gap-10">
+      <section>
         <div className="min-w-0">
           {compact ? (
-            <h1 className="serif text-[1.6rem] md:text-[1.9rem] leading-tight text-ink">Investigate another wallet</h1>
+            <h1 className="text-[1.5rem] md:text-[1.75rem] leading-tight text-ink">Investigate another wallet</h1>
           ) : (
             <>
-              <h1 className="serif text-[2.2rem] md:text-[3.1rem] leading-[1.06] text-ink max-w-[20ch]">Understand how a wallet manages liquidity.</h1>
-              <p className="mt-3 text-[1rem] md:text-[1.1rem] text-ink-600 leading-relaxed max-w-[54ch]">
-                Explore real blockchain activity, discover its strategy and evaluate whether it can be recreated.
+              <h1 className="text-[2rem] md:text-[2.75rem] leading-[1.08] text-ink max-w-[22ch]">See how a wallet really manages its liquidity.</h1>
+              <p className="mt-3 text-[1rem] md:text-[1.06rem] text-ink-600 leading-relaxed max-w-[58ch]">
+                Paste a Uniswap V3 liquidity provider. TRACE rebuilds every position from Sepolia, explains the strategy behind it with evidence, and tests it on real past swaps.
               </p>
             </>
           )}
 
           <form
-            className={`${compact ? "mt-4" : "mt-7"} flex flex-col sm:flex-row gap-2 rounded-card border border-gold/40 bg-ivory-50 p-2 shadow-lift max-w-[720px] focus-within:border-gold`}
+            className={`${compact ? "mt-4" : "mt-7"} flex flex-col sm:flex-row gap-2 rounded-lg2 border border-ink/20 bg-ivory-50 p-1.5 max-w-[720px] focus-within:border-ink/50`}
             onSubmit={(e) => {
               e.preventDefault();
               run();
             }}
           >
             <label className="flex items-center gap-3 px-3 flex-1 min-w-0">
-              <Search size={19} strokeWidth={1.6} className="text-gold shrink-0" aria-hidden />
+              <Search size={18} strokeWidth={1.75} className="text-ink-600 shrink-0" aria-hidden />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -145,7 +143,7 @@ export default function InvestigatePage() {
               <button
                 type="submit"
                 disabled={submitting}
-                className="flex-1 sm:flex-none inline-flex items-center justify-center rounded-md2 bg-gold text-white px-7 h-11 text-[0.92rem] font-medium shadow-glow hover:bg-[#A67C38] disabled:opacity-50"
+                className="flex-1 sm:flex-none inline-flex items-center justify-center rounded-md2 bg-ink text-white px-7 h-11 text-[0.92rem] font-medium hover:bg-[#2B2D33] disabled:opacity-50"
               >
                 {submitting ? "Starting…" : "Investigate"}
               </button>
@@ -160,14 +158,14 @@ export default function InvestigatePage() {
             <button
               onClick={() => run(EXAMPLE_WALLET)}
               disabled={submitting}
-              className="inline-flex items-center gap-1.5 rounded-full border border-gold/45 bg-ivory-50 px-3.5 h-9 font-medium text-ink hover:bg-ivory-100 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-md2 border border-line bg-ivory-50 px-3 h-9 font-medium text-ink hover:border-ink/30 disabled:opacity-50"
               title={`A real Sepolia liquidity provider: ${EXAMPLE_WALLET} (WETH/USDC). Investigated and verified by TRACE.`}
             >
-              <Sparkles size={14} className="text-gold" /> Try an example wallet
+              <Crosshair size={14} className="text-ink-600" /> Try an example wallet
             </button>
             {wallet.connected && wallet.address && (
-              <button onClick={() => run(wallet.address!)} disabled={submitting} className="inline-flex items-center gap-1.5 rounded-full border border-line bg-ivory-50 px-3.5 h-9 text-ink-600 hover:text-ink disabled:opacity-50">
-                <Wallet size={13} className="text-gold" /> Use my wallet <span className="tabular">{fmt.addr(wallet.address)}</span>
+              <button onClick={() => run(wallet.address!)} disabled={submitting} className="inline-flex items-center gap-1.5 rounded-md2 border border-line bg-ivory-50 px-3 h-9 text-ink-600 hover:text-ink disabled:opacity-50">
+                <Wallet size={13} className="text-ink-600" /> Use my wallet <span className="tabular">{fmt.addr(wallet.address)}</span>
               </button>
             )}
           </div>
@@ -198,12 +196,11 @@ export default function InvestigatePage() {
             </div>
           )}
         </div>
-        <EngineMark state={engine} className={`hidden lg:block h-auto ${compact ? "w-[220px] justify-self-end" : "w-full"}`} />
       </section>
 
       {/* 2. The four stages: an explainer before a run, live status during and after it */}
       <div className="mt-9 lg:mt-7">
-        {!inv && <h2 className="text-[0.78rem] font-semibold uppercase tracking-[0.14em] text-ink-600 mb-2.5">How it works</h2>}
+        {!inv && <h2 className="text-[0.95rem] font-semibold text-ink mb-2.5">How it works</h2>}
         <Workflow inv={inv} full={fullData} exec={fullData ? exec : null} />
         {inv && (
           <div className="mt-2.5 px-1 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[0.76rem]">
