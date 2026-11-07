@@ -429,8 +429,11 @@ export type SuggestedWallet = { wallet: string; mints: number; lastBlock: number
 export function useSuggestedWallets() {
   return useQuery({
     queryKey: ["suggested"],
-    queryFn: () => api<{ wallets: SuggestedWallet[]; source: string; computedAt: string }>("/wallets/suggested"),
+    queryFn: () => api<{ wallets: SuggestedWallet[]; source: string; computedAt: string; stale?: boolean }>("/wallets/suggested"),
     staleTime: 10 * 60_000,
+    // Optional list: a 503 means the Sepolia RPC is rate-limiting the scan and the
+    // server has set a back-off. Don't hammer it; the list simply stays hidden.
+    retry: (n, err) => !(err instanceof ApiError && err.status === 503) && n < 1,
   });
 }
 
@@ -468,7 +471,7 @@ export function useRecentInvestigations(wallet?: string | null) {
   return useQuery({
     queryKey: ["recent", wallet ?? null],
     queryFn: () =>
-      api<{ investigations: { id: string; wallet: string; status: InvestigationStatus; error: string | null; createdAt: string; counts: ReconstructionSummary["counts"] | null }[] }>(
+      api<{ investigations: { id: string; wallet: string; status: InvestigationStatus; error: string | null; createdAt: string; fromTs?: number | null; toTs?: number | null; counts: ReconstructionSummary["counts"] | null }[] }>(
         `/investigations/recent?limit=30${wallet ? `&wallet=${wallet}` : ""}`,
       ),
     refetchInterval: 15_000,

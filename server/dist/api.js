@@ -35,6 +35,7 @@ import { buildTypedData, newChallenge, verifyAuthorization } from "@trace/author
 import { archive } from "@trace/zero-g-storage";
 import { runBacktest } from "@trace/backtester";
 import { buildCaseStudy } from "@trace/strategy-inference";
+import { createSuggestedWallets } from "./suggested.js";
 import { integrationSnapshot } from "./integrations.js";
 /** Actions a signed authorization can cover, and the plan steps each allows. */
 export const ACTIONS = {
@@ -94,6 +95,24 @@ function pickBasis(metas, tokenId) {
 }
 /** Real pool price series per (pool, window), reused across What If requests in this process. */
 const seriesCache = new Map();
+/** Parse /activity paging parameters. Absent parameters keep the original behaviour (50, no cursor). */
+export function activityPage(q) {
+    let limit = 50;
+    if (q.limit !== undefined) {
+        const n = Number(q.limit);
+        if (!Number.isInteger(n) || n < 1 || n > 100)
+            return { error: "limit must be an integer between 1 and 100" };
+        limit = n;
+    }
+    let before = null;
+    if (q.before !== undefined) {
+        const t = typeof q.before === "string" ? Date.parse(q.before) : NaN;
+        if (!Number.isFinite(t))
+            return { error: "before must be an ISO timestamp" };
+        before = new Date(t).toISOString();
+    }
+    return { limit, before };
+}
 export function createApi(deps) {
     const { db, queue, cfg } = deps;
     const app = express();
@@ -149,14 +168,18 @@ export function createApi(deps) {
     app.get("/integrations", h(async (req, res) => {
         res.json(await integrationSnapshot(cfg, db, queue.backend, req.query.refresh === "1"));
     }));
-    let suggested = null;
+    // Cached 10 min; on an RPC rate limit it serves the last good list or a 503
+    // with Retry-After instead of failing as a 500 (see suggested.ts).
+    const suggested = createSuggestedWallets(async () => {
+        const chain = createTraceClient({ rpcUrl: cfg.sepoliaRpcUrl, fallbackRpcUrls: cfg.sepoliaFallbackRpcUrls });
+        const wallets = await chain.findActiveLpWallets(5, 50_000);
+        return { wallets, source: "Live scan of Uniswap V3 position mints on Sepolia (last ~50,000 blocks), ranked by real swaps in each wallet's pool (last ~10,000 blocks)", computedAt: new Date().toISOString() };
+    });
     app.get("/wallets/suggested", h(async (_req, res) => {
-        if (!suggested || Date.now() - suggested.at > 10 * 60_000) {
-            const chain = createTraceClient({ rpcUrl: cfg.sepoliaRpcUrl, fallbackRpcUrls: cfg.sepoliaFallbackRpcUrls });
-            const wallets = await chain.findActiveLpWallets(5, 50_000);
-            suggested = { at: Date.now(), data: { wallets, source: "Live scan of Uniswap V3 position mints on Sepolia (last ~50,000 blocks), ranked by real swaps in each wallet's pool (last ~10,000 blocks)", computedAt: new Date().toISOString() } };
-        }
-        res.json(suggested.data);
+        const r = await suggested();
+        if (r.status === 503)
+            res.setHeader("Retry-After", String(r.retryAfterSec));
+        res.status(r.status).json(r.body);
     }));
     /* ---------------- investigations ---------------- */
     /** Cancel a run: drop its queued job if it hasn't started; a running job stops at its next stage. */
@@ -721,15 +744,27 @@ export function createApi(deps) {
         const [fresh] = await db.query(`select * from transactions where tx_hash = $1`, [P(req, "hash")]);
         res.json(fresh);
     }));
+    /**
+     * A wallet's investigations (newest first) and its TRACE transactions.
+     * Optional paging, backward compatible: `limit` (1–100, default 50) and
+     * `before` (ISO time; only investigations created earlier). With neither, the
+     * response is the same as before, plus `hasMore`. Nothing is ever deleted.
+     */
     app.get("/activity/:wallet", h(async (req, res) => {
         if (!isAddress(P(req, "wallet")))
             return bad(res, "invalid wallet");
-        const [investigations, transactions] = await Promise.all([
+        const page = activityPage(req.query);
+        if ("error" in page)
+            return bad(res, page.error);
+        const params = [P(req, "wallet"), page.limit + 1];
+        if (page.before)
+            params.push(page.before);
+        const [rows, transactions] = await Promise.all([
             db.query(`select id, wallet, status, error, created_at as "createdAt", updated_at as "updatedAt", (summary_json->'counts') as counts
-           from investigations where lower(wallet) = lower($1) order by created_at desc limit 50`, [P(req, "wallet")]),
+           from investigations where lower(wallet) = lower($1)${page.before ? " and created_at < $3" : ""} order by created_at desc limit $2`, params),
             db.listTransactions({ wallet: P(req, "wallet") }),
         ]);
-        res.json({ investigations, transactions });
+        res.json({ investigations: rows.slice(0, page.limit), hasMore: rows.length > page.limit, transactions });
     }));
     // Error handler: scrubbed message, no stack traces to clients.
     app.use((err, _req, res, _next) => {

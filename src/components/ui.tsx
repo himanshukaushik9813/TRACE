@@ -148,13 +148,32 @@ export function EmptyState({ title, children, icon }: { title: string; children?
   );
 }
 
-export function ErrorState({ title = "Something went wrong", message }: { title?: string; message: string }) {
+export function ErrorState({
+  title = "Something went wrong",
+  message,
+  detail,
+  action,
+}: {
+  title?: string;
+  message: string;
+  /** Technical detail (e.g. the server's error text), folded away under the message. */
+  detail?: string;
+  /** Optional recovery control, e.g. a "Try again" button. */
+  action?: ReactNode;
+}) {
   return (
     <div className="rounded-card border border-brick/30 bg-brick/5 p-4 flex gap-3 items-start" role="alert">
       <AlertTriangle size={17} className="text-brick shrink-0 mt-0.5" />
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <div className="text-brick font-medium text-[0.9rem]">{title}</div>
         <div className="text-[0.82rem] text-brick/90 mt-0.5 break-words">{message}</div>
+        {detail && detail !== message && (
+          <details className="mt-1.5 text-[0.76rem] text-ink-600">
+            <summary className="w-fit hover:text-ink">Technical detail</summary>
+            <div className="mt-1 break-words [overflow-wrap:anywhere]">{detail}</div>
+          </details>
+        )}
+        {action && <div className="mt-3">{action}</div>}
       </div>
     </div>
   );

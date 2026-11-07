@@ -12,7 +12,10 @@ import { fmt } from "@/lib/format";
 import { api, useCurrentInvestigationId, useInvestigationStatus, withInv, type TxRow } from "@/lib/api";
 
 type ActivityTx = TxRow & { investigation?: string; family?: string; investigated_wallet?: string; plan_tokens?: { address: string; symbol: string }[] | null };
-type ActivityResp = { investigations: { id: string; status: string; error: string | null; createdAt: string; counts: { positions: number; events: number } | null }[]; transactions: ActivityTx[] };
+type ActivityInv = { id: string; status: string; error: string | null; createdAt: string; counts: { positions: number; events: number } | null };
+// `hasMore` is sent by API versions with paging; older versions omit it (treated as false).
+type ActivityResp = { investigations: ActivityInv[]; transactions: ActivityTx[]; hasMore?: boolean };
+const PAGE = 10;
 
 /** "Approved WETH", "Strategy sent to Aqua": what each transaction did, in plain words. */
 function plainOp(t: ActivityTx): string {
@@ -36,6 +39,41 @@ export default function ActivityPage() {
     if (!wallet && (w.address || inv.data?.wallet)) setWallet(w.address ?? inv.data!.wallet);
   }, [w.address, inv.data, wallet]);
   const q = useQuery({ queryKey: ["activity", wallet], queryFn: () => api<ActivityResp>(`/activity/${wallet}`), enabled: isAddress(wallet), refetchInterval: 15_000 });
+
+  // Investigations: show 10 at a time. "Load more" reveals rows already loaded,
+  // then asks the API for older ones (`before` the oldest shown). Every real
+  // record stays reachable; nothing is deleted or hidden for good.
+  const [shown, setShown] = useState(PAGE);
+  const [older, setOlder] = useState<{ rows: ActivityInv[]; hasMore: boolean } | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [moreErr, setMoreErr] = useState<string | null>(null);
+  useEffect(() => {
+    setShown(PAGE);
+    setOlder(null);
+    setMoreErr(null);
+  }, [wallet]);
+  const allInv: ActivityInv[] = [];
+  const seen = new Set<string>();
+  for (const i of [...(q.data?.investigations ?? []), ...(older?.rows ?? [])]) if (!seen.has(i.id) && seen.add(i.id)) allInv.push(i);
+  const serverHasMore = older ? older.hasMore : Boolean(q.data?.hasMore);
+  const visibleInv = allInv.slice(0, shown);
+  const canShowMore = shown < allInv.length || serverHasMore;
+  const loadMore = async () => {
+    setMoreErr(null);
+    if (shown < allInv.length) return setShown((n) => n + PAGE);
+    const oldest = allInv[allInv.length - 1];
+    if (!oldest) return;
+    setLoadingMore(true);
+    try {
+      const r = await api<ActivityResp>(`/activity/${wallet}?limit=50&before=${encodeURIComponent(oldest.createdAt)}`);
+      setOlder((o) => ({ rows: [...(o?.rows ?? []), ...r.investigations], hasMore: Boolean(r.hasMore) }));
+      setShown((n) => n + PAGE);
+    } catch (e) {
+      setMoreErr((e as Error).message);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   // Transactions grouped by the investigation whose strategy they executed.
   const groups = new Map<string, ActivityTx[]>();
@@ -103,11 +141,11 @@ export default function ActivityPage() {
             </div>
           )}
           <SectionTitle eyebrow="Investigations run on this wallet" title="Investigations" />
-          {q.data.investigations.length === 0 ? (
+          {allInv.length === 0 ? (
             <EmptyState title="No investigations of this wallet" />
           ) : (
             <Card pad={false} className="divide-y divide-ink/8">
-              {q.data.investigations.map((i) => (
+              {visibleInv.map((i) => (
                 <Link key={i.id} href={withInv("/reports", i.id)} className="px-5 py-3 flex flex-wrap items-center gap-3 text-[0.84rem] hover:bg-ink/3">
                   <span className="tabular text-ink-600 whitespace-nowrap">{new Date(i.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
                   <span className="flex-1 text-ink">{i.counts ? `${fmt.count(i.counts.positions, "position")}, ${fmt.count(i.counts.events, "event")}` : i.status === "no_positions" ? "No Uniswap V3 positions in the window" : (i.error ?? plainInvStatus[i.status] ?? i.status).slice(0, 100)}</span>
@@ -115,6 +153,25 @@ export default function ActivityPage() {
                 </Link>
               ))}
             </Card>
+          )}
+          {allInv.length > 0 && (
+            <div className="mt-3 flex flex-wrap items-center gap-3 text-[0.78rem] text-ink-600">
+              <span className="tabular">
+                Showing {visibleInv.length} of {allInv.length}
+                {serverHasMore ? "+" : ""} investigations
+              </span>
+              {canShowMore && (
+                <button
+                  type="button"
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  className="inline-flex items-center rounded-md2 border border-line bg-ivory-50 px-3 h-9 text-[0.84rem] font-medium text-ink hover:border-ink/25 disabled:opacity-50"
+                >
+                  {loadingMore ? "Loading…" : "Load more"}
+                </button>
+              )}
+              {moreErr && <span className="text-brick">Could not load older investigations: {moreErr}</span>}
+            </div>
           )}
           <div className="text-[0.72rem] text-ink-600 mt-3">Wallet <ExplorerLink kind="address" value={wallet}>{fmt.addr(wallet)}</ExplorerLink> on Sepolia Etherscan.</div>
         </>

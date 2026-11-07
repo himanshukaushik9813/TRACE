@@ -662,7 +662,7 @@ function RangeMeter({ lower, upper, current }: { lower: number; upper: number; c
   );
 }
 
-export function BestExecution({ full, invId, exec }: { full: FullInvestigation | null; invId: string | null; exec: AquaExecution }) {
+export function BestExecution({ full, invId, exec, pendingNote }: { full: FullInvestigation | null; invId: string | null; exec: AquaExecution; pendingNote?: string }) {
   const integ = useIntegrations();
   const aqua = integ.data?.integrations.find((i) => i.key === "aqua");
   const aquaBlocked = aqua?.status === "BLOCKED BY EXTERNAL DEPENDENCY" || aqua?.status === "NOT IMPLEMENTED";
@@ -679,7 +679,7 @@ export function BestExecution({ full, invId, exec }: { full: FullInvestigation |
   let reason: string | null = null; // why the button is disabled
   let action: string;
   if (!full) {
-    action = "Investigate a wallet to see whether its strategy can run on 1inch Aqua.";
+    action = pendingNote ?? "Investigate a wallet to see whether its strategy can run on 1inch Aqua.";
     reason = "Needs a completed investigation.";
   } else if (aquaBlocked) {
     action = "Execution unavailable on this network.";
