@@ -1,6 +1,6 @@
 import { TraceMarkSvg } from "@/components/brand-mark";
 import type { Metadata } from "next";
-import { IBM_Plex_Mono, IBM_Plex_Sans, Playfair_Display } from "next/font/google";
+import { IBM_Plex_Mono, Inter, Playfair_Display } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 import { existsSync } from "node:fs";
@@ -27,9 +27,9 @@ function partnerLogos(): PartnerLogos {
   return out;
 }
 
-// Interface + data: IBM Plex Sans (engineered for dense, numeric UI). Hashes and
-// addresses: IBM Plex Mono. The serif is kept for the TRACE wordmark only.
-const plex = IBM_Plex_Sans({
+// Body and UI: Inter (tabular figures for data). Page titles and the wordmark:
+// Playfair Display. Hashes and addresses: IBM Plex Mono.
+const inter = Inter({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
   variable: "--font-sans",
@@ -45,7 +45,7 @@ const plexMono = IBM_Plex_Mono({
 
 const wordmark = Playfair_Display({
   subsets: ["latin"],
-  weight: ["600", "700"],
+  weight: ["500", "600", "700"],
   variable: "--font-serif",
   display: "swap",
 });
@@ -64,7 +64,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     // data-intro* attributes are set before paint by the boot script and by <LaunchIntro>.
-    <html lang="en" className={`${plex.variable} ${plexMono.variable} ${wordmark.variable}`} suppressHydrationWarning>
+    <html lang="en" className={`${inter.variable} ${plexMono.variable} ${wordmark.variable}`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: INTRO_BOOT_SCRIPT }} />
       </head>

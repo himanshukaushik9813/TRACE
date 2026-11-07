@@ -349,7 +349,7 @@ function Slab({ s, sc, hovered, onHover, onOpen, still, hoverEvent, onHoverEvent
             <div className="text-[0.8rem] font-semibold text-ink">{s.label}</div>
             <div className="text-[0.72rem] text-ink-600">{s.detail}</div>
             {s.inRangeShare != null && <div className="text-[0.72rem] text-ink">In range {Math.round(s.inRangeShare * 100)}% of the time it was open</div>}
-            <div className="text-[0.68rem] text-[#8A6528] mt-0.5">Click to open</div>
+            <div className="text-[0.68rem] text-gold-700 mt-0.5">Click to open</div>
           </div>
         </Html>
       )}
@@ -411,7 +411,7 @@ function PricePath({ points, still, nowLabel, nowShort }: { points: Vector3[]; s
         {nowLabel && (
           <Html position={[-0.12, 0.9, 0]} zIndexRange={[30, 0]}>
             <div className="pointer-events-none whitespace-nowrap rounded-full border border-gold/50 bg-ivory-50/95 px-2.5 py-1 text-[0.68rem] text-ink shadow-soft" style={{ transform: "translate(-100%, -50%)" }}>
-              <span className="text-[#8A6528] font-semibold">Now</span> · {narrow ? nowShort : nowLabel}
+              <span className="text-gold-700 font-semibold">Now</span> · {narrow ? nowShort : nowLabel}
             </div>
           </Html>
         )}

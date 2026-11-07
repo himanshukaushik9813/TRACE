@@ -48,7 +48,7 @@ function IntegrationTable() {
                     {plain.tone === "bad" && UNAVAILABLE_PLAIN[i.key] ? UNAVAILABLE_PLAIN[i.key] : i.detail}
                     {plain.tone === "bad" && UNAVAILABLE_PLAIN[i.key] && (
                       <details className="mt-1">
-                        <summary className="cursor-pointer text-[0.72rem] text-ink hover:text-gold w-fit">Technical detail</summary>
+                        <summary className="cursor-pointer text-[0.72rem] text-ink hover:text-gold-700 w-fit">Technical detail</summary>
                         <div className="text-[0.72rem] mt-0.5 break-all">{i.status}: {i.detail}</div>
                       </details>
                     )}

@@ -187,7 +187,7 @@ function StrategyStory({ s, full, inv }: { s: StrategyRow; full: FullInvestigati
                 )}
                 <EvidenceTrail inv={inv} refs={r.evidenceRefs} />
                 <details className="mt-2 text-[0.76rem] text-ink-600">
-                  <summary className="cursor-pointer text-ink hover:text-gold w-fit">What could be wrong</summary>
+                  <summary className="cursor-pointer text-ink hover:text-gold-700 w-fit">What could be wrong</summary>
                   <div className="mt-1 space-y-0.5">
                     <div><span className="text-ink">Uncertainty:</span> {r.uncertainty}</div>
                     <div><span className="text-ink">Another reading:</span> {r.alternative}</div>
@@ -207,7 +207,7 @@ function StrategyStory({ s, full, inv }: { s: StrategyRow; full: FullInvestigati
       )}
       {!compat && ir.rules.length > 0 && (
         <p className="text-[0.74rem] text-ink-600 mt-2">
-          Whether each rule can run on 1inch Aqua is shown after the <Term k="aquaCompatibility">Aqua compatibility</Term> check on the <Link href={withInv("/execute", inv)} className="underline text-[#8A6528]">Execute</Link> screen.
+          Whether each rule can run on 1inch Aqua is shown after the <Term k="aquaCompatibility">Aqua compatibility</Term> check on the <Link href={withInv("/execute", inv)} className="underline text-gold-700">Execute</Link> screen.
         </p>
       )}
 
@@ -310,7 +310,7 @@ function EvidenceTrail({ inv, refs }: { inv: string; refs: string[] }) {
   if (!refs.length) return null;
   return (
     <details className="mt-2 text-[0.76rem] text-ink-600" onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
-      <summary className="cursor-pointer text-ink hover:text-gold w-fit">All {fmt.count(refs.length, "supporting transaction")}</summary>
+      <summary className="cursor-pointer text-ink hover:text-gold-700 w-fit">All {fmt.count(refs.length, "supporting transaction")}</summary>
       {q.isLoading ? (
         <div className="mt-1.5">Loading the on-chain events…</div>
       ) : q.error ? (
@@ -417,7 +417,7 @@ function VersionsPanel({ wallet, currentInv }: { wallet: string; currentInv: str
               <span className="flex items-center gap-2">
                 {s.investigation === currentInv && <Pill tone="gold">This investigation</Pill>}
                 <Pill tone={s.role === "ai_hypothesis" ? "gold" : "neutral"}>{s.role === "ai_hypothesis" ? "0G AI" : "Evidence only"}</Pill>
-                <Link href={withInv("/strategy", s.investigation)} className="text-[0.76rem] text-[#8A6528] hover:text-ink underline-offset-2 hover:underline" onClick={(e) => e.stopPropagation()}>
+                <Link href={withInv("/strategy", s.investigation)} className="text-[0.76rem] text-gold-700 hover:text-ink underline-offset-2 hover:underline" onClick={(e) => e.stopPropagation()}>
                   Open
                 </Link>
               </span>

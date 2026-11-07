@@ -61,7 +61,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const path = usePathname();
   const inv = useInvParam();
   return (
-    <nav className="flex-1 px-3 space-y-0.5 mt-2">
+    <nav className="flex-1 px-3 space-y-px mt-1">
       {NAV.map((item) => {
         const active = isActive(item, path);
         const Icon = item.icon;
@@ -72,12 +72,12 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
             onClick={onNavigate}
             aria-current={active ? "page" : undefined}
             title={item.hint}
-            className={`group flex items-center gap-3 rounded-md2 px-3 py-2 transition-colors ${
-              active ? "bg-ivory-50 text-ink font-semibold shadow-[inset_2px_0_0_#B68A42]" : "text-ink-600 hover:text-ink hover:bg-ivory-100"
+            className={`group flex items-center gap-3 rounded-md2 px-2 h-9 transition-colors ${
+              active ? "bg-ivory-50 text-ink font-semibold shadow-[inset_2px_0_0_#B68A42,0_1px_2px_rgba(23,23,20,0.04)]" : "text-ink-600 hover:text-ink hover:bg-ivory-100"
             }`}
           >
             <Icon size={16} strokeWidth={1.75} className={active ? "text-gold" : "text-ink-600 group-hover:text-ink"} />
-            <span className="text-[0.9rem] flex-1">{item.label}</span>
+            <span className="text-[0.875rem] flex-1">{item.label}</span>
           </Link>
         );
       })}
@@ -91,7 +91,7 @@ function ChainFooter({ onNavigate }: { onNavigate?: () => void }) {
   const block = data?.chain.latestBlock ?? null;
   return (
     <div className="mt-4 border-t border-line">
-      <div className="px-4 pt-3 pb-5 space-y-2">
+      <div className="px-5 pt-3 pb-4 space-y-2">
         <div className="flex items-center gap-2 text-[0.78rem] text-ink">
           <span className={`h-2 w-2 rounded-[2px] ${isError || (data && !ok) ? "bg-brick" : ok ? "bg-forest" : "bg-ink/25"}`} />
           {isError ? "API unreachable" : data && !ok ? "Sepolia RPC error" : "Connected to Sepolia"}
@@ -128,8 +128,8 @@ function Brand() {
 
 function Sidebar() {
   return (
-    <aside className="hidden lg:flex w-[248px] shrink-0 h-full flex-col bg-ivory border-r border-line relative">
-      <div className="px-5 pt-6 pb-4">
+    <aside className="hidden lg:flex w-[232px] shrink-0 h-full flex-col bg-ivory border-r border-line relative">
+      <div className="px-5 pt-5 pb-4">
         <Brand />
       </div>
       <NavLinks />
@@ -204,7 +204,7 @@ function MobileNav({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
     <>
       <div className={`lg:hidden fixed inset-0 z-40 bg-ink/20 transition-opacity ${open ? "opacity-100" : "opacity-0 pointer-events-none"}`} onClick={onClose} />
-      <aside className={`lg:hidden fixed top-0 left-0 z-50 h-full w-[270px] max-w-[85vw] bg-ivory border-r border-line flex flex-col transition-transform ${open ? "translate-x-0" : "-translate-x-full"}`}>
+      <aside className={`lg:hidden fixed top-0 left-0 z-50 h-full w-[264px] max-w-[85vw] bg-ivory border-r border-line flex flex-col transition-transform ${open ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="px-5 pt-5 pb-3 flex items-center justify-between">
           <Brand />
           <button onClick={onClose} aria-label="Close navigation" className="p-1.5 rounded-md2 hover:bg-ivory-100">
@@ -227,7 +227,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="flex-1 min-w-0 flex flex-col">
         <Topbar onMenu={() => setMenu(true)} />
         <main className="relative flex-1 overflow-y-auto dark-scroll bg-ivory">
-          <div className="max-w-[1280px] mx-auto px-4 md:px-8 py-6 md:py-10">{children}</div>
+          <div className="max-w-[1280px] mx-auto px-4 md:px-8 py-6 md:py-8">{children}</div>
         </main>
       </div>
     </div>

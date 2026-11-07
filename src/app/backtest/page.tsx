@@ -117,7 +117,7 @@ function WhatIf({ inv, bt }: { inv: string; bt: BacktestResult }) {
           <span className="text-[0.68rem] block mt-1">The inferred strategy {defaultRecentre ? "does this" : "does not do this"}.</span>
         </div>
         <div className="sm:col-span-2 lg:col-span-4 flex flex-wrap items-center gap-3">
-          <button type="submit" disabled={!capOk || !slipOk || m.isPending} className="inline-flex items-center gap-2 rounded-md2 bg-gold text-white px-4 h-10 text-[0.86rem] font-medium hover:bg-[#A67C38] disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/50">
+          <button type="submit" disabled={!capOk || !slipOk || m.isPending} className="inline-flex items-center gap-2 rounded-md2 bg-gold-700 text-white px-4 h-10 text-[0.86rem] font-medium hover:bg-gold-800 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/50">
             {m.isPending && <Loader2 size={15} className="animate-spin" />} Run simulation
           </button>
           <button

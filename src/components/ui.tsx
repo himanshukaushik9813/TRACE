@@ -39,7 +39,7 @@ export function SectionTitle({
     <div className="section-title flex flex-wrap items-end justify-between gap-x-4 gap-y-2 mb-4">
       <div>
         {eyebrow && <Label>{eyebrow}</Label>}
-        <h2 className="serif text-xl md:text-2xl leading-tight mt-1 text-ink">{title}</h2>
+        <h2 className="text-[1.125rem] md:text-[1.25rem] leading-snug mt-1 text-ink">{title}</h2>
       </div>
       {action}
     </div>
@@ -55,8 +55,8 @@ export function Pill({
   tone?: "neutral" | "gold" | "sage" | "amber" | "brick" | "forest";
 }) {
   const map: Record<string, string> = {
-    neutral: "bg-ink/5 text-ink/70 border-ink/10",
-    gold: "bg-gold/12 text-gold border-gold/30",
+    neutral: "bg-ink/5 text-ink-600 border-ink/10",
+    gold: "bg-gold/12 text-gold-700 border-gold/30",
     sage: "bg-sage/14 text-sage-600 border-sage/30",
     amber: "bg-amber/12 text-amber border-amber/30",
     brick: "bg-brick/12 text-brick border-brick/30",
@@ -64,7 +64,7 @@ export function Pill({
   };
   return (
     <span
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.68rem] font-medium tracking-wide border ${map[tone]}`}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.7rem] font-medium border whitespace-nowrap ${map[tone]}`}
     >
       {children}
     </span>
@@ -121,7 +121,7 @@ export function ExplorerLink({
     : explorer.nft(String(value));
   const text = children ?? (typeof value === "string" && value.startsWith("0x") ? `${value.slice(0, 6)}…${value.slice(-4)}` : `#${value}`);
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" className={`inline-flex items-center gap-1 tabular underline decoration-gold/40 underline-offset-2 hover:text-gold ${className}`}>
+    <a href={href} target="_blank" rel="noopener noreferrer" className={`inline-flex items-center gap-1 tabular underline decoration-gold/40 underline-offset-2 hover:text-gold-700 ${className}`}>
       {text}
       <ExternalLink size={11} className="opacity-60" />
     </a>
@@ -138,7 +138,7 @@ export function LoadingState({ label = "Loading…" }: { label?: string; onDark?
 
 export function EmptyState({ title, children, icon }: { title: string; children?: ReactNode; icon?: ReactNode }) {
   return (
-    <div className="rounded-card border border-dashed border-ink/15 bg-ivory-50 p-6 flex gap-4 items-start min-w-0">
+    <div className="rounded-card border border-dashed border-ink/15 bg-ivory-50 p-5 flex gap-4 items-start min-w-0">
       <div className="h-9 w-9 grid place-items-center rounded-md2 bg-ink/5 text-ink-600 shrink-0">{icon ?? <Inbox size={17} />}</div>
       <div className="min-w-0">
         <div className="text-ink font-medium">{title}</div>
@@ -197,12 +197,14 @@ export function Button({
   className?: string;
 }) {
   const base =
-    "inline-flex items-center justify-center gap-2 rounded-md2 px-4 py-2 text-sm font-medium transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed";
+    "inline-flex items-center justify-center gap-2 rounded-md2 px-4 h-9 text-[0.875rem] font-medium transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed";
+  // primary: the one main action on a screen. gold: a brand-accented action.
+  // ghost: secondary. `dark` is kept for call-site compatibility (= primary).
   const variants: Record<string, string> = {
-    primary: "bg-ivory-50 border border-gold/45 text-ink hover:bg-ivory-100 shadow-soft",
-    dark: "bg-ivory-50 border border-gold/45 text-ink hover:bg-ivory-100 shadow-soft",
-    gold: "bg-gold text-white hover:bg-[#A67C38] shadow-glow",
-    ghost: "border border-line text-ink hover:bg-ink/5",
+    primary: "bg-ink text-white hover:bg-charcoal-700",
+    dark: "bg-ink text-white hover:bg-charcoal-700",
+    gold: "bg-gold-700 text-white hover:bg-gold-800",
+    ghost: "border border-line bg-ivory-50 text-ink hover:border-ink/25",
   };
   return (
     <button onClick={onClick} disabled={disabled} className={`${base} ${variants[variant]} ${className}`}>

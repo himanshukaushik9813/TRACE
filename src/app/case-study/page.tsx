@@ -267,12 +267,12 @@ function Observation({ o, cs }: { o: CaseObservation; cs: CaseStudy }) {
         </table>
       </div>
       {o.evidence.length > 5 && (
-        <button type="button" onClick={() => setAll((v) => !v)} className="mt-2 text-[0.76rem] text-ink underline decoration-gold/50 hover:text-gold">
+        <button type="button" onClick={() => setAll((v) => !v)} className="mt-2 text-[0.76rem] text-ink underline decoration-gold/50 hover:text-gold-700">
           {all ? "Show fewer" : `Show all ${o.evidence.length} events`}
         </button>
       )}
       {o.missingRefs.length > 0 && (
-        <p className="mt-2 text-[0.74rem] text-[#8A6528]">{fmt.count(o.missingRefs.length, "cited transaction")} not found among this investigation&apos;s events: {o.missingRefs.map((t) => fmt.addr(t)).join(", ")}</p>
+        <p className="mt-2 text-[0.74rem] text-gold-700">{fmt.count(o.missingRefs.length, "cited transaction")} not found among this investigation&apos;s events: {o.missingRefs.map((t) => fmt.addr(t)).join(", ")}</p>
       )}
       {cs.coverage.events > 0 && o.evidence.length === 0 && <p className="mt-2 text-[0.74rem] text-ink-600">No supporting events.</p>}
     </Card>
@@ -298,7 +298,7 @@ function PositionsTable({ cs, inv, onPick }: { cs: CaseStudy; inv: string; onPic
                 <td className="px-3 py-2 tabular">{bound(p, "lower")} – {bound(p, "upper")}</td>
                 <td className="px-3 py-2">
                   <Pill tone={p.status === "active" ? "forest" : "neutral"}>{p.status}</Pill>
-                  {!p.historyComplete && <div className="text-[0.7rem] text-[#8A6528] mt-1">history before window missing</div>}
+                  {!p.historyComplete && <div className="text-[0.7rem] text-gold-700 mt-1">history before window missing</div>}
                 </td>
                 <td className="px-3 py-2">{p.opened ? <ExplorerLink kind="tx" value={p.opened.tx}>{fmt.tsSec(p.opened.timestamp, false)}</ExplorerLink> : <span className="text-ink-600">before window</span>}</td>
                 <td className="px-3 py-2">{p.closed ? <ExplorerLink kind="tx" value={p.closed.tx}>{fmt.tsSec(p.closed.timestamp, false)}</ExplorerLink> : <span className="text-ink-600">{p.status === "closed" ? "emptied (not burned)" : "—"}</span>}</td>

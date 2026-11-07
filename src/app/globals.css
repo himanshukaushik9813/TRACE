@@ -2,28 +2,29 @@
 @tailwind components;
 @tailwind utilities;
 
-/* TRACE design system: a research instrument. Neutral paper, crisp ink, ruled panels;
-   brand ochre is reserved for data and the mark. */
+/* TRACE design system: premium, minimal, light only. Warm page, white cards,
+   hairline borders; gold is an accent, never decoration. 8px spacing rhythm. */
 :root {
   color-scheme: light;
-  /* Palette (spec 2.1) */
-  --canvas: #f4f3ef;
+  /* Palette (redesign brief, exact values) */
+  --canvas: #f7f3eb;
   --card: #ffffff;
-  --ivory: #eceae4;
+  --ivory: #f3ebdd;
   --ivory-50: #ffffff;
-  --line: #dedbd3;
+  --line: #e9e2d6;
   --success: #278653;
-  --stone: #e2dfd8;
+  --stone: #e9e2d6;
   --charcoal: #171714;
   --charcoal-900: #11110f;
   --graphite: #252520;
-  --gold: #946a2b;
+  --gold: #b68a42;
+  --gold-700: #8a6528;
   --gold-300: #c6a66b;
   --gold-200: #d9c08f;
   --sage: #78866b;
   --sage-600: #344c3a;
-  --ink: #17181b;
-  --ink-600: #5f6166;
+  --ink: #171714;
+  --ink-600: #77736a;
   --cream: #f3ebdd;
   --cream-muted: #b7b0a2;
   --forest: #278653;
@@ -40,22 +41,29 @@ body {
   margin: 0;
   background: var(--canvas);
   color: var(--ink);
-  font-family: var(--font-sans), "IBM Plex Sans", system-ui, -apple-system,
+  font-family: var(--font-sans), Inter, system-ui, -apple-system,
     "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   font-size: 15px;
   line-height: 1.5;
 }
 
-/* Headings: the interface face, set tight and heavy — no display serif. */
+/* Section and card headings: Inter, semibold, slightly tight. */
 h1, h2, h3, .serif {
-  font-family: var(--font-sans), "IBM Plex Sans", system-ui, sans-serif;
+  font-family: var(--font-sans), Inter, system-ui, sans-serif;
   font-weight: 600;
-  letter-spacing: -0.018em;
+  letter-spacing: -0.014em;
   font-variant-numeric: lining-nums;
 }
-h1 { letter-spacing: -0.024em; }
 
-/* The TRACE wordmark is the only serif in the product (it is the logo). */
+/* Page titles: Playfair Display. Every screen's title is its <h1>. */
+h1, h1.serif {
+  font-family: var(--font-serif), Georgia, serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+}
+
+/* The TRACE wordmark (the logo) shares the page-title serif. */
 .wordmark {
   font-family: var(--font-serif), Georgia, serif;
   font-weight: 600;
@@ -105,7 +113,7 @@ a[href*="etherscan.io/nft/"],
   animation: trace-in 1.4s ease-out forwards;
 }
 
-/* Gold focus ring */
+/* Focus ring: ink, always visible on the light surfaces */
 :focus-visible {
   outline: 2px solid var(--ink);
   outline-offset: 2px;
@@ -153,7 +161,7 @@ summary { list-style: none; cursor: pointer; }
 summary::-webkit-details-marker { display: none; }
 
 /* A section heading after other content gets breathing room; as a card's first child it sits flush */
-.section-title { margin-top: 2.25rem; }
+.section-title { margin-top: 2rem; }
 .section-title:first-child { margin-top: 0; }
 
 /* ───────────────────────── Launch intro ───────────────────────── */

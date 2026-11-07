@@ -15,7 +15,7 @@ export function NextStep({ href, title, children, label = "Continue" }: { href: 
         <div className="text-[0.95rem] font-semibold text-ink">{title}</div>
         {children && <p className="text-[0.8rem] text-ink-600 mt-0.5 leading-relaxed">{children}</p>}
       </div>
-      <Link href={href} className="inline-flex items-center justify-center gap-2 rounded-md2 bg-gold text-white px-4 h-10 text-[0.86rem] font-medium hover:bg-[#A67C38] shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/50">
+      <Link href={href} className="inline-flex items-center justify-center gap-2 rounded-md2 bg-gold-700 text-white px-4 h-10 text-[0.86rem] font-medium hover:bg-gold-800 shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/50">
         {label}
       </Link>
     </aside>

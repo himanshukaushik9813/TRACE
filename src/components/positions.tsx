@@ -130,7 +130,7 @@ export function PositionCard({ p, acct, inv, price }: { p: V3Position; acct?: Ac
       <div className="mt-auto pt-3">
         <Link
           href={withInv(`/positions/${p.tokenId}`, inv)}
-          className="mt-1 flex items-center justify-between border-t border-ink/8 pt-3 text-[0.76rem] font-medium text-[#8A6528] hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 rounded-sm"
+          className="mt-1 flex items-center justify-between border-t border-ink/8 pt-3 text-[0.76rem] font-medium text-gold-700 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 rounded-sm"
           aria-label={`View details of ${p.token0}/${p.token1} position ${p.tokenId}`}
         >
           View details <ChevronRight size={14} />

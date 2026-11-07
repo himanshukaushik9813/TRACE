@@ -100,7 +100,7 @@ export function WelcomeCard({ onExample }: { onExample: () => void }) {
             markOnboarding("seenIntro");
             onExample();
           }}
-          className="inline-flex items-center gap-2 rounded-md2 bg-gold text-white px-4 h-10 text-[0.86rem] font-medium hover:bg-[#A67C38] focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/50"
+          className="inline-flex items-center gap-2 rounded-md2 bg-gold-700 text-white px-4 h-10 text-[0.86rem] font-medium hover:bg-gold-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/50"
         >
           Start with an example wallet
         </button>

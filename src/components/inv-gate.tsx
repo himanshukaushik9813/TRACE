@@ -20,7 +20,7 @@ export function InvestigationGate({ children }: { children: (full: FullInvestiga
   if (!invId)
     return (
       <EmptyState title="No investigation selected">
-        Run an investigation on the <Link href="/" className="underline text-gold">Investigate</Link> screen first. Every screen here shows real Sepolia data for that investigation.
+        Run an investigation on the <Link href="/" className="underline text-gold-700">Investigate</Link> screen first. Every screen here shows real Sepolia data for that investigation.
       </EmptyState>
     );
   if (full.isLoading) return <LoadingState label="Loading investigation from the TRACE API…" />;

@@ -4,15 +4,14 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // Primary backgrounds
-        // Minimal light theme: canvas, white cards, warm secondary surface
-        // Paper: a neutral warm grey (not cream), white panels, quiet secondary surfaces
+        // TRACE light palette (redesign brief, exact values):
+        // background #F7F3EB, card #FFFFFF, secondary #F3EBDD, border #E9E2D6.
         ivory: {
-          DEFAULT: '#F4F3EF', // main background
-          50: '#FFFFFF', // panel surface
-          100: '#ECEAE4', // secondary surface
-          200: '#E2DFD8', // stone
-          300: '#D3CFC6',
+          DEFAULT: '#F7F3EB', // page background
+          50: '#FFFFFF', // card surface
+          100: '#F3EBDD', // secondary surface
+          200: '#E9E2D6', // stone (same as the border colour)
+          300: '#DDD3C2',
         },
         // Primary dark surfaces
         charcoal: {
@@ -22,10 +21,15 @@ module.exports = {
           700: '#252520', // dark graphite
         },
         // Accents
+        // Gold #B68A42 is for accents, fills, borders and icons (3:1 on white).
+        // Gold that must be read as text, or carry white text, uses 700/800:
+        // deeper shades of the same gold that pass WCAG AA (5.3:1 on white).
         gold: {
-          DEFAULT: '#946A2B', // brand ochre (AA with white text)
+          DEFAULT: '#B68A42',
           300: '#C6A66B', // muted gold
           200: '#D9C08F',
+          700: '#8A6528', // gold text, gold buttons
+          800: '#755521', // gold button hover
         },
         sage: {
           DEFAULT: '#78866B',
@@ -34,10 +38,10 @@ module.exports = {
         },
         // Text
         ink: {
-          DEFAULT: '#17181B',
-          600: '#5F6166', // secondary text (AA on paper and white)
+          DEFAULT: '#171714', // text
+          600: '#77736A', // secondary text
         },
-        line: '#DEDBD3', // hairline borders
+        line: '#E9E2D6', // borders
         cream: {
           DEFAULT: '#F3EBDD', // light on dark
           muted: '#B7B0A2', // muted light
@@ -49,22 +53,23 @@ module.exports = {
         graphite: '#252520',
       },
       fontFamily: {
-        // `serif` is the wordmark face only; everything else is Plex.
+        // Playfair Display: page titles and the wordmark. Inter: body and UI.
+        // IBM Plex Mono: hashes and addresses only.
         serif: ['var(--font-serif)', 'Georgia', 'serif'],
-        sans: ['var(--font-sans)', 'IBM Plex Sans', 'system-ui', 'sans-serif'],
+        sans: ['var(--font-sans)', 'Inter', 'system-ui', 'sans-serif'],
         mono: ['var(--font-mono)', 'IBM Plex Mono', 'ui-monospace', 'monospace'],
       },
       boxShadow: {
-        // Flat, instrument-like: panels are separated by rules, not floating shadows.
-        // Only overlays (menus, tooltips, dialogs) keep a real shadow.
-        soft: '0 1px 0 rgba(23,24,27,0.04)',
-        card: '0 1px 0 rgba(23,24,27,0.04)',
+        // Quiet: white cards sit on the warm page with a hairline and the
+        // faintest lift. Only overlays (menus, tooltips, dialogs) cast a shadow.
+        soft: '0 1px 2px rgba(23,23,20,0.04)',
+        card: '0 1px 2px rgba(23,23,20,0.04)',
         glow: 'none',
-        lift: '0 1px 0 rgba(23,24,27,0.05)',
-        overlay: '0 12px 32px -12px rgba(23,24,27,0.28)',
+        lift: '0 1px 2px rgba(23,23,20,0.04)',
+        overlay: '0 12px 32px -12px rgba(23,23,20,0.24)',
       },
       borderRadius: {
-        md2: '5px',
+        md2: '6px',
         lg2: '8px',
         panel: '8px',
         card: '8px',

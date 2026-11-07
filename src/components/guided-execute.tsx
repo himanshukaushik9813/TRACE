@@ -38,7 +38,7 @@ type State = "done" | "current" | "upcoming" | "blocked";
 type PlanResponse = { planId: string; plan: ExecutionPlan; compatibility: Compatibility; simulation: Record<string, { ok: boolean; error?: string }> };
 
 const BTN =
-  "inline-flex items-center justify-center gap-2 rounded-md2 bg-gold text-white px-5 h-10 text-[0.88rem] font-medium hover:bg-[#A67C38] disabled:bg-ivory-100 disabled:text-ink-600 disabled:border disabled:border-line disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/50";
+  "inline-flex items-center justify-center gap-2 rounded-md2 bg-gold-700 text-white px-5 h-10 text-[0.88rem] font-medium hover:bg-gold-800 disabled:bg-ivory-100 disabled:text-ink-600 disabled:border disabled:border-line disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/50";
 const BTN_QUIET =
   "inline-flex items-center justify-center gap-2 rounded-md2 border border-line bg-white text-ink px-4 h-10 text-[0.86rem] font-medium hover:border-gold/50 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/40";
 
@@ -50,7 +50,7 @@ function Step({ n, title, state, summary, children }: { n: number; title: string
       <div className="flex items-start gap-3">
         <span
           className={`grid h-7 w-7 shrink-0 place-items-center rounded-full text-[0.78rem] font-semibold tabular ${
-            state === "done" ? "bg-forest text-white" : state === "current" ? "bg-gold text-white" : state === "blocked" ? "bg-brick/10 text-brick border border-brick/30" : "border border-line text-ink-600"
+            state === "done" ? "bg-forest text-white" : state === "current" ? "bg-gold-700 text-white" : state === "blocked" ? "bg-brick/10 text-brick border border-brick/30" : "border border-line text-ink-600"
           }`}
           aria-hidden
         >
@@ -81,7 +81,7 @@ function TxLine({ label, tx, state }: { label: string; tx?: TxRow | null; state:
     <li className="flex flex-wrap items-center gap-2.5 text-[0.84rem]">
       <span
         className={`grid h-5 w-5 shrink-0 place-items-center rounded-full ${
-          state === "done" ? "bg-forest text-white" : state === "failed" ? "bg-brick text-white" : state === "active" ? "border border-gold/60 text-gold" : "border border-line"
+          state === "done" ? "bg-forest text-white" : state === "failed" ? "bg-brick text-white" : state === "active" ? "border border-gold/60 text-gold-700" : "border border-line"
         }`}
         aria-hidden
       >
@@ -89,7 +89,7 @@ function TxLine({ label, tx, state }: { label: string; tx?: TxRow | null; state:
       </span>
       <span className={state === "pending" ? "text-ink-600" : "text-ink"}>{label}</span>
       {tx && (
-        <a href={explorer.tx(tx.tx_hash)} target="_blank" rel="noopener noreferrer" className="ml-auto inline-flex items-center gap-1 text-[0.74rem] text-ink-600 hover:text-gold tabular">
+        <a href={explorer.tx(tx.tx_hash)} target="_blank" rel="noopener noreferrer" className="ml-auto inline-flex items-center gap-1 text-[0.74rem] text-ink-600 hover:text-gold-700 tabular">
           {fmt.hash(tx.tx_hash)} <ExternalLink size={11} />
         </a>
       )}
@@ -239,7 +239,7 @@ export function GuidedExecute({ full, invId }: { full: FullInvestigation; invId:
       </header>
 
       {recovery && (
-        <p role="status" className="mb-4 rounded-md2 border border-gold/30 bg-gold/8 px-3 py-2 text-[0.8rem] text-[#8A6528] flex items-start gap-2">
+        <p role="status" className="mb-4 rounded-md2 border border-gold/30 bg-gold/8 px-3 py-2 text-[0.8rem] text-gold-700 flex items-start gap-2">
           <Loader2 size={14} className="animate-spin mt-0.5 shrink-0" />
           {recovery.state === "checking" ? "The page reloaded while your wallet was asked to send a transaction. Checking Sepolia so it is never sent twice…" : recovery.detail}
         </p>
@@ -257,7 +257,7 @@ export function GuidedExecute({ full, invId }: { full: FullInvestigation; invId:
             ) : (
               <>
                 <span className="text-ink font-medium">{FAMILY[primary!.family] ?? primary!.family}</span>, {fmt.frac(Number(primary!.confidence), 0)} <Term k="confidence">confidence</Term>. {FAMILY_PLAIN[primary!.family] ?? ""}{" "}
-                <Link href={withInv("/strategy", invId)} className="underline text-[#8A6528]">See the evidence</Link>
+                <Link href={withInv("/strategy", invId)} className="underline text-gold-700">See the evidence</Link>
               </>
             )
           }
@@ -351,7 +351,7 @@ export function GuidedExecute({ full, invId }: { full: FullInvestigation; invId:
           state={states[3]}
           summary={
             havePlan || signed
-              ? <>Committed: {planAmounts.join(" and ") || "your amounts"}{plan?.plan.allocation ? <>, sized to the pool price at block {plan.plan.allocation.spot.block.toLocaleString("en-US")}</> : null}.{" "}{!signed && <button className="underline text-[#8A6528]" onClick={() => setEditing(true)} disabled={working}>Change amounts</button>}</>
+              ? <>Committed: {planAmounts.join(" and ") || "your amounts"}{plan?.plan.allocation ? <>, sized to the pool price at block {plan.plan.allocation.spot.block.toLocaleString("en-US")}</> : null}.{" "}{!signed && <button className="underline text-gold-700" onClick={() => setEditing(true)} disabled={working}>Change amounts</button>}</>
               : "Set the most the Aqua order may use. Tokens stay in your wallet; Aqua takes them only when a trade fills."
           }
         >
@@ -378,7 +378,7 @@ export function GuidedExecute({ full, invId }: { full: FullInvestigation; invId:
                 })}
               </div>
               {(short(0, a0) || short(1, a1)) && (
-                <p className="mt-2 text-[0.76rem] text-[#8A6528] leading-relaxed max-w-[72ch]">
+                <p className="mt-2 text-[0.76rem] text-gold-700 leading-relaxed max-w-[72ch]">
                   Your wallet holds less than this. The order can still be sent, but trades will only fill once the tokens are in your wallet.
                 </p>
               )}
@@ -435,7 +435,7 @@ export function GuidedExecute({ full, invId }: { full: FullInvestigation; invId:
                 </p>
               )}
               {plan.plan.notCompiled.length > 0 && (
-                <ul className="mt-2 text-[0.76rem] text-[#8A6528] list-disc pl-5">
+                <ul className="mt-2 text-[0.76rem] text-gold-700 list-disc pl-5">
                   {plan.plan.notCompiled.map((n) => <li key={n}>Not included: {n}</li>)}
                 </ul>
               )}

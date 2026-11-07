@@ -73,7 +73,7 @@ export default function ActivityPage() {
                       <span className="font-medium">{txs[0].family ? FAMILY[txs[0].family] ?? txs[0].family : "Strategy"}</span>
                       {txs[0].investigated_wallet && <span className="text-ink-600"> learned from {fmt.addr(txs[0].investigated_wallet)}</span>}
                     </div>
-                    {invKey !== "unknown" && <Link href={withInv("/reports", invKey)} className="text-[0.76rem] text-[#8A6528] hover:text-ink underline-offset-2 hover:underline">Open report</Link>}
+                    {invKey !== "unknown" && <Link href={withInv("/reports", invKey)} className="text-[0.76rem] text-gold-700 hover:text-ink underline-offset-2 hover:underline">Open report</Link>}
                   </div>
                   <ul className="divide-y divide-ink/8">
                     {txs.map((t) => {

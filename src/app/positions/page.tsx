@@ -35,7 +35,7 @@ export default function PositionsPage() {
                   {s.counts.positions > 0 && (
                     <>
                       {" "}
-                      <a href={withInv("/case-study", inv)} className="underline decoration-gold/50 text-ink hover:text-gold">See the full case study</a> for the timeline and evidence.
+                      <a href={withInv("/case-study", inv)} className="underline decoration-gold/50 text-ink hover:text-gold-700">See the full case study</a> for the timeline and evidence.
                     </>
                   )}
                 </p>

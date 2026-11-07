@@ -64,7 +64,7 @@ function Quiet({ children }: { children: React.ReactNode }) {
 function Chip({ tone, children }: { tone: "good" | "warn" | "bad" | "neutral"; children: React.ReactNode }) {
   const map = {
     good: "bg-forest/8 text-forest border-forest/20",
-    warn: "bg-amber/10 text-[#8A6528] border-amber/25",
+    warn: "bg-amber/10 text-gold-700 border-amber/25",
     bad: "bg-brick/8 text-brick border-brick/25",
     neutral: "bg-ivory-100 text-ink-600 border-line",
   };
@@ -230,11 +230,11 @@ const STATE_DOT: Record<StageState, string> = {
 };
 const STATE_TEXT: Record<StageState, string> = {
   done: "text-forest",
-  active: "text-[#8A6528]",
+  active: "text-gold-700",
   loading: "text-ink-600",
   waiting: "text-ink-600",
-  awaiting: "text-[#8A6528]",
-  warn: "text-[#8A6528]",
+  awaiting: "text-gold-700",
+  warn: "text-gold-700",
   blocked: "text-brick",
   unavailable: "text-ink-600",
   cancelled: "text-ink-600",
@@ -359,7 +359,7 @@ function WorkflowNow({ stage, index }: { stage: Stage; index: number }) {
       </div>
       <div className="text-ink-600 min-w-0 break-words">
         {stage.status}.
-        {needsYou && <span className="ml-1.5 inline-flex items-center rounded-full bg-amber/15 text-[#8A6528] px-2 py-0.5 text-[0.7rem] font-semibold">Your action is needed</span>}
+        {needsYou && <span className="ml-1.5 inline-flex items-center rounded-full bg-amber/15 text-gold-700 px-2 py-0.5 text-[0.7rem] font-semibold">Your action is needed</span>}
       </div>
       {!stuck && (
         <>
@@ -387,7 +387,7 @@ export function WalletOverview({ full, invId }: { full: FullInvestigation; invId
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[0.8rem] text-ink-600">Wallet</div>
-          <a href={explorer.address(inv.wallet)} target="_blank" rel="noopener noreferrer" className="group mt-0.5 inline-flex items-center gap-2 serif text-[1.7rem] md:text-[1.9rem] leading-tight text-ink hover:text-[#8A6528]" title={inv.wallet}>
+          <a href={explorer.address(inv.wallet)} target="_blank" rel="noopener noreferrer" className="group mt-0.5 inline-flex items-center gap-2 serif text-[1.7rem] md:text-[1.9rem] leading-tight text-ink hover:text-gold-700" title={inv.wallet}>
             <span className="tabular">{fmt.addr(inv.wallet)}</span>
             <ExternalLink size={15} className="text-ink-600 group-hover:text-gold" aria-label="Open on Sepolia Etherscan" />
           </a>
@@ -499,7 +499,7 @@ export function PositionPanel({ full, invId }: { full: FullInvestigation; invId:
             <div className="text-[0.72rem] text-ink-600">{fmt.feeTier(p.feeTier)} fee tier</div>
           </div>
         </div>
-        <a href={explorer.nft(p.tokenId)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[0.78rem] text-ink-600 hover:text-gold tabular">
+        <a href={explorer.nft(p.tokenId)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[0.78rem] text-ink-600 hover:text-gold-700 tabular">
           NFT #{p.tokenId} <ExternalLink size={12} />
         </a>
       </div>
@@ -532,7 +532,7 @@ export function PositionPanel({ full, invId }: { full: FullInvestigation; invId:
       </dl>
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3 text-[0.78rem]">
-        <Link href={withInv(`/positions/${p.tokenId}`, invId)} className="inline-flex items-center gap-1 text-[#8A6528] font-medium hover:text-gold">
+        <Link href={withInv(`/positions/${p.tokenId}`, invId)} className="inline-flex items-center gap-1 text-gold-700 font-medium hover:text-gold-700">
           View details <ChevronRight size={14} />
         </Link>
         {total > 1 && (
@@ -615,7 +615,7 @@ export function PerformancePanel({ full }: { full: FullInvestigation }) {
 
       <p className="mt-3 text-[0.78rem] text-ink-600 leading-relaxed">
         {run?.kind === "observed" ? "The wallet's real ranges, replayed on the pool's real trades" : "A simulation of the inferred strategy on the pool's real trades"}, compared with simply holding the tokens.{" "}
-        <Link href={withInv("/backtest", full.investigation.id)} className="text-[#8A6528] font-medium hover:text-gold whitespace-nowrap">
+        <Link href={withInv("/backtest", full.investigation.id)} className="text-gold-700 font-medium hover:text-gold-700 whitespace-nowrap">
           Full backtest →
         </Link>
       </p>
@@ -768,7 +768,7 @@ export function BestExecution({ full, invId, exec }: { full: FullInvestigation |
             </div>
             <Link
               href={withInv("/execute", invId)}
-              className="inline-flex items-center justify-center gap-2 rounded-md2 bg-gold text-white px-5 h-11 text-[0.92rem] font-medium shadow-glow hover:bg-[#A67C38] shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/50"
+              className="inline-flex items-center justify-center gap-2 rounded-md2 bg-gold-700 text-white px-5 h-11 text-[0.92rem] font-medium shadow-glow hover:bg-gold-800 shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/50"
             >
               {exec.snap.plan ? "Continue to Execute" : "Execute with 1inch Aqua"} <ArrowRight size={15} />
             </Link>
