@@ -4,6 +4,10 @@
 
 Built for ETHGlobal Mumbai 2026. **Testnet only** (Sepolia, 11155111). There are no demo data, mock chain responses or simulated successes anywhere in the product. Every integration is either live or labelled with exactly why it is not.
 
+- **Live app:** https://trace-eth.vercel.app · **API:** https://trace-api-6ap0.onrender.com (`/health`, `/integrations`)
+- **Submission status, evidence and test results:** [docs/SUBMISSION.md](docs/SUBMISSION.md)
+- **3–4 minute demo:** [docs/DEMO_FLOW.md](docs/DEMO_FLOW.md) · **Screenshots:** [docs/screenshots/final](docs/screenshots/final)
+
 ```
 INVESTIGATE → RECONSTRUCT → DISCOVER (Strategy DNA + 0G) → VALIDATE (backtest) → EXECUTE (Aqua)
 ```
@@ -35,15 +39,18 @@ TRACE turns those logs into an evidence-backed, versioned **Strategy IR**. Every
 - **Authorization.** An EIP-712 signature bound to the strategy version, plan hash, action, a single-use challenge and an expiry, verified server-side.
 - **0G Storage.** Genuine Galileo uploads with Merkle-proof read-back. A reference is shown only after a successful upload.
 
-## Integration status (2026-11-06)
+## Integration status (verified 2026-11-07)
 | | |
 |---|---|
-| Sepolia RPC, Uniswap V3 data | **VERIFIED TESTNET** |
-| Postgres (Supabase), BullMQ (Upstash Redis) | **VERIFIED LIVE** |
-| 1inch Aqua ship/dock | **IMPLEMENTED BUT NOT VERIFIED** on Sepolia (simulates OK; full cycle passes on a Sepolia fork against the real contracts) |
-| Aqua swap (taker) | **BLOCKED BY EXTERNAL DEPENDENCY**: 1inch KycNFT required |
-| 0G inference | **BLOCKED BY EXTERNAL DEPENDENCY**: key fixed to *private* trust mode, no private providers available |
-| 0G Storage | **BLOCKED BY EXTERNAL DEPENDENCY**: uploader wallet needs testnet 0G |
+| Sepolia RPC, Uniswap V3 data | **WORKING**: verified on Sepolia (positions and events cross-checked on a public RPC) |
+| Postgres (Supabase), BullMQ (Upstash Redis) | **WORKING** |
+| 1inch Aqua compatibility + approve/ship (maker side) | **WORKING**: 7 ships verified from Sepolia receipts |
+| EIP-712 authorization | **WORKING**: 7 signatures verified server-side |
+| Aqua swap (taker) | **NOT AVAILABLE**: 1inch KycNFT required |
+| 0G Compute (inference) | **BLOCKED (external)**: key fixed to *private* trust mode, no private providers; evidence-only analysis is shown and labelled |
+| 0G Storage | **BLOCKED (external)**: uploader wallet needs testnet 0G; JSON download works |
+
+Full matrix with evidence: [docs/SUBMISSION.md](docs/SUBMISSION.md).
 
 Live status: `GET /integrations`, or the **Reports** screen. Details are in [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
 
@@ -93,7 +100,8 @@ The step-by-step judge flow is in [docs/DEMO_FLOW.md](docs/DEMO_FLOW.md).
 ## Tests
 ```bash
 npm run typecheck   # frontend + 9 packages + server
-npm test            # unit + API security tests on real captured Sepolia data
+npm run lint
+npm test            # 108 unit + API tests (incl. security, paging, rate-limit) on real captured Sepolia data
 npm run test:live   # live Sepolia integration
 npm run test:fork   # real 1inch Aqua contracts on an Anvil Sepolia fork: approve → ship → dock
 npm run test:e2e    # Playwright against the running app
@@ -112,4 +120,4 @@ See [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md). In short:
 - Many Sepolia pools have no swaps to backtest against.
 
 ## Design
-Editorial luxury fintech: ivory and charcoal surfaces, antique gold accents, sage for verified states, Playfair Display + Inter, fine-line borders, and hand-built SVG charts drawn from real data only.
+Premium, minimal, light only: a warm `#F7F3EB` page with white cards and `#E9E2D6` hairlines, gold `#B68A42` accents, green `#278653` for verified states, Playfair Display page titles and Inter for everything else. Charts and the 3D liquidity landscape are drawn from real data only.

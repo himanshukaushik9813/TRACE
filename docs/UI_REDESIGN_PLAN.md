@@ -45,12 +45,12 @@ sandboxes (no network); the Vercel deploy is the production build.
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Two bug fixes above | Done |
-| 1 | Theme tokens: palette, fonts, 8 px spacing (tailwind.config.js, globals.css) | Awaiting approval |
-| 2 | Layout: 232 px sidebar (Investigate, Positions, Strategy, Backtest, Execute, Reports, Activity), mobile drawer, shared page header | Not started |
-| 3 | Investigate page polish plus the bug fixes below | Not started |
-| 4 | Positions, Strategy, Backtest, Execute, Reports, Activity on one page pattern | Not started |
-| 5 | Shared lazy R3F 3D kit, one data-driven scene per page, fallbacks | Not started |
-| 6 | Final verification and deliverables | Not started |
+| 1 | Theme tokens: palette, fonts, 8 px spacing, sidebar, core components | Done (a96d75d, 1a30596) |
+| 2 | Shared page header and page-pattern layout | Deferred (final-submission freeze) |
+| 3 | Critical bug fixes 3.1–3.5 below | Done (a5fd83e); Investigate polish deferred |
+| 4 | Positions, Strategy, Backtest, Execute, Reports, Activity on one page pattern | Deferred (final-submission freeze) |
+| 5 | Shared lazy R3F 3D kit, one data-driven scene per page, fallbacks | Deferred (final-submission freeze) |
+| 6 | Final verification and deliverables | Done: see docs/SUBMISSION.md |
 
 After every phase: typecheck, lint, unit tests, then live screenshots at
 1440x900, 1280x800, 768 and 390x844 with console checks.
