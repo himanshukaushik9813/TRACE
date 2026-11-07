@@ -116,11 +116,11 @@ function ChainFooter({ onNavigate }: { onNavigate?: () => void }) {
 
 function Brand() {
   return (
-    <div className="flex items-center gap-2.5">
+    <div className="flex items-center gap-2">
       <BrandMark />
-      <div>
+      <div className="min-w-0">
         <div className="wordmark text-[1.3rem] tracking-[0.06em] text-ink leading-none">TRACE</div>
-        <div className="text-[0.66rem] text-ink-600 mt-1">On-chain strategy intelligence</div>
+        <div className="text-[0.625rem] text-ink-600 mt-1 whitespace-nowrap">On-chain strategy intelligence</div>
       </div>
     </div>
   );
